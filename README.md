@@ -137,7 +137,6 @@ After collecting data from participants, you can use the included Jupyter notebo
 jupyter notebook "Rescaling_Notebook.ipynb"
 ```
 This is a rescaling notebook that:
-- Uses relative paths instead of absolute paths
 - Includes detailed documentation and explanations
 - Provides visualization of both original and rescaled data
 
