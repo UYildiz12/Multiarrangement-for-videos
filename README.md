@@ -114,7 +114,7 @@ python Multiarrangement_fullscreen.py
 4. For each batch:
    - Drag videos to arrange them by similarity
    - Double-click a video to play it
-   - Press ESC when satisfied with the arrangement
+   - Press the "Done" button in the left corner when satisfied with the arrangement
 5. Results will be saved automatically in the "Participantdata" directory
 
 ## Alternative Version
@@ -132,30 +132,14 @@ For each participant, two files are generated:
 ## Post-Processing
 After collecting data from participants, you can use the included Jupyter notebooks for post-processing:
 
-### User-Friendly Rescaling Notebook
+### Rescaling Notebook
 ```
 jupyter notebook "Rescaling_Notebook.ipynb"
 ```
-This is a more user-friendly version of the rescaling notebook that:
-- Works with example data (generated using `generate_example_data.py`)
+This is a rescaling notebook that:
 - Uses relative paths instead of absolute paths
 - Includes detailed documentation and explanations
 - Provides visualization of both original and rescaled data
-- Includes optional batch processing functionality
-
-To generate example data for testing:
-```
-python generate_example_data.py
-```
-
-### Original Rescaling Notebook
-```
-jupyter notebook "Rescaling after experiment.ipynb"
-```
-The original notebook provides tools for analyzing the collected data, including:
-- Loading and visualizing RDMs
-- Rescaling raw pixel distances to a 1-7 scale
-- Sorting data by video ID
 
 ## Controls
 - **Left-click and drag**: Move a video
