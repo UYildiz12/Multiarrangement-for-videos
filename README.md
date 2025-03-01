@@ -138,7 +138,7 @@ jupyter notebook "Rescaling_Notebook.ipynb"
 ```
 This is a rescaling notebook that:
 - Includes detailed documentation and explanations
-- Provides visualization of both original and rescaled data
+- Provides visualization of the data from the multiarrangement task.
 
 ## Controls
 - **Left-click and drag**: Move a video
