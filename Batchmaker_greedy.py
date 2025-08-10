@@ -53,44 +53,47 @@ def generate_optimal_batches(n_items, batch_size):
         # Start a new batch
         current_batch = []
         current_pairs_covered = set()
-        
-        # Track candidate items and their value (number of new pairs they would cover)
+
+        # Track candidate items and the number of uncovered pairs they can form
+        candidate_scores = {}
         candidates = []
         for item in items:
-            if item not in current_batch:
-                # Value is number of uncovered pairs this item would add with current batch
-                new_pairs = sum(1 for pair in item_to_pairs[item] 
-                               if pair in uncovered_pairs and 
-                               pair not in current_pairs_covered)
-                heapq.heappush(candidates, (-new_pairs, item))  # Negative for max-heap
-        
+            score = sum(1 for pair in item_to_pairs[item] if pair in uncovered_pairs)
+            candidate_scores[item] = score
+            candidates.append((-score, item))  # Negative for max-heap
+        heapq.heapify(candidates)
+
         # Build batch incrementally, always adding the most valuable item
         while len(current_batch) < batch_size and candidates:
-            _, best_item = heapq.heappop(candidates)
-            
-            # Skip if item is already in batch
-            if best_item in current_batch:
-                continue
-                
+            neg_score, best_item = heapq.heappop(candidates)
+            if best_item not in candidate_scores:
+                continue  # Skip stale entries
+
             current_batch.append(best_item)
-            
+            candidate_scores.pop(best_item)
+
             # Update pairs covered by this batch
             for item in current_batch[:-1]:  # Check with all previous items in batch
                 pair = (min(item, best_item), max(item, best_item))
                 if pair in uncovered_pairs:
                     current_pairs_covered.add(pair)
-            
-            # Recalculate values for remaining candidates
-            candidates = []
-            for item in items:
-                if item not in current_batch:
-                    # Recalculate value based on current batch
-                    value = 0
-                    for batch_item in current_batch:
-                        pair = (min(item, batch_item), max(item, batch_item))
-                        if pair in uncovered_pairs and pair not in current_pairs_covered:
-                            value += 1
-                    heapq.heappush(candidates, (-value, item))
+
+            # Update scores only for items affected by the new coverage
+            affected_items = []
+            for item in candidate_scores:
+                pair = (min(item, best_item), max(item, best_item))
+                if pair in uncovered_pairs:
+                    candidate_scores[item] += 1
+                    affected_items.append(item)
+
+            # Adjust heap entries for updated scores
+            for item in affected_items:
+                new_score = candidate_scores[item]
+                for idx, (neg, itm) in enumerate(candidates):
+                    if itm == item:
+                        candidates[idx] = (-new_score, item)
+                        heapq._siftdown(candidates, 0, idx)
+                        break
         
         # If batch is not full but we can't add more items, just keep it as is
         batches.append(tuple(sorted(current_batch)))
