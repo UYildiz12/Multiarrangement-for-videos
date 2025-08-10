@@ -39,6 +39,9 @@ def generate_optimal_batches(n_items, batch_size):
     for a, b in all_pairs:
         item_to_pairs[a].add((a, b))
         item_to_pairs[b].add((a, b))
+
+    # Track how many batches each item has been included in
+    item_usage = defaultdict(int)
     
     batches = []
     batch_count = 0
@@ -53,16 +56,18 @@ def generate_optimal_batches(n_items, batch_size):
         # Start a new batch
         current_batch = []
         current_pairs_covered = set()
-        
+
         # Track candidate items and their value (number of new pairs they would cover)
         candidates = []
         for item in items:
             if item not in current_batch:
                 # Value is number of uncovered pairs this item would add with current batch
-                new_pairs = sum(1 for pair in item_to_pairs[item] 
-                               if pair in uncovered_pairs and 
+                new_pairs = sum(1 for pair in item_to_pairs[item]
+                               if pair in uncovered_pairs and
                                pair not in current_pairs_covered)
-                heapq.heappush(candidates, (-new_pairs, item))  # Negative for max-heap
+                # Penalize items that have been used frequently
+                score = new_pairs / (1 + item_usage[item])
+                heapq.heappush(candidates, (-score, item))  # Negative for max-heap
         
         # Build batch incrementally, always adding the most valuable item
         while len(current_batch) < batch_size and candidates:
@@ -71,8 +76,10 @@ def generate_optimal_batches(n_items, batch_size):
             # Skip if item is already in batch
             if best_item in current_batch:
                 continue
-                
+
             current_batch.append(best_item)
+            # Increment usage count for this item
+            item_usage[best_item] += 1
             
             # Update pairs covered by this batch
             for item in current_batch[:-1]:  # Check with all previous items in batch
@@ -90,7 +97,9 @@ def generate_optimal_batches(n_items, batch_size):
                         pair = (min(item, batch_item), max(item, batch_item))
                         if pair in uncovered_pairs and pair not in current_pairs_covered:
                             value += 1
-                    heapq.heappush(candidates, (-value, item))
+                    # Include usage-based penalty in candidate score
+                    score = value / (1 + item_usage[item])
+                    heapq.heappush(candidates, (-score, item))
         
         # If batch is not full but we can't add more items, just keep it as is
         batches.append(tuple(sorted(current_batch)))
