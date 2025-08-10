@@ -31,6 +31,9 @@ def generate_optimal_batches(n_items, batch_size):
     all_pairs = set((min(a, b), max(a, b)) for a, b in itertools.combinations(items, 2))
     uncovered_pairs = all_pairs.copy()
     total_pairs = len(all_pairs)
+
+    # Track which items still participate in uncovered pairs
+    active_items = set(items)
     
     print(f"Total pairs to cover: {total_pairs}")
     
@@ -43,7 +46,7 @@ def generate_optimal_batches(n_items, batch_size):
     batches = []
     batch_count = 0
     
-    while uncovered_pairs:
+    while uncovered_pairs and active_items:
         batch_count += 1
         pairs_covered_so_far = total_pairs - len(uncovered_pairs)
         progress = (pairs_covered_so_far / total_pairs) * 100
@@ -56,13 +59,14 @@ def generate_optimal_batches(n_items, batch_size):
         
         # Track candidate items and their value (number of new pairs they would cover)
         candidates = []
-        for item in items:
+        for item in active_items:
             if item not in current_batch:
                 # Value is number of uncovered pairs this item would add with current batch
-                new_pairs = sum(1 for pair in item_to_pairs[item] 
-                               if pair in uncovered_pairs and 
+                new_pairs = sum(1 for pair in item_to_pairs[item]
+                               if pair in uncovered_pairs and
                                pair not in current_pairs_covered)
-                heapq.heappush(candidates, (-new_pairs, item))  # Negative for max-heap
+                if new_pairs > 0:
+                    heapq.heappush(candidates, (-new_pairs, item))  # Negative for max-heap
         
         # Build batch incrementally, always adding the most valuable item
         while len(current_batch) < batch_size and candidates:
@@ -82,7 +86,7 @@ def generate_optimal_batches(n_items, batch_size):
             
             # Recalculate values for remaining candidates
             candidates = []
-            for item in items:
+            for item in active_items:
                 if item not in current_batch:
                     # Recalculate value based on current batch
                     value = 0
@@ -90,13 +94,19 @@ def generate_optimal_batches(n_items, batch_size):
                         pair = (min(item, batch_item), max(item, batch_item))
                         if pair in uncovered_pairs and pair not in current_pairs_covered:
                             value += 1
-                    heapq.heappush(candidates, (-value, item))
+                    if value > 0:
+                        heapq.heappush(candidates, (-value, item))
         
         # If batch is not full but we can't add more items, just keep it as is
         batches.append(tuple(sorted(current_batch)))
         
         # Remove covered pairs from uncovered set
         uncovered_pairs -= current_pairs_covered
+
+        # Deactivate items whose pairs are fully covered
+        for item in list(active_items):
+            if not any(pair in uncovered_pairs for pair in item_to_pairs[item]):
+                active_items.remove(item)
     
     return batches
 
