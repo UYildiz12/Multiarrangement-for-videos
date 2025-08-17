@@ -1,0 +1,37 @@
+# Include data files
+include README.md
+include LICENSE
+include pyproject.toml
+include img1.PNG
+include Audio.png
+include test_audio_icon_new.png
+
+# Include package data
+recursive-include multiarrangement/data *.txt
+recursive-include multiarrangement/data *.xlsx
+recursive-include multiarrangement/data *.png *.jpg *.jpeg *.gif
+recursive-include multiarrangement/data *.mp4 *.avi *.mov *.mkv *.wmv
+
+# Include demo videos if present
+recursive-include demovids *.mp4 *.avi *.mov *.mkv *.wmv
+
+# Include demo video folders
+recursive-include 15videos *.avi *.mp4 *.mov *.mkv *.wmv
+recursive-include 24videos *.avi *.mp4 *.mov *.mkv *.wmv
+recursive-include 58videos *.avi *.mp4 *.mov *.mkv *.wmv
+
+# Include example data
+recursive-include ExampleData *.xlsx *.csv
+
+# Include standalone scripts for backward compatibility
+include *.py
+
+# Exclude cache and build files
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .git*
+global-exclude *.so
+global-exclude *.dylib
+global-exclude *.dll
+prune ljcr_cache
+prune output

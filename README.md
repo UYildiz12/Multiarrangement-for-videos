@@ -1,145 +1,391 @@
-# Multiarr - Video Similarity Arrangement Task
+# Multiarrangement - Video & Audio Similarity Arrangement Task
+
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
-Multiarr is a psychological experiment tool that allows participants to arrange videos based on perceived similarity. Videos are presented as interactive circles that can be dragged around in a circular arena. The spatial arrangement of these videos represents the participant's perception of similarity - videos placed closer together are considered more similar, while those placed further apart are considered more different.
+
+Multiarrangement is a comprehensive Python package for conducting psychological experiments where participants arrange videos or audio files based on perceived similarity. The package provides both windowed and fullscreen interactive interfaces where stimuli are presented as draggable circles in a circular arena. The spatial arrangement represents the participant's perception of similarity, generating Representational Dissimilarity Matrices (RDMs) for analysis.
 
 ## Features
-- Fullscreen interactive interface
-- Video playback on double-click
-- Drag-and-drop arrangement of video thumbnails
-- Automatic data collection and storage
-- Batch processing of video sets
-- Representational Dissimilarity Matrix (RDM) generation
 
-## Requirements
-- Python 3.6+
-- PyGame
-- OpenCV (cv2)
-- NumPy
-- Pandas
-- Tkinter
-- Jupyter Notebook (for post-processing)
+- **Modern Package Structure**: Properly organized Python package with modular components
+- **Dual Interface Modes**: Both windowed and fullscreen experiment interfaces
+- **Multi-Modal Support**: Support for both video and audio stimuli
+- **Interactive Arrangement**: Drag-and-drop interface with real-time feedback
+- **Advanced Batch Generation**: Three-tier optimization system for creating balanced stimulus batches
+- **Comprehensive Data Export**: Multiple output formats (Excel, CSV, NumPy arrays)
+- **CLI Tools**: Command-line interfaces for all major functions
+- **Data Validation**: Built-in validation for batch configurations and experimental data
+- **Extensible Design**: Easy to customize and extend for specific research needs
+- **Covering Design Optimization**: Advanced algorithms for optimal experimental design
 
 ## Installation
-1. Clone this repository
-2. Install the required dependencies:
-```
-pip install pygame opencv-python numpy pandas jupyter
-```
-3. Ensure you have Tkinter installed (usually comes with Python)
 
-## Directory Structure
-```
-Multiarr/
-├── Multiarrangement_fullscreen.py  # Main fullscreen application
-├── Multiarrangement.py             # Alternative non-fullscreen version
-├── Batchmaker_bruteforce.py        # Bruteforce batch generation algorithm
-├── Batchmaker_greedy.py            # Greedy batch generation algorithm
-├── Rescaling_Notebook.ipynb        # User-friendly post-processing notebook
-├── Rescaling after experiment.ipynb # Original post-processing notebook
-├── generate_example_data.py        # Script to generate example data
-├── batches_*videos_batchsize*.txt  # Batch configuration files (examples)
-├── 58videos/                       # Directory containing 58 video files
-├── 24videos/                       # Directory containing 24 video files
-├── 15videos/                       # Directory containing 15 video files
-├── demovids/                       # Directory containing demo videos
-├── ExampleData/                    # Directory containing example data
-└── Participantdata/                # Output directory (created automatically)
-    ├── participant_1_results.xlsx
-    ├── participant_1_rdm.npy
-    └── ...
+### From PyPI (when published)
+```bash
+pip install multiarrangement
 ```
 
-## Video Files
-The program expects video files to be in a directory named according to the number of videos you're using (e.g., "58videos", "24videos", etc.), with the videos named as numbers (e.g., "1.mp4", "2.mp4", etc.). These numbers should correspond to the indices in the batch file.
-
-You can use different video sets by:
-1. Creating a directory with the appropriate name (e.g., "32videos")
-2. Placing your videos in that directory with numeric names
-3. Generating a batch file for that specific number of videos
-4. Modifying the video path in the main script if needed
-
-## Batch Configuration
-The batch file (e.g., `batches_25videos_batchsize8.txt`) should contain comma-separated lists of video indices, with each line representing a batch. For example:
-```
-1,5,8,12,15,18,22,25
-2,6,9,13,16,19,23,26
-...
+### From Source
+```bash
+git clone https://github.com/UYildiz12/Multiarrangement-for-videos.git
+cd Multiarrangement-for-videos
+pip install -e .
 ```
 
-### Generating Batch Files
-Users should generate their own batch files based on their specific requirements for video count and batch size. The provided batch files are just examples.
+### Requirements
+- Python 3.8+
+- NumPy >= 1.20.0
+- Pandas >= 1.3.0
+- Pygame >= 2.0.0
+- OpenCV-Python >= 4.5.0
+- openpyxl >= 3.0.0
 
-Two algorithms are available for batch generation:
-
-1. **Bruteforce Algorithm** (`Batchmaker_bruteforce.py`): Minimizes the total number of batches needed to ensure all pairs of videos appear together at least once. This produces the optimal solution but can be computationally intensive for large video sets. Works well for up to 32 videos.
-
-2. **Greedy Algorithm** (`Batchmaker_greedy.py`): Much more efficient for large video sets but may not produce the minimum number of batches. Recommended for experiments with many videos.
-
-To generate a batch file:
-
-#### Using Bruteforce Algorithm:
+### Optional Dependencies
+For covering design optimization:
+```bash
+pip install multiarrangement[coverlib]
 ```
-python Batchmaker_bruteforce.py
+
+## Quick Start
+
+### Basic Usage
+
+1. **Run an experiment**:
+```bash
+# Windowed mode
+multiarrangement
+
+# Fullscreen mode
+multiarrangement-fullscreen
+
+# With specific parameters
+multiarrangement --video-dir ./videos --batch-file ./batches.txt --participant-id P001
 ```
-You can modify the video count and batch size by editing these lines in the script:
+
+2. **Generate batch configurations**:
+```bash
+# Generate batches using hybrid approach (recommended)
+multiarrangement-batch-generator 25 8 --algorithm hybrid --output-file my_batches.txt
+
+# Use specific algorithms
+multiarrangement-batch-generator 25 8 --algorithm optimal    # Try optimal only
+multiarrangement-batch-generator 25 8 --algorithm greedy     # Python greedy only
+```
+
+3. **Use as a Python library**:
+
+#### Minimal Example: Video Similarity Arrangement
 ```python
-# Number of videos in your dataset
-my_list = list(range(0,25))
-# How many should appear in the screen at once
-batch_size = 8
+import multiarrangement as ma
+
+# Create batches for 24 videos, batch size 8
+batches = ma.create_batches(24, 8)
+
+# Run video experiment (English instructions)
+result_file = ma.multiarrangement(
+    input_dir="./videos",
+    batches=batches,
+    output_dir="./results"
+)
+print("Results saved to:", result_file)
 ```
 
-#### Using Greedy Algorithm:
-```
-python Batchmaker_greedy.py
-```
-You can modify the video count and batch size by editing these lines in the script:
+#### Minimal Example: Audio Similarity Arrangement
 ```python
-# Number of videos in your dataset
-n_videos = 25
-# How many should appear in the screen at once
-batch_size = 8
+import multiarrangement as ma
+
+# Create batches for 24 audio files, batch size 8
+batches = ma.create_batches(24, 8)
+
+# Run audio experiment (Turkish instructions)
+result_file = ma.multiarrangement(
+    input_dir="./audio",
+    batches=batches,
+    output_dir="./results",
+    mode="audio",           # Specify audio mode
+    language="tr"           # Turkish instructions
+)
+print("Results saved to:", result_file)
 ```
 
-Both scripts will generate a file named `batches_[number_of_videos]videos_batchsize[batch_size].txt` that can be used with the main application.
+#### Customizing Instructions
+You can control the instructions shown before the experiment using the `instructions` argument:
 
-## Usage
-1. Run the main script:
-```
-python Multiarrangement_fullscreen.py
-```
-2. Enter the participant number when prompted
-3. Read the instructions and press any key to begin
-4. For each batch:
-   - Drag videos to arrange them by similarity
-   - Double-click a video to play it
-   - Press the "Done" button in the left corner when satisfied with the arrangement
-5. Results will be saved automatically in the "Participantdata" directory
+- `instructions="default"` (or omit): Shows the standard instructions (with videos/images for video mode).
+- `instructions=None`: Skips instructions entirely.
+- `instructions=[...]`: Shows a custom list of instruction strings, centered on the screen. (Media is not shown for custom instructions.)
 
-## Alternative Version
-An alternative non-fullscreen version is available:
+```python
+# Custom instructions example
+custom_instructions = [
+    "Welcome to the custom experiment!",
+    "Arrange the stimuli as you wish.",
+    "Press SPACE to continue."
+]
+
+result_file = ma.multiarrangement(
+    input_dir=input_dir,
+    batches=batches,
+    output_dir="./results",
+    instructions=custom_instructions
+)
 ```
+
+#### Language and Mode
+- The experiment automatically detects whether you are running a video or audio arrangement based on the input directory contents.
+- You can set the instruction language with `language="en"` (English, default) or `language="tr"` (Turkish).
+
+## Package Structure
+```
+multiarrangement/
+├── __init__.py                     # Main package exports
+├── cli.py                          # Command-line interfaces
+├── experiment_runner.py             # High-level experiment runner
+├── core/                           # Core experiment functionality
+│   ├── __init__.py
+│   ├── experiment.py               # Main experiment class
+│   └── batch_generator.py          # Batch generation algorithms
+├── ui/                             # User interface components
+│   ├── __init__.py
+│   ├── interface.py                # Base and windowed interface
+│   └── fullscreen_interface.py     # Fullscreen interface
+├── utils/                          # Utility modules
+│   ├── __init__.py
+│   ├── video_processing.py         # Video handling utilities
+│   ├── data_processing.py          # Data analysis utilities
+│   └── file_utils.py               # File and path utilities
+├── data/                           # Package data files
+│   ├── batches_*.txt               # Example batch configurations
+│   └── img1.PNG                    # Interface assets
+└── optimize_cover_*.py             # Covering design optimization
+
+coverlib/                           # Covering design library
+├── __init__.py
+├── api.py                          # API for covering designs
+├── cache.py                        # Caching system
+├── cli.py                          # CLI for covering designs
+├── combinatorics.py                # Combinatorial utilities
+├── fetchers.py                     # Data fetching utilities
+├── optimizer.py                    # Optimization algorithms
+└── repair.py                       # Solution repair utilities
+
+Additional Files:
+├── Greedy_gen.c                    # C implementation of greedy algorithm
+├── greedy_gen.exe                  # Compiled greedy algorithm
+├── New_Greedy_1.py                 # Python greedy implementation
+├── optimize_cover_pure.py          # Pure Python covering optimizer
+└── Multiarrangement.py             # Legacy standalone script
+```
+
+## Stimulus Organization
+
+The package supports flexible stimulus organization:
+
+### Supported Video Formats
+- `.avi`, `.mp4`, `.mov`, `.mkv`, `.wmv`, `.flv`, `.webm`
+
+### Supported Audio Formats
+- `.wav`, `.mp3`, `.ogg`, `.flac`, `.m4a`, `.aac`
+
+### Directory Structure
+Stimuli can be organized in any directory structure. The package will automatically detect files and map them to batch indices. Example:
+
+```
+videos/
+├── video_001.mp4
+├── video_002.avi
+├── action_walking.mp4
+└── action_running.mp4
+
+audio/
+├── sound_001.wav
+├── sound_002.mp3
+├── music_sample.ogg
+└── speech_sample.flac
+```
+
+### Batch Configuration
+Batch files specify which stimuli appear together. Format examples:
+
+```
+# Simple comma-separated format
+0,1,2,3
+4,5,6,7
+1,3,5,7
+
+# Comments and empty lines are ignored
+# Batch 1: similar actions
+0,2,4,6
+# Batch 2: different actions  
+1,3,5,7
+```
+
+## Advanced Batch Generation
+
+The package includes a sophisticated three-tier batch generation system:
+
+### 🏆 Hybrid Approach (Recommended)
+```bash
+multiarrangement-batch-generator 25 8 --algorithm hybrid
+```
+
+**Tier 1: Optimal Solutions** (`optimize_cover_pure.py`)
+- Fetches optimal covering designs from LJCR database
+- Uses advanced local search and DFS optimization
+- Produces mathematically optimal solutions when available
+- May not work for all parameter combinations
+
+**Tier 2: High-Performance Greedy** (`Greedy_gen.c`)
+- Fast compiled C implementation with bitsets and max-heap
+- Works for any valid parameters (n ≤ 255)
+- Significantly faster than Python implementations
+- Always finds a solution, though not necessarily optimal
+
+**Tier 3: Python Fallback** (Pure Python)
+- Always available, no dependencies
+- Works on any platform
+- Reasonable performance for small to medium datasets
+
+### Algorithm Selection
+```bash
+# Try all tiers (recommended)
+--algorithm hybrid
+
+# Optimal only (fails if not available)
+--algorithm optimal  
+
+# High-performance C only
+--algorithm greedy
+
+# Python implementation only 
+--algorithm brute_force  # Small datasets only
+```
+
+### Using Covering Design Library
+```bash
+# Generate covering designs directly
+covergen 25 8 --output-file covering.txt
+
+# Optimize existing designs
+optimize-cover input.txt --output-file optimized.txt
+```
+
+## Legacy Scripts
+
+For backward compatibility, several legacy scripts are included:
+
+### Standalone Multiarrangement
+```bash
 python Multiarrangement.py
 ```
-This version provides similar functionality but runs in a windowed mode instead of fullscreen.
+This provides a windowed interface similar to the main package.
+
+### Greedy Algorithm Scripts
+```bash
+# Python greedy implementation
+python New_Greedy_1.py
+
+# C implementation (Windows executable)
+./greedy_gen.exe
+```
 
 ## Data Output
-For each participant, two files are generated:
-1. `participant_X_results.xlsx`: Contains pairwise distances between all videos
+
+For each participant, multiple files are generated:
+1. `participant_X_results.xlsx`: Contains pairwise distances between all stimuli
 2. `participant_X_rdm.npy`: Numpy array containing the Representational Dissimilarity Matrix
+3. `participant_X_distances.csv`: CSV format of the distance matrix
 
 ## Post-Processing
-After collecting data from participants, you can use the included Jupyter notebooks for post-processing:
+
+After collecting data from participants, you can use the included Jupyter notebook for post-processing:
 
 ### Rescaling Notebook
-```
+```bash
 jupyter notebook "Rescaling_Notebook.ipynb"
 ```
-This is a rescaling notebook that:
-- Includes detailed documentation and explanations
-- Provides visualization of the data from the multiarrangement task.
+This notebook provides:
+- Detailed documentation and explanations
+- Visualization of the data from the multiarrangement task
+- Statistical analysis tools
+- Data export capabilities
+
+## Demo Videos and Data Sources
+
+### Demo Videos
+The package includes demo videos from the following source:
+
+**A Large Video Set of Natural Human Actions for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI**
+
+*Reference:* Urgen, B. A., Nizamoğlu, H., Eroğlu, A., & Orban, G. A. (2023). A Large Video Set of Natural Human Actions for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. *Brain Sciences*, *13*(1), 61. https://doi.org/10.3390/brainsci13010061
+
+The demo videos included in this package are derived from this dataset and are used for:
+- **Instruction videos**: `demovids/` folder contains videos demonstrating the interface controls
+- **Example datasets**: `15videos/`, `24videos/`, and `58videos/` folders contain sample video sets for testing and demonstration
+
+### Sample Audio
+The `sample_audio/` directory contains example audio files for testing audio arrangement experiments.
 
 ## Controls
-- **Left-click and drag**: Move a video
+
+### Video Mode
+- **Left-click and drag**: Move a video circle
 - **Double-click**: Play a video
+- **Spacebar**: Continue to next batch
+- **Escape**: Exit experiment
+
+### Audio Mode
+- **Left-click and drag**: Move an audio circle
+- **Double-click**: Play a sound
+- **Spacebar**: Continue to next batch
+- **Escape**: Exit experiment
+
+## Example Data
+
+The `ExampleData/` directory contains:
+- `participant_example.xlsx`: Example participant data
+- `participant_example_rescaled.xlsx`: Example rescaled data
+
+## Testing
+
+Run the test suite:
+```bash
+pytest tests/
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests for new functionality
+5. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Citation
+
+If you use this package in your research, please cite both this package and the original video dataset:
+
+*Citation information will be added soon.*
+
+## Support
+
+For issues and questions:
+- Check the [Issues](https://github.com/UYildiz12/Multiarrangement-for-videos/issues) page
+- Review the documentation in the code
+- Contact the maintainers
+
+## Updating Your Package on PyPI
+
+After publishing, you can update your package at any time:
+1. Make your changes in the codebase.
+2. Increment the version number in `pyproject.toml` (and/or `setup.py`).
+3. Build and upload the new version to PyPI using `twine`.
+4. Users can upgrade with `pip install --upgrade multiarrangement`.
+
+Repeat as needed for bug fixes and new features.
