@@ -11,7 +11,7 @@ for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. Brai
 13(1), 61. https://doi.org/10.3390/brainsci13010061
 """
 
-__version__ = "1.0.0"
+__version__ = "0.1.0"
 __author__ = "Multiarrangement Team"
 
 from .core.experiment import MultiarrangementExperiment
@@ -20,6 +20,8 @@ from .utils.video_processing import VideoProcessor
 from .utils.data_processing import DataProcessor
 from .core.batch_generator import BatchGenerator
 from typing import List
+from .adaptive.adaptive_experiment import AdaptiveMultiarrangementExperiment, AdaptiveConfig
+from .results import Results
 
 # Main library functions
 def create_batches(n_videos_or_file, batch_size: int = None, seed: int = 42, algorithm: str = 'hybrid', 
@@ -279,7 +281,7 @@ def multiarrangement(input_dir: str, batches, output_dir: str,
          >>> result_file = ma.multiarrangement("./videos", batches, "./results")
     """
     from .experiment_runner import run_multiarrangement_experiment
-    return run_multiarrangement_experiment(
+    csv_path = run_multiarrangement_experiment(
         input_dir=input_dir,
         batches=batches, 
         output_dir=output_dir,
@@ -288,6 +290,13 @@ def multiarrangement(input_dir: str, batches, output_dir: str,
         language=language,
         instructions=instructions
     )
+    # Wrap results with a convenient visualization helper
+    try:
+        res = Results.from_csv(csv_path)
+        res.meta.update({"mode": "set-cover", "input_dir": input_dir})
+        return res
+    except Exception:
+        return csv_path
 
 def demo():
     """
@@ -310,11 +319,15 @@ def demo():
     print("🎬 Multiarrangement Demo - 15 videos, batch size 6")
     print("=" * 50)
     
-    # Check if 15videos directory exists
-    input_dir = "15videos"
+    # Resolve demo media: prefer local ./15videos, else packaged under multiarrangement/15videos
+    local_dir = os.path.join(os.getcwd(), "15videos")
+    pkg_dir = os.path.join(os.path.dirname(__file__), "15videos")
+    input_dir = local_dir if os.path.exists(local_dir) else pkg_dir
     if not os.path.exists(input_dir):
-        raise FileNotFoundError(f"Demo directory '{input_dir}' not found! "
-                              f"Make sure you have the 15videos directory in your workspace.")
+        raise FileNotFoundError(
+            "Demo media not found. Place a '15videos' folder next to your working directory, "
+            "or install the package with demo media included."
+        )
     
     # Auto-detect videos
     n_videos = auto_detect_stimuli(input_dir)
@@ -337,7 +350,7 @@ def demo():
     print("   - Double-click videos to play them")
     print("   - Arrange videos by similarity in the circle")
     
-    result_file = multiarrangement(
+    result_obj = multiarrangement(
         input_dir=input_dir,
         batches=batches,
         output_dir=output_dir,
@@ -347,9 +360,116 @@ def demo():
     )
     
     print(f"\n🎉 Demo completed successfully!")
-    print(f"📄 Results saved to: {result_file}")
+    csv_path = getattr(result_obj, 'meta', {}).get('csv_path', '(see returned Results object)')
+    print(f"📄 CSV path: {csv_path}")
+    print("🖼️  Tip: call result.vis() to view the heatmap.")
     
-    return result_file
+    return result_obj
+
+def demo_adaptive():
+    """
+    Run the adaptive (Lift-the-Weakest) demo with 15 videos.
+
+    Behavior:
+    - Uses the local "15videos" directory (must exist next to your working dir)
+    - Runs the adaptive LTW experiment with friendly demo settings
+      (lower evidence threshold and mid-sized subsets)
+    - Saves results to the current directory
+
+    Returns:
+        None
+    """
+    import os
+
+    print("🎬 Adaptive Multiarrangement Demo (LTW) - 15 videos")
+    print("=" * 50)
+
+    # Resolve demo media: prefer local ./15videos, else packaged under multiarrangement/15videos
+    local_dir = os.path.join(os.getcwd(), "15videos")
+    pkg_dir = os.path.join(os.path.dirname(__file__), "15videos")
+    input_dir = local_dir if os.path.exists(local_dir) else pkg_dir
+    if not os.path.exists(input_dir):
+        raise FileNotFoundError(
+            "Demo media not found. Place a '15videos' folder next to your working directory, "
+            "or install the package with demo media included."
+        )
+
+    # Save to current directory
+    output_dir = "."
+    print(f"📁 Results will be saved to: {os.path.abspath(output_dir)}")
+
+    # Friendlier demo defaults: slightly lower threshold, 4–6 item subsets, fullscreen UI
+    multiarrangement_adaptive(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        fullscreen=True,
+        evidence_threshold=0.35,
+        min_subset_size=4,
+        max_subset_size=6,
+        use_inverse_mds=True,
+    )
+
+def multiarrangement_adaptive(
+    input_dir: str,
+    output_dir: str,
+    participant_id: str = "participant",
+    *,
+    fullscreen: bool = True,
+    language: str = "en",
+    evidence_threshold: float = 0.5,
+    utility_exponent: float = 10.0,
+    time_limit_minutes: float = None,
+    min_subset_size: int = 3,
+    max_subset_size: int = None,
+    use_inverse_mds: bool = False,
+    inverse_mds_max_iter: int = 15,
+    inverse_mds_step_c: float = 0.3,
+    inverse_mds_tol: float = 1e-4,
+    instructions = "default",
+):
+    """
+    Run the adaptive lift-the-weakest multiarrangement experiment.
+
+    Minimal usage:
+        >>> import multiarrangement as ma
+        >>> ma.multiarrangement_adaptive("./videos", output_dir="./results")
+    """
+    cfg = AdaptiveConfig(
+        evidence_threshold=evidence_threshold,
+        utility_exponent=utility_exponent,
+        time_limit_seconds=(time_limit_minutes * 60.0) if time_limit_minutes else None,
+        min_subset_size=max(3, int(min_subset_size)),
+        max_subset_size=int(max_subset_size) if max_subset_size is not None else None,
+        use_inverse_mds=use_inverse_mds,
+        inverse_mds_max_iter=inverse_mds_max_iter,
+        inverse_mds_step_c=inverse_mds_step_c,
+        inverse_mds_tol=inverse_mds_tol,
+    )
+
+    exp = AdaptiveMultiarrangementExperiment(
+        input_directory=input_dir,
+        participant_id=participant_id,
+        output_directory=output_dir,
+        config=cfg,
+        language=language,
+    )
+
+    from .ui.fullscreen_interface import FullscreenInterface
+    interface = FullscreenInterface(exp) if fullscreen else MultiarrangementInterface(exp)
+    # Attach custom instructions if provided as a list; 'default' -> show built-ins; None -> skip
+    if isinstance(instructions, list):
+        interface.custom_instructions = instructions
+    interface.run()
+    # Return a Results object with the final RDM and labels
+    try:
+        res = Results(matrix=exp.D_est.astype(float), labels=list(exp.video_names), meta={
+            "mode": "adaptive",
+            "input_dir": input_dir,
+            "participant_id": participant_id,
+        })
+        return res
+    except Exception:
+        return None
 
 __all__ = [
     "MultiarrangementExperiment",
@@ -362,4 +482,7 @@ __all__ = [
     "validate_batches",
     "multiarrangement",
     "demo",
+    "demo_adaptive",
+    "multiarrangement_adaptive",
+    "Results",
 ]
