@@ -54,14 +54,14 @@ if can_build_c_extensions():
             extra_link_args=['-lm'] if 'linux' in sys.platform else [],
         )
         ext_modules = [greedy_extension]
-        print("✅ C extension will be built")
+        print("C extension will be built")
     except Exception as e:
-        print(f"⚠️  C extension disabled: {e}")
-        print("   The package will work with pure Python implementations")
+        print(f"C extension disabled: {e}")
+        print("The package will work with pure Python implementations")
         ext_modules = []
 else:
-    print("⚠️  C extension disabled: No C compiler available")
-    print("   The package will work with pure Python implementations")
+    print("C extension disabled: No C compiler available")
+    print("The package will work with pure Python implementations")
     ext_modules = []
 
 setup(

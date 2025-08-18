@@ -452,6 +452,7 @@ class CoverOptimizer:
     def reduce_lmax_group(self, target:int, time_limit:float=15.0, max_pairs_considered:int=20,
                           candidates_per_block:int=100, rng=random) -> bool:
         start = time.time()
+        deadline = start + max(0.0, time_limit)
         v,k = self.v,self.k
         lmax = self.lambda_max()
         if lmax <= target: return False
@@ -485,7 +486,8 @@ class CoverOptimizer:
         comps.sort(key=lambda c: c[2] if len(c) > 2 else (0, 0, 0))
 
         for pairs, blocks, _ in comps:
-            if time.time() - start > time_limit: break
+            if time_limit > 0 and time.time() > deadline:
+                break
             
             # Remove all blocks in this component when computing critical
             count_out = self.pair_count[:]
@@ -503,6 +505,9 @@ class CoverOptimizer:
                 s: Set[Tuple[int,...]] = set()
                 tries = 0
                 while len(s) < candidates_per_block and tries < candidates_per_block*20:
+                    if time_limit > 0 and time.time() > deadline:
+                        # Out of time for this round
+                        return False
                     tries += 1
                     S: List[int] = []
                     while len(S) < k:
@@ -525,7 +530,14 @@ class CoverOptimizer:
                 lst = list(s)
                 if not lst:
                     orig = set(self.blocks[i])
-                    while len(s) < min(20, candidates_per_block):
+                    # Fallback sampling with caps and time checks
+                    min_target = min(20, candidates_per_block)
+                    attempts = 0
+                    max_attempts = min_target * 100
+                    while len(s) < min_target and attempts < max_attempts:
+                        if time_limit > 0 and time.time() > deadline:
+                            return False
+                        attempts += 1
                         S = set(orig)
                         if len(S)>=2:
                             S = set(random.sample(list(S), k-2))
@@ -619,9 +631,12 @@ def main():
     ap.add_argument("--outfile", type=str, default=None)
     ap.add_argument("--seed", type=int, default=12345)
     ap.add_argument("--out-indexing", choices=["zero","one"], default="zero")
+    ap.add_argument("--time-limit", type=float, default=10.0, help="overall time limit in seconds (<=0 to disable)")
 
     # cache + offline
-    ap.add_argument("--cache-dir", type=str, default="ljcr_cache")
+    # Default to the packaged cache inside the installed module
+    default_cache = str((Path(__file__).parent / "ljcr_cache").resolve())
+    ap.add_argument("--cache-dir", type=str, default=default_cache)
     ap.add_argument("--offline-first", action="store_true", help="load from cache if available (default)")
     ap.add_argument("--offline-only", action="store_true", help="do not fetch; error on cache miss")
     ap.add_argument("--seed-file", type=str, default=None, help="explicit seed file (auto 0/1-base detection)")
@@ -637,6 +652,8 @@ def main():
     args = ap.parse_args()
 
     cache_dir = Path(args.cache_dir)
+    start_time = time.time()
+    deadline = (start_time + args.time_limit) if args.time_limit and args.time_limit > 0 else None
 
     # Bulk mode
     if args.bulk_download:
@@ -689,21 +706,39 @@ def main():
     freq = vertex_frequencies(v, blocks)
     lmax_vertex_lb = max((7*f + (v-2)) // (v-1) for f in freq)  # ceil(7f/(v-1))
     print(f"Vertex-frequency lower bound on lambda_max: >= {lmax_vertex_lb} (max f_i={max(freq)})")
+    # Prepare output path early so we can save on timeout
+    outpath = Path(args.outfile or f"rebalance_v{v}_k{k}.txt")
+    one_based = (args.out_indexing == "one")
 
     # 1-opt local search
     opt = CoverOptimizer(v, blocks, seed=args.seed)
+
+    def time_left():
+        if deadline is None:
+            return None
+        return max(0.0, deadline - time.time())
+
+    def maybe_timeout():
+        if deadline is not None and time.time() >= deadline:
+            print("Time limit reached; saving current cover…")
+            save_blocks_file(outpath, opt.blocks, indexing=("one" if one_based else "zero"))
+            print("Saved improved cover to", outpath)
+            sys.exit(0)
     print("Initial  lambda_max:", opt.lambda_max(), "hist:", opt.histogram(), "sumsq:", opt.sumsq())
     forbid = None if args.forbid_above < 0 else args.forbid_above
     opt.local_search(passes=args.passes, forbid_above=forbid, greedy_trials=args.greedy_trials)
+    maybe_timeout()
 
     # 1-vertex swap pass to clear stubborn offenders
     print("Running 1-vertex swap pass...")
     opt.one_vertex_swap(T=opt.lambda_max()-1, iters=1000, rng=rng)
+    maybe_timeout()
 
     # Phase: minimize count of pairs at current lambda_max
     print("Phase: minimizing count of pairs at current lambda_max...")
     lmax = opt.lambda_max()
     while lmax > 2:
+        maybe_timeout()
         count_at_lmax = opt.count_at_level(lmax)
         print(f"Current lambda_max={lmax}, count={count_at_lmax}")
         
@@ -717,6 +752,7 @@ def main():
                 improved_count = True
                 print(f"Reduced count at lambda_max={lmax} from {old_count} to {new_count}")
                 break
+            maybe_timeout()
         
         if not improved_count:
             break
@@ -738,8 +774,13 @@ def main():
         if lnow <= 2: break
         target = lnow - 1
         print(f"[group] trying target lambda_max={target} ... (round {args.group_rounds - rounds_left}/{args.group_rounds})")
-        improved = opt.reduce_lmax_group(target=target, time_limit=args.group_time,
+        remaining = time_left()
+        round_time = args.group_time if (remaining is None) else max(0.0, min(args.group_time, remaining))
+        if remaining is not None and remaining <= 0:
+            maybe_timeout()
+        improved = opt.reduce_lmax_group(target=target, time_limit=round_time,
                                          max_pairs_considered=20, candidates_per_block=args.group_cands, rng=rng)
+        maybe_timeout()
         
         # Early stop: if we succeeded, try another round immediately
         if improved:
@@ -749,11 +790,10 @@ def main():
     # Final 1-vertex swap pass
     print("Final 1-vertex swap pass...")
     opt.one_vertex_swap(T=opt.lambda_max()-1, iters=1000, rng=rng)
+    maybe_timeout()
 
     print("Final    lambda_max:", opt.lambda_max(), "hist:", opt.histogram(), "sumsq:", opt.sumsq())
 
-    outpath = Path(args.outfile or f"rebalance_v{v}_k{k}.txt")
-    one_based = (args.out_indexing == "one")
     with outpath.open("w", encoding="utf-8") as f:
         for blk in opt.blocks:
             if one_based: f.write(" ".join(str(x+1) for x in blk) + "\n")

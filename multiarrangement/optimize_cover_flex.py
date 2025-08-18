@@ -699,8 +699,10 @@ def main():
     ap.add_argument("--min-k-size", type=int, default=2, help="minimum allowed block size after shrink (>=2). Default 2.")
 
     # cache + offline
-    ap.add_argument("--cache-dir", type=str, default="ljcr_cache")
-    ap.add_argument("--offline-first", action="store_true", help="load from cache if available")
+    # Default to the packaged cache inside the installed module
+    default_cache = str((Path(__file__).parent / "ljcr_cache").resolve())
+    ap.add_argument("--cache-dir", type=str, default=default_cache)
+    ap.add_argument("--offline-first", action="store_true", default=True, help="load from cache if available (default)")
     ap.add_argument("--offline-only", action="store_true", help="do not fetch; error on cache miss")
     ap.add_argument("--seed-file", type=str, default=None, help="explicit seed file (auto 0/1-base detection; variable sizes allowed)")
 

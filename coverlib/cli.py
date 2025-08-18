@@ -14,7 +14,14 @@ def main():
     ap.add_argument("--group-rounds", type=int, default=12)
     ap.add_argument("--group-time", type=float, default=10.0)
     ap.add_argument("--group-cands", type=int, default=100)
-    ap.add_argument("--cache-dir", type=str, default="ljcr_cache")
+    from pathlib import Path
+    # Prefer packaged cache under multiarrangement/ljcr_cache if available
+    try:
+        import multiarrangement
+        default_cache = str((Path(multiarrangement.__file__).parent / "ljcr_cache").resolve())
+    except Exception:
+        default_cache = str((Path(__file__).parent.parent / "ljcr_cache").resolve())
+    ap.add_argument("--cache-dir", type=str, default=default_cache)
     ap.add_argument("--offline-only", action="store_true")
     ap.add_argument("--seed-file", type=str, default=None)
     ap.add_argument("--outfile", type=str, default=None)

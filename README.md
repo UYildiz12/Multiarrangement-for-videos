@@ -1,391 +1,235 @@
-# Multiarrangement - Video & Audio Similarity Arrangement Task
+# Multiarrangement — Video & Audio Similarity Arrangement Toolkit
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Overview
 
-Multiarrangement is a comprehensive Python package for conducting psychological experiments where participants arrange videos or audio files based on perceived similarity. The package provides both windowed and fullscreen interactive interfaces where stimuli are presented as draggable circles in a circular arena. The spatial arrangement represents the participant's perception of similarity, generating Representational Dissimilarity Matrices (RDMs) for analysis.
+Multiarrangement is a Python toolkit for collecting human similarity judgements by arranging stimuli (videos or audio) on a 2D canvas. The spatial arrangement encodes perceived similarity and is converted into a full Representational Dissimilarity Matrix (RDM) for downstream analysis.
 
-## Features
+Two complementary experiment paradigms are supported:
 
-- **Modern Package Structure**: Properly organized Python package with modular components
-- **Dual Interface Modes**: Both windowed and fullscreen experiment interfaces
-- **Multi-Modal Support**: Support for both video and audio stimuli
-- **Interactive Arrangement**: Drag-and-drop interface with real-time feedback
-- **Advanced Batch Generation**: Three-tier optimization system for creating balanced stimulus batches
-- **Comprehensive Data Export**: Multiple output formats (Excel, CSV, NumPy arrays)
-- **CLI Tools**: Command-line interfaces for all major functions
-- **Data Validation**: Built-in validation for batch configurations and experimental data
-- **Extensible Design**: Easy to customize and extend for specific research needs
-- **Covering Design Optimization**: Advanced algorithms for optimal experimental design
+- Set‑Cover (fixed batches): Precompute batches that efficiently cover pairs; run them in a controlled sequence.
+- Adaptive LTW (Lift‑the‑Weakest): After each trial, select the next subset that maximizes evidence gain for the weakest‑evidence pairs, with optional inverse‑MDS refinement.
 
-## Installation
+The package ships with windowed and fullscreen UIs, packaged demo media (15 videos and 15 audios), instruction videos, bundled LJCR covering‑design cache (offline‑first), CLIs, and Python APIs.
 
-### From PyPI (when published)
-```bash
-pip install multiarrangement
-```
+## What’s Included
 
-### From Source
+- Package code: `multiarrangement/*` (UI, core, adaptive LTW), `coverlib/*` (covering‑design tools)
+- Demo media (installed): `multiarrangement/15videos/*`, `multiarrangement/15audios/*`, `multiarrangement/sample_audio/*`, and `multiarrangement/demovids/*`
+- LJCR cache (installed): `multiarrangement/ljcr_cache/*.txt` used by covering‑design CLIs by default (offline‑first)
+- Source only (not in wheel): `24videos/`, `58videos/`, tests, legacy scripts, large examples
+
+## Install
+
+From source:
+
 ```bash
 git clone https://github.com/UYildiz12/Multiarrangement-for-videos.git
 cd Multiarrangement-for-videos
-pip install -e .
+pip install -e .[coverlib]
 ```
 
-### Requirements
-- Python 3.8+
-- NumPy >= 1.20.0
-- Pandas >= 1.3.0
-- Pygame >= 2.0.0
-- OpenCV-Python >= 4.5.0
-- openpyxl >= 3.0.0
+Requirements: Python 3.8+, NumPy ≥ 1.20, pandas ≥ 1.3, pygame ≥ 2.0, opencv‑python ≥ 4.5, openpyxl ≥ 3.0. The optional extra `[coverlib]` installs `requests/urllib3` for the `covergen` CLI.
 
-### Optional Dependencies
-For covering design optimization:
+## Demos
+
+- Set‑cover (fixed batches):
+
 ```bash
-pip install multiarrangement[coverlib]
+multiarrangement-demo
 ```
 
-## Quick Start
+- Adaptive LTW (Lift‑the‑Weakest):
 
-### Basic Usage
-
-1. **Run an experiment**:
 ```bash
-# Windowed mode
-multiarrangement
+multiarrangement-demo-adaptive
+```
 
-# Fullscreen mode
-multiarrangement-fullscreen
+Both demos use the packaged `15videos` and show default instruction screens (with bundled instruction clips).
 
-# With specific parameters
+## CLI Usage
+
+- Windowed experiment (set‑cover):
+
+```bash
 multiarrangement --video-dir ./videos --batch-file ./batches.txt --participant-id P001
 ```
 
-2. **Generate batch configurations**:
-```bash
-# Generate batches using hybrid approach (recommended)
-multiarrangement-batch-generator 25 8 --algorithm hybrid --output-file my_batches.txt
+- Fullscreen experiment (set‑cover):
 
-# Use specific algorithms
-multiarrangement-batch-generator 25 8 --algorithm optimal    # Try optimal only
-multiarrangement-batch-generator 25 8 --algorithm greedy     # Python greedy only
+```bash
+multiarrangement-fullscreen --video-dir ./videos --batch-file ./batches.txt --participant-id P001
 ```
 
-3. **Use as a Python library**:
+- Adaptive LTW experiment:
 
-#### Minimal Example: Video Similarity Arrangement
+```bash
+multiarrangement-adaptive \
+  --input-dir ./videos \
+  --participant-id P001 \
+  --fullscreen \
+  --evidence-threshold 0.35 \
+  --min-subset-size 4 \
+  --max-subset-size 6 \
+  --use-inverse-mds
+```
+
+- Batch generation (set‑cover):
+
+```bash
+multiarrangement-batch-generator 24 8 --algorithm hybrid --validate --output-file batches_24x8.txt
+```
+
+- Covering‑design optimizers (offline‑first using the bundled cache):
+
+```bash
+# Fixed k
+optimize-cover --v 24 --k 8 --offline-only --outfile cover_v24_k8.txt
+
+# Flexible shrink‑only (min size 3)
+optimize-cover-flex --v 24 --k 8 --min-k-size 3 --offline-only --outfile cover_v24_var.txt
+
+# Prefetch more LJCR cache entries
+optimize-cover --bulk-download --v-min 10 --v-max 40 --k-min 3 --k-max 8
+```
+
+Notes:
+
+- If Tk is not available, pass `--video-dir`, `--batch-file`, and `--participant-id` rather than using GUI dialogs.
+- Both cover CLIs default `--cache-dir` to the packaged cache under `multiarrangement/ljcr_cache` and can run fully offline for cached (v,k).
+
+## Python API
+
+### Set‑Cover Experiment
+
 ```python
 import multiarrangement as ma
 
-# Create batches for 24 videos, batch size 8
+# Build batches for 24 items, size 8
 batches = ma.create_batches(24, 8)
 
-# Run video experiment (English instructions)
-result_file = ma.multiarrangement(
+# Run experiment (English, windowed)
+results = ma.multiarrangement(
     input_dir="./videos",
     batches=batches,
-    output_dir="./results"
+    output_dir="./results",
+    fullscreen=False,
+    language="en",
+    instructions="default"  # or None, or ["Custom", "lines"]
 )
-print("Results saved to:", result_file)
+results.vis(title="Set‑Cover RDM")
+results.savefig("results/rdm_setcover.png", title="Set‑Cover RDM")
 ```
 
-#### Minimal Example: Audio Similarity Arrangement
+### Adaptive LTW Experiment (with optional inverse‑MDS)
+
 ```python
 import multiarrangement as ma
 
-# Create batches for 24 audio files, batch size 8
-batches = ma.create_batches(24, 8)
-
-# Run audio experiment (Turkish instructions)
-result_file = ma.multiarrangement(
-    input_dir="./audio",
-    batches=batches,
+results = ma.multiarrangement_adaptive(
+    input_dir="./videos",
     output_dir="./results",
-    mode="audio",           # Specify audio mode
-    language="tr"           # Turkish instructions
+    fullscreen=True,
+    evidence_threshold=0.35,   # stop when min pair evidence ≥ threshold
+    min_subset_size=4,
+    max_subset_size=6,
+    use_inverse_mds=True,      # optional inverse‑MDS refinement
+    inverse_mds_max_iter=15,
+    inverse_mds_step_c=0.3,
+    inverse_mds_tol=1e-4,
 )
-print("Results saved to:", result_file)
+results.vis(title="Adaptive LTW RDM")
+results.savefig("results/rdm_adaptive.png", title="Adaptive LTW RDM")
+
+### Run the examples
+
+We include four examples for both paradigms (video/audio). They save heatmaps to `./results`.
+
+- From an installed package (recommended): run the in‑package example modules
+  - `python -m multiarrangement.examples.setcover_video`
+  - `python -m multiarrangement.examples.setcover_audio`
+  - `python -m multiarrangement.examples.ltw_video`
+  - `python -m multiarrangement.examples.ltw_audio`
+  - These examples auto‑resolve the packaged media and create `./results` if missing.
+
+- From the repo root (developer use): run the top‑level scripts
+  - `python setcover_video.py`
+  - `python setcover_audio.py`
+  - `python ltw_video.py`
+  - `python ltw_audio.py`
+  - These scripts assume you are in the repo root where `15videos/` and `15audios/` exist.
 ```
 
-#### Customizing Instructions
-You can control the instructions shown before the experiment using the `instructions` argument:
-
-- `instructions="default"` (or omit): Shows the standard instructions (with videos/images for video mode).
-- `instructions=None`: Skips instructions entirely.
-- `instructions=[...]`: Shows a custom list of instruction strings, centered on the screen. (Media is not shown for custom instructions.)
+### Custom Instructions (both paradigms)
 
 ```python
-# Custom instructions example
-custom_instructions = [
-    "Welcome to the custom experiment!",
-    "Arrange the stimuli as you wish.",
+custom = [
+    "Welcome to the lab.",
+    "Drag each item inside the white circle.",
+    "Double‑click to play/replay.",
     "Press SPACE to continue."
 ]
 
-result_file = ma.multiarrangement(
-    input_dir=input_dir,
+# Set‑cover
+ma.multiarrangement(
+    input_dir="./videos",
     batches=batches,
     output_dir="./results",
-    instructions=custom_instructions
+    instructions=custom,    # show these lines instead of defaults
+)
+
+# Adaptive LTW
+ma.multiarrangement_adaptive(
+    input_dir="./videos",
+    output_dir="./results",
+    instructions=custom,    # also supported here
 )
 ```
 
-#### Language and Mode
-- The experiment automatically detects whether you are running a video or audio arrangement based on the input directory contents.
-- You can set the instruction language with `language="en"` (English, default) or `language="tr"` (Turkish).
+Key ideas:
 
-## Package Structure
-```
-multiarrangement/
-├── __init__.py                     # Main package exports
-├── cli.py                          # Command-line interfaces
-├── experiment_runner.py             # High-level experiment runner
-├── core/                           # Core experiment functionality
-│   ├── __init__.py
-│   ├── experiment.py               # Main experiment class
-│   └── batch_generator.py          # Batch generation algorithms
-├── ui/                             # User interface components
-│   ├── __init__.py
-│   ├── interface.py                # Base and windowed interface
-│   └── fullscreen_interface.py     # Fullscreen interface
-├── utils/                          # Utility modules
-│   ├── __init__.py
-│   ├── video_processing.py         # Video handling utilities
-│   ├── data_processing.py          # Data analysis utilities
-│   └── file_utils.py               # File and path utilities
-├── data/                           # Package data files
-│   ├── batches_*.txt               # Example batch configurations
-│   └── img1.PNG                    # Interface assets
-└── optimize_cover_*.py             # Covering design optimization
+- Evidence is normalized per trial: `w_ij = (d_ij / max_d)^2` so absolute pixel scale does not dominate.
+- Next subset is chosen greedily to maximize (utility gain)/(time cost), starting from the globally weakest‑evidence pair.
+- Optional inverse‑MDS refinement reduces arrangement prediction error across trials.
 
-coverlib/                           # Covering design library
-├── __init__.py
-├── api.py                          # API for covering designs
-├── cache.py                        # Caching system
-├── cli.py                          # CLI for covering designs
-├── combinatorics.py                # Combinatorial utilities
-├── fetchers.py                     # Data fetching utilities
-├── optimizer.py                    # Optimization algorithms
-└── repair.py                       # Solution repair utilities
+## Instruction Screens
 
-Additional Files:
-├── Greedy_gen.c                    # C implementation of greedy algorithm
-├── greedy_gen.exe                  # Compiled greedy algorithm
-├── New_Greedy_1.py                 # Python greedy implementation
-├── optimize_cover_pure.py          # Pure Python covering optimizer
-└── Multiarrangement.py             # Legacy standalone script
-```
+- Default instructions include short videos (bundled in `demovids/`) showing drag, double‑click, and completion.
+- To skip instructions, pass `instructions=None`. To customize, pass a list of strings.
 
-## Stimulus Organization
+## Outputs
 
-The package supports flexible stimulus organization:
+- Set‑cover: `participant_<id>_results.xlsx`, `participant_<id>_rdm.npy`, CSV (optional)
+- Adaptive LTW: `adaptive_results_results.xlsx`, `adaptive_results_rdm.npy`, `adaptive_results_evidence.npy`, `adaptive_results_meta.json`
 
-### Supported Video Formats
-- `.avi`, `.mp4`, `.mov`, `.mkv`, `.wmv`, `.flv`, `.webm`
+## Covering Designs
 
-### Supported Audio Formats
-- `.wav`, `.mp3`, `.ogg`, `.flac`, `.m4a`, `.aac`
+- Two optimizers are provided:
+  - `optimize-cover`: fixed k; cache‑first LJCR seed, repair/prune, local search + group DFS
+  - `optimize-cover-flex`: shrink‑only; starts from fixed k and may reduce block sizes down to `--min-k-size`
+- Both prefer the installed cache path by default and support `--seed-file` to run from your own seeds.
 
-### Directory Structure
-Stimuli can be organized in any directory structure. The package will automatically detect files and map them to batch indices. Example:
+## Troubleshooting
 
-```
-videos/
-├── video_001.mp4
-├── video_002.avi
-├── action_walking.mp4
-└── action_running.mp4
+- Pygame/OpenCV: on minimal Linux, install SDL2 and video codecs via your package manager.
+- Tk missing: supply `--video-dir`, `--batch-file`, and `--participant-id` on the command line.
+- Audio playback: Windows uses Windows Media Player (fallback), macOS `afplay`, Linux `paplay`/`aplay`.
 
-audio/
-├── sound_001.wav
-├── sound_002.mp3
-├── music_sample.ogg
-└── speech_sample.flac
-```
+## References
 
-### Batch Configuration
-Batch files specify which stimuli appear together. Format examples:
-
-```
-# Simple comma-separated format
-0,1,2,3
-4,5,6,7
-1,3,5,7
-
-# Comments and empty lines are ignored
-# Batch 1: similar actions
-0,2,4,6
-# Batch 2: different actions  
-1,3,5,7
-```
-
-## Advanced Batch Generation
-
-The package includes a sophisticated three-tier batch generation system:
-
-### 🏆 Hybrid Approach (Recommended)
-```bash
-multiarrangement-batch-generator 25 8 --algorithm hybrid
-```
-
-**Tier 1: Optimal Solutions** (`optimize_cover_pure.py`)
-- Fetches optimal covering designs from LJCR database
-- Uses advanced local search and DFS optimization
-- Produces mathematically optimal solutions when available
-- May not work for all parameter combinations
-
-**Tier 2: High-Performance Greedy** (`Greedy_gen.c`)
-- Fast compiled C implementation with bitsets and max-heap
-- Works for any valid parameters (n ≤ 255)
-- Significantly faster than Python implementations
-- Always finds a solution, though not necessarily optimal
-
-**Tier 3: Python Fallback** (Pure Python)
-- Always available, no dependencies
-- Works on any platform
-- Reasonable performance for small to medium datasets
-
-### Algorithm Selection
-```bash
-# Try all tiers (recommended)
---algorithm hybrid
-
-# Optimal only (fails if not available)
---algorithm optimal  
-
-# High-performance C only
---algorithm greedy
-
-# Python implementation only 
---algorithm brute_force  # Small datasets only
-```
-
-### Using Covering Design Library
-```bash
-# Generate covering designs directly
-covergen 25 8 --output-file covering.txt
-
-# Optimize existing designs
-optimize-cover input.txt --output-file optimized.txt
-```
-
-## Legacy Scripts
-
-For backward compatibility, several legacy scripts are included:
-
-### Standalone Multiarrangement
-```bash
-python Multiarrangement.py
-```
-This provides a windowed interface similar to the main package.
-
-### Greedy Algorithm Scripts
-```bash
-# Python greedy implementation
-python New_Greedy_1.py
-
-# C implementation (Windows executable)
-./greedy_gen.exe
-```
-
-## Data Output
-
-For each participant, multiple files are generated:
-1. `participant_X_results.xlsx`: Contains pairwise distances between all stimuli
-2. `participant_X_rdm.npy`: Numpy array containing the Representational Dissimilarity Matrix
-3. `participant_X_distances.csv`: CSV format of the distance matrix
-
-## Post-Processing
-
-After collecting data from participants, you can use the included Jupyter notebook for post-processing:
-
-### Rescaling Notebook
-```bash
-jupyter notebook "Rescaling_Notebook.ipynb"
-```
-This notebook provides:
-- Detailed documentation and explanations
-- Visualization of the data from the multiarrangement task
-- Statistical analysis tools
-- Data export capabilities
-
-## Demo Videos and Data Sources
-
-### Demo Videos
-The package includes demo videos from the following source:
-
-**A Large Video Set of Natural Human Actions for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI**
-
-*Reference:* Urgen, B. A., Nizamoğlu, H., Eroğlu, A., & Orban, G. A. (2023). A Large Video Set of Natural Human Actions for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. *Brain Sciences*, *13*(1), 61. https://doi.org/10.3390/brainsci13010061
-
-The demo videos included in this package are derived from this dataset and are used for:
-- **Instruction videos**: `demovids/` folder contains videos demonstrating the interface controls
-- **Example datasets**: `15videos/`, `24videos/`, and `58videos/` folders contain sample video sets for testing and demonstration
-
-### Sample Audio
-The `sample_audio/` directory contains example audio files for testing audio arrangement experiments.
-
-## Controls
-
-### Video Mode
-- **Left-click and drag**: Move a video circle
-- **Double-click**: Play a video
-- **Spacebar**: Continue to next batch
-- **Escape**: Exit experiment
-
-### Audio Mode
-- **Left-click and drag**: Move an audio circle
-- **Double-click**: Play a sound
-- **Spacebar**: Continue to next batch
-- **Escape**: Exit experiment
-
-## Example Data
-
-The `ExampleData/` directory contains:
-- `participant_example.xlsx`: Example participant data
-- `participant_example_rescaled.xlsx`: Example rescaled data
-
-## Testing
-
-Run the test suite:
-```bash
-pytest tests/
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Submit a pull request
+- Inverse MDS (adaptive refinement):
+  - Kriegeskorte, N., & Mur, M. (2012). Inverse MDS: optimizing the stimulus arrangements for pairwise dissimilarity measures. Frontiers in Psychology, 3, 245. https://doi.org/10.3389/fpsyg.2012.00245
+- Representational similarity analysis (context):
+  - Kriegeskorte, N., Mur, M., & Bandettini, P. (2008). Representational similarity analysis—connecting the branches of systems neuroscience. Frontiers in Systems Neuroscience, 2, 4.
+- Demo video dataset:
+  - Urgen, B. A., Nizamoğlu, H., Eroğlu, A., & Orban, G. A. (2023). A large video set of natural human actions for visual and cognitive neuroscience studies and its validation with fMRI. Brain Sciences, 13(1), 61. https://doi.org/10.3390/brainsci13010061
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License. See `LICENSE`.
 
-## Citation
+## Contributing
 
-If you use this package in your research, please cite both this package and the original video dataset:
-
-*Citation information will be added soon.*
-
-## Support
-
-For issues and questions:
-- Check the [Issues](https://github.com/UYildiz12/Multiarrangement-for-videos/issues) page
-- Review the documentation in the code
-- Contact the maintainers
-
-## Updating Your Package on PyPI
-
-After publishing, you can update your package at any time:
-1. Make your changes in the codebase.
-2. Increment the version number in `pyproject.toml` (and/or `setup.py`).
-3. Build and upload the new version to PyPI using `twine`.
-4. Users can upgrade with `pip install --upgrade multiarrangement`.
-
-Repeat as needed for bug fixes and new features.
+Issues and PRs are welcome. Please add tests for new functionality and keep changes focused.

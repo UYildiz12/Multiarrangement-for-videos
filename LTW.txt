@@ -1,0 +1,187 @@
+Multi-Arrangement by Lift-the-Weakest Algorithm for Adaptive Design of Item Subsets
+We present a particular implementation of the multi-arrangement method, which proceeds by the following algorithm:
+
+1. trial 1: let subject arrange all items
+
+2. estimate the RDM from the current set of item arrangements (see Estimating the High-Dimensional Dissimilarity Matrix from Multiple Item-Subset Arrangements for details)
+
+3. if subject’s time is up or dissimilarity-evidence criterion reached, terminate
+
+4. design item-subset for the next trial (optimizing trial efficiency)
+
+5. next trial: let subject arrange the item-subset
+
+6. goto 2
+
+Steps 1 and 5 are carried out by an algorithm that presents the items on a computer screen and enables the subject to arrange them by mouse drag-and-drop operations. Step 2, the estimation of the RDM from a set of arrangements of subsets of the items (or “inverse MDS”), is detailed in Section “Estimating the High-Dimensional Dissimilarity Matrix from Multiple Item-Subset Arrangements.” Steps 3 and 4 are explained in this section.
+
+The design of the item-subset to be presented on the next trial (step 4) is carried out by the “lift-the-weakest” algorithm. The motivation for the lift-the-weakest algorithm is to prioritize acquisition of evidence for those dissimilarities, for which we currently have the weakest evidence (thus the name “lift-the-weakest”). This prioritization lends the algorithm its “anytime” behavior (after the initial trial including all items has been completed).
+
+More precisely, the lift-the-weakest algorithm heuristically optimizes the estimated trial efficiency for the subsequent trial, based on a few assumptions. Before we state the algorithm for item-subset design, we explain the assumptions and define the quantitative concepts involved:
+
+• Relative dissimilarities: each item-subset arrangement is assumed to reflect the relative, not the absolute, dissimilarities between the items. A distance of 0 always represents identity. However, the scaling of the set of distances for a given arrangement is to be ignored. The subject is instructed to use the entire arena to arrange each subset. The same dissimilarity will therefore tend to correspond to a larger on-screen distance if the two items appear as part of a smaller subset.
+
+• On-screen placement error: we assume that the location of each item in an arrangement is affected by placement error, which is isotropic and has a constant variance in on-screen distance units across trials. We further assume that the placement error is small relative to the distances.
+
+• Dissimilarity signal-to-noise ratio: the dissimilarity signal is reflected in the on-screen distance. Since the placement error is constant in on-screen distance units, the dissimilarity signal-to-noise ratio is proportional to the on-screen distance. An item pair’s distance will therefore tend to reflect the dissimilarity (relative to the subset) with a higher signal-to-noise ratio if the two items are placed farther apart on a given trial (e.g., because there were fewer items in the trial allowing the subject to “zoom in” on a subcluster).
+
+• Dissimilarity-evidence weight = signal-to-noise ratio2: the weight of the dissimilarity-evidence contributed by a given arrangement is the square of the signal-to-noise ratio. The dissimilarity for a given item pair can be estimated as an optimally weighted average of the scale-adjusted dissimilarity estimates from individual arrangements. According to the optimal-filter theorem, weighting each scale-adjusted dissimilarity estimate by the evidence weight gives the minimum-variance estimate of the dissimilarity (assuming independence of the evidence from different trials and neglecting distortions due to dimensionality reduction). An algorithm for such an estimate is described in Section “Inverse Multidimensional Scaling by Iterative Reduction of Arrangement Prediction Error,” below.
+
+• Dissimilarity-evidence matrix: we can estimate the combined current evidence for the dissimilarity of each item pair by summing the evidence weights across trials. This yields a dissimilarity-evidence matrix (n by n, symmetric about an ignored diagonal), which is updated after each trial.
+
+• Termination when time is up or dissimilarity-evidence criterion is reached: after each trial, we assess whether another trial should be performed. The process will be terminated when either the available time (e.g., 1 h) is up or a dissimilarity-evidence criterion is reached. The dissimilarity-evidence criterion is that the minimum current dissimilarity-evidence across all item pairs exceeds some threshold.
+
+• Lift-the-weakest: the rationale of the algorithm is to seek more evidence for those item pairs, for which the current evidence is weakest. This is motivated by the idea that we want a minimum level of evidence for each item pair. Gathering evidence first for pairs for which we most lack it, ensures that the subject’s time is well spent. After the initial arrangement of all items, each additional trial improves the estimates, but the process can be terminated at any point. We call this “anytime” behavior. To formalize the goal to “lift-the-weakest,” we define the concept of “evidence-utility.”
+
+• Evidence-utility: we would like a given amount of evidence to be considered more useful for an item pair, for which we have little dissimilarity-evidence so far, than for an item pair, for which we already have a lot of dissimilarity-evidence. We therefore define the evidence-utility u (i.e., the usefulness or value of the current evidence) as a saturating function of the current evidence weight w for an item pair:
+
+u
+(
+w
+)
+=
+1
+−
+e
+−
+w
+⋅
+d
+,
+
+where d is the evidence-utility exponent, which controls how soon the utility saturates as a function of the evidence weight. The function u(w) starts at the origin with a positive slope and approaches an asymptote of u = 1. It models the notion that additional evidence for a given dissimilarity is less useful when we already have enough evidence for that dissimilarity. (In the current paper we used d = 10. The utility then saturates at an evidence weight of about 0.5. This focuses the item-subset design on lifting dissimilarities with an evidence weight below 0.5. The process was terminated when all dissimilarities had an evidence weight exceeding 0.5.) We compute an evidence-utility matrix (n by n, symmetric about an ignored diagonal), which assembles the evidence utilities for all item pairs.
+
+• Trial benefit = evidence-utility gain: we define the benefit of having the subject arrange a particular item-subset as the evidence-utility gain, i.e., the change in total evidence-utility (summed across all item pairs) expected to occur if that trial were presented. To estimate this, we first consider the largest dissimilarity among the item set (based on the current dissimilarity estimate). We assume that the two items in this pair would end up at opposite ends of the arena, defining the scaling factor for the arrangement. The scaling factor enables us to estimate the on-screen distances and the expected signal-to-noise ratios, i.e., the expected dissimilarity-evidence the trial would contribute for each pair. This, in turn, enables us to estimate the current dissimilarity-evidence after the trial, and the associated evidence-utility matrix. The evidence-utility gain is the total evidence-utility after the trial minus the total evidence-utility before the trial.
+
+• Trial cost = time taken to arrange the subset: we define the cost of the trial as the time it will take the subject to arrange the item-subset. We estimate this as a simple function of the number n of items in the trial: time = n1.5. The choice of 1.5 is motivated by the idea that an arrangement’s time complexity is superlinear, but subquadratic. The arrangement would take linear time if each item placement took constant time with no need to consider relationships. The arrangement would take quadratic time if each pairwise comparison were given an equal amount of time to adjust it. (The exponent or the form of the equation could be adjusted in the future on the basis of empirical measurements of the relationship between arrangement times and item set sizes.)
+
+• Trial efficiency = benefit/cost: we define the trial efficiency, which we aim to optimize in designing each trial, as the trial benefit divided by the trial cost. The trial efficiency TE for an item-subset ISS is denoted TE(ISS) below. Note that TE(ISS) depends on the arrangements already performed, but this dependency is omitted from the notation for brevity [TE(ISS) = TE(ISS, arrangements already performed)].
+
+Heuristic optimization of the estimated efficiency of the next trial
+Based on the concepts introduced above, there is an item-subset that maximizes the estimated efficiency of the subsequent trial, given the current dissimilarity-evidence (i.e., the item-subset arrangements acquired so far). Because the number of item subsets to be considered is vast for larger item sets (2n; e.g., 240 ≈ 1012 for 40 items), we do not search the entire set of subsets so as to find the global maximum of estimated trial efficiency. Instead we take a heuristic greedy approach. We start with the two items for whose dissimilarity we have the weakest evidence. We then consider adding each other item, and include the item (if any) that yields the highest positive gain in trial efficiency. This process is repeated until the point where adding any item will decrease the trial efficiency.
+
+Here is the precise definition of the lift-the-weakest algorithm:
+
+1. compute the current dissimilarity-evidence matrix (n by n)
+
+2. find the item pair {j, k} with the weakest current dissimilarity-evidence
+
+3. initialize the item-subset for the next trial with those two items: nextISS = {j, k}
+
+4. initialize the current-trial efficiency: curTE = 0
+
+5. find the optimal item to add: optItem = argmaxi (TE(nextISS ∪ {i})), where i ∈ total item set \ nextISS (if all items are in nextISS already, optItem = {}) and TE(item set) is the trial efficiency of an item set
+
+6. if TE(nextISS ∪ {optItem}) ≤ curTE, then terminate, returning item-subset nextISS
+
+7. add optItem to the next trial’s item-subset: nextISS = nextISS ∪ {optItem}
+
+8. curTE = TE(nextISS ∪ {optItem})
+
+9. goto 5
+
+Because curTE is set to 0 initially, the item-subset will have at least three items. This is necessary in the context of the current implementation of the multi-arrangement, because the scaling of the distance matrix is to be ignored, rendering a two-item trial uninformative.
+
+In this algorithm, the consideration of adding a particular item takes into account a number of consequences affecting the efficiency of the trial:
+
+• If the item is added, the trial will produce evidence for the dissimilarities of the added item to all the other items already in the set. This increases the trial benefit.
+
+• If the item is added, the trial will take longer to complete. This increases the trial cost.
+
+• If the item is added, the on-screen distances of the arrangement might be scaled down, as the entire arrangement needs to fit into the arena. This would reduce the signal-to-noise ratios (i.e., the evidence) for the dissimilarities, thus reducing trial benefit.
+
+The algorithm estimates these effects and chooses a trial with a good benefit-to-cost ratio, i.e., a highly efficient trial.
+
+Estimating the High-Dimensional Dissimilarity Matrix from Multiple Item-Subset Arrangements
+In this section we define the two particular algorithms for estimating the high-dimensional RDM from multiple item-subset arrangements (Figure 3).
+
+Weighted average of iteratively scaled-to-match subset dissimilarity matrices
+This algorithm is motivated by the assumption that each arrangement containing a given item pair provides an independent measurement of the dissimilarity for that item pair. The signal-to-noise ratio varies across the arrangements, because a given dissimilarity will not stand out from placement noise when it corresponds to a small on-screen distance in the context of a given arrangement. The dissimilarity for a given item pair can be estimated as a weighted average of the scale-adjusted dissimilarity estimates from individual arrangements.
+
+We assume that placement error additively affects the dissimilarities, positively or negatively. (This holds if the placement error is small relative to the on-screen distance, in which case we can neglect the fact that placement noise cannot render distances negative.) According to the optimal-filter theorem, an average of the scale-adjusted dissimilarity estimates weighted by the evidence weights (squared signal-to-noise ratios) then gives the minimum-variance estimate of the dissimilarity for each item pair.
+
+Because subjects are instructed to “zoom in” on subclusters in separate trials, we need to ignore the on-screen scale of each arrangement. We therefore determine a scaling factor for each subset RDM that matches the dissimilarities to an initial RDM estimate before weighted-averaging. The weighted average RDM estimate depends on the scaling factors. Conversely, the scaling factors are determined by the match to an initial RDM estimate. We therefore proceed iteratively, alternately adjusting the scaling factors and recomputing the weighted average RDM estimate until convergence. This is achieved by the following algorithm:
+
+1. for each arrangement and each item pair included in it, determine the dissimilarity-evidence weight (as the squared on-screen distance)
+
+2. determine the initial seed for the current RDM estimate
+
+a. if a full arrangement (e.g., from the first trial) is included, use this as the current RDM estimate
+
+b. otherwise, use the evidence-weighted average across arrangements of the on-screen distances as the current RDM estimate
+
+3. scale the current RDM estimate to have a root mean square (RMS) of 1
+
+4. scale the distance matrix of each arrangement, such that the RMS of its distances match the RMS of the same item pair entries of the current RDM estimate
+
+5. replace the current RDM estimate with an evidence-weighted average of the scaled distance matrices. In other words, for each item pair: 
+dissimilarity
+estimate
+=
+su
+m
+t
+i
+(
+scaled
+distanc
+e
+ti
+∗
+unscaled distance
+2
+t
+i
+)
+/
+su
+m
+t
+i
+(
+unscaled distance
+2
+t
+i
+)
+,
+ where ti is the trial index running through all trials that included the item pair
+
+6. if the RMS of the deviations between the current and the previous RDM estimate is close to 0, return the current RDM estimate
+
+7. otherwise, goto 3
+
+Inverse multidimensional scaling by iterative reduction of arrangement prediction error
+The weighted-averaging algorithm explained above (Inverse Multidimensional Scaling by Iterative Reduction of Arrangement Prediction Error) neglects distortions due to the projection into the 2D arena. We use the term “inverse MDS” for more ambitious methods that take the distortions due to dimensionality reduction into account. We can estimate a (high-dimensional) RDM from multiple (low-dimensional) arrangements by predicting the arrangements from an initial estimate of the RDM, and iteratively reducing the prediction errors. The following algorithm implements this approach:
+
+1. compute an initial estimate of the RDM using weighted-averaging of subset RDMs (as described in Weighted Average of Iteratively Scaled-to-Match Subset Dissimilarity Matrices)
+
+2. scale the current RDM estimate to an RMS of 1
+
+3. for each arrangement with trial index ti
+
+a. reduce the current RDM estimate to the subset of items arranged in trial ti
+
+b. use MDS (with metric stress criterion) to predict the subject’s arrangement
+
+c. compute the distance matrix from the MDS-predicted arrangement
+
+d. scale the distance matrix for the predicted arrangement to match its RMS to the RMS of the corresponding dissimilarities in the current RDM estimate
+
+e. scale the distance matrix for the actual arrangement to match its RMS to the RMS of the corresponding dissimilarities in the current RDM estimate
+
+f. compute the dissimilarity disparities Dti by subtracting the scaled distance matrix for the actual arrangement from the scaled distance matrix for the predicted arrangement
+
+4. compute the RMS of the disparities Dti across item pairs and trial indices
+
+5. if the RMS of the disparities is below a threshold, return the current RDM estimate
+
+6. for each item pair ip, compute the dissimilarity adjustment Aip as the average of the dissimilarity disparities Dti
+
+7. adjust the current RDM estimate by subtracting the dissimilarity adjustments c*Aip, where c is a constant scaling factor (c = 0.3 in our code)
+
+8. set any dissimilarities that are negative after adjustment to 0 in the current RDM estimate
+
+9. goto 2
+
+This method perfectly recovers the true underlying dissimilarities for the toy example shown in Figure 3. It significantly improves RDM estimates for more complex scenarios. However, if the item set is large (e.g., n = 100 items), the inversion is a difficult problem because of the large number of parameters of the RDM [(n2 − n)/2 = (1002 − 100)/2 = 4950 dissimilarities]. In that case, compared to the weighted-averaging approach, this method will still improve the RDM estimate in the sense that the result will be more consistent with the arrangements. However, convergence to an accurate estimate of the actual underlying dissimilarities is not guaranteed, as it will depend on the quantity and quality of the arrangement data. Although multiple arrangements help to constrain the space of solutions, a unique solution may not exist.

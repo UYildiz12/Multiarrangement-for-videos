@@ -4,8 +4,6 @@ Command-line interface for multiarrangement experiments.
 
 import argparse
 import sys
-import tkinter as tk
-from tkinter import simpledialog, filedialog, messagebox
 from pathlib import Path
 from typing import Optional
 
@@ -14,67 +12,61 @@ from .core.batch_generator import BatchGenerator
 from .ui.interface import MultiarrangementInterface
 from .ui.fullscreen_interface import FullscreenInterface
 from .utils.file_utils import get_video_files, validate_batch_configuration, load_batches
+from .adaptive.adaptive_experiment import AdaptiveMultiarrangementExperiment, AdaptiveConfig
 
 
 def get_participant_id() -> str:
     """Get participant ID using a GUI dialog."""
-    root = tk.Tk()
-    root.withdraw()
-    
-    participant_id = simpledialog.askstring(
-        "Participant ID", 
-        "Enter participant number or ID:",
-        parent=root
-    )
-    
-    root.destroy()
-    
-    if not participant_id:
-        print("No participant ID provided. Exiting.")
+    try:
+        import tkinter as tk
+        from tkinter import simpledialog
+    except Exception:
+        print("Tkinter is not available. Please pass --participant-id on the command line.")
         sys.exit(1)
-        
+
+    root = tk.Tk(); root.withdraw()
+    participant_id = simpledialog.askstring("Participant ID", "Enter participant number or ID:", parent=root)
+    root.destroy()
+    if not participant_id:
+        print("No participant ID provided. Exiting."); sys.exit(1)
     return participant_id
 
 
 def select_video_directory() -> Path:
     """Select video directory using file dialog."""
-    root = tk.Tk()
-    root.withdraw()
-    
-    directory = filedialog.askdirectory(
-        title="Select video directory",
-        initialdir=Path.cwd()
-    )
-    
-    root.destroy()
-    
-    if not directory:
-        print("No video directory selected. Exiting.")
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:
+        print("Tkinter is not available. Please pass --video-dir on the command line.")
         sys.exit(1)
-        
+
+    root = tk.Tk(); root.withdraw()
+    directory = filedialog.askdirectory(title="Select video directory", initialdir=Path.cwd())
+    root.destroy()
+    if not directory:
+        print("No video directory selected. Exiting."); sys.exit(1)
     return Path(directory)
 
 
 def select_batch_file() -> Path:
     """Select batch configuration file using file dialog."""
-    root = tk.Tk()
-    root.withdraw()
-    
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:
+        print("Tkinter is not available. Please pass --batch-file on the command line.")
+        sys.exit(1)
+
+    root = tk.Tk(); root.withdraw()
     batch_file = filedialog.askopenfilename(
         title="Select batch configuration file",
         initialdir=Path.cwd(),
-        filetypes=[
-            ("Text files", "*.txt"),
-            ("All files", "*.*")
-        ]
+        filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
     )
-    
     root.destroy()
-    
     if not batch_file:
-        print("No batch file selected. Exiting.")
-        sys.exit(1)
-        
+        print("No batch file selected. Exiting."); sys.exit(1)
     return Path(batch_file)
 
 
@@ -341,3 +333,61 @@ def batch_generator_cli():
 
 if __name__ == "__main__":
     main()
+
+
+def main_adaptive():
+    """CLI entry point for adaptive (lift-the-weakest) multiarrangement experiment."""
+    parser = argparse.ArgumentParser(
+        description="Run adaptive multiarrangement experiment using Lift-the-Weakest"
+    )
+
+    parser.add_argument("--input-dir", type=str, help="Directory containing media files")
+    parser.add_argument("--participant-id", type=str, help="Participant ID")
+    parser.add_argument("--output-dir", type=str, default="Participantdata", help="Output directory")
+    parser.add_argument("--fullscreen", action="store_true", help="Run in fullscreen mode")
+    parser.add_argument("--language", type=str, default="en", choices=["en", "tr"], help="Instruction language")
+    parser.add_argument("--evidence-threshold", type=float, default=0.5, help="Min evidence per pair to stop")
+    parser.add_argument("--utility-exponent", type=float, default=10.0, help="Utility exponent d in u(w)=1-exp(-dw)")
+    parser.add_argument("--time-limit-minutes", type=float, default=None, help="Total time limit (minutes)")
+    parser.add_argument("--min-subset-size", type=int, default=3, help="Minimum items in a subset")
+    parser.add_argument("--max-subset-size", type=int, default=None, help="Maximum items in a subset")
+    parser.add_argument("--use-inverse-mds", action="store_true", help="Enable inverse-MDS refinement per trial")
+    parser.add_argument("--inverse-mds-max-iter", type=int, default=15, help="Max inverse-MDS iterations")
+    parser.add_argument("--inverse-mds-step-c", type=float, default=0.3, help="Inverse-MDS step size c")
+    parser.add_argument("--inverse-mds-tol", type=float, default=1e-4, help="Inverse-MDS RMS disparity tolerance")
+
+    args = parser.parse_args()
+
+    # Resolve inputs (prompt if missing)
+    input_dir = Path(args.input_dir) if args.input_dir else select_video_directory()
+    if not args.participant_id:
+        pid = get_participant_id()
+    else:
+        pid = args.participant_id
+
+    cfg = AdaptiveConfig(
+        evidence_threshold=args.evidence_threshold,
+        utility_exponent=args.utility_exponent,
+        time_limit_seconds=(args.time_limit_minutes * 60.0) if args.time_limit_minutes else None,
+        min_subset_size=max(3, args.min_subset_size),
+        max_subset_size=args.max_subset_size,
+        use_inverse_mds=args.use_inverse_mds,
+        inverse_mds_max_iter=args.inverse_mds_max_iter,
+        inverse_mds_step_c=args.inverse_mds_step_c,
+        inverse_mds_tol=args.inverse_mds_tol,
+    )
+
+    try:
+        exp = AdaptiveMultiarrangementExperiment(
+            input_directory=str(input_dir),
+            participant_id=pid,
+            output_directory=args.output_dir,
+            config=cfg,
+        )
+
+        # Reuse existing UIs
+        interface = FullscreenInterface(exp) if args.fullscreen else MultiarrangementInterface(exp)
+        interface.run()
+    except Exception as e:
+        print(f"Error: {e}")
+        sys.exit(1)

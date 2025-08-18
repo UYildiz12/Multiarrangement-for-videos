@@ -114,8 +114,7 @@ class VideoProcessor:
         # Convert to pygame surface
         frame_surface = self.frame_to_pygame_surface(frame, scaled_size)
         
-        # Rotate to correct orientation
-        frame_surface = pygame.transform.rotate(frame_surface, -90)
+        # Keep original orientation (avoid 90-degree rotation)
         
         # Create circular mask
         diameter = radius * 2
@@ -170,6 +169,11 @@ class VideoProcessor:
         window_name = f'Video: {video_path.name}'
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window_name, width * 2, height * 2)
+        # Match set-cover behavior: keep window on top
+        try:
+            cv2.setWindowProperty(window_name, cv2.WND_PROP_TOPMOST, 1)
+        except Exception:
+            pass
         
         try:
             while cap.isOpened():
@@ -180,9 +184,9 @@ class VideoProcessor:
                     
                 cv2.imshow(window_name, frame)
                 
-                # Exit on 'q' key or window close
+                # Exit on 'q', SPACE, or ESC key, or window close
                 key = cv2.waitKey(delay) & 0xFF
-                if key == ord('q'):
+                if key in (ord('q'), 32, 27):
                     break
                     
                 # Check if window was closed
@@ -194,7 +198,59 @@ class VideoProcessor:
         finally:
             cap.release()
             cv2.destroyWindow(window_name)
+
+    def play_audio_inplace(self, audio_path: Union[str, Path]) -> None:
+        """Play audio using pygame.mixer within the same window (no app switch)."""
+        import pygame
+        import time
+        from pathlib import Path
+        audio_path = Path(audio_path)
+        if not audio_path.exists():
+            print(f"Audio file not found: {audio_path}")
+            return
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+            pygame.mixer.music.stop()
+            pygame.mixer.music.unload() if hasattr(pygame.mixer.music, 'unload') else None
+            pygame.mixer.music.load(str(audio_path))
+            pygame.mixer.music.play()
+            # Blocking loop (kept for compatibility)
+            while pygame.mixer.music.get_busy():
+                for event in pygame.event.get():
+                    if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_SPACE):
+                        pygame.mixer.music.stop()
+                        return
+                time.sleep(0.01)
+        except Exception as e:
+            print(f"Audio playback error, falling back: {e}")
+            self._play_audio_file(audio_path)
             
+    def play_audio_nonblocking(self, audio_path: Union[str, Path]) -> None:
+        """Start audio playback without blocking the UI (pygame.mixer)."""
+        import pygame
+        from pathlib import Path
+        audio_path = Path(audio_path)
+        if not audio_path.exists():
+            print(f"Audio file not found: {audio_path}")
+            return
+        try:
+            if not pygame.mixer.get_init():
+                pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+            # Stop any currently playing audio, then start new one
+            try:
+                pygame.mixer.music.stop()
+                if hasattr(pygame.mixer.music, 'unload'):
+                    pygame.mixer.music.unload()
+            except Exception:
+                pass
+            pygame.mixer.music.load(str(audio_path))
+            pygame.mixer.music.play()
+        except Exception as e:
+            print(f"Audio nonblocking playback error, falling back: {e}")
+            # Fallback to OS player thread (non-blocking for UI)
+            self._play_audio_file(audio_path)
+
     def _play_audio_file(self, audio_path: Path) -> None:
         """Play audio file until it finishes naturally."""
         import subprocess

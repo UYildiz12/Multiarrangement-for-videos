@@ -5,6 +5,7 @@ include pyproject.toml
 include img1.PNG
 include Audio.png
 include test_audio_icon_new.png
+include results/.gitkeep
 
 # Include package data
 recursive-include multiarrangement/data *.txt
@@ -15,10 +16,10 @@ recursive-include multiarrangement/data *.mp4 *.avi *.mov *.mkv *.wmv
 # Include demo videos if present
 recursive-include demovids *.mp4 *.avi *.mov *.mkv *.wmv
 
-# Include demo video folders
+# Include demo video folders (exclude 58videos to keep package size reasonable)
 recursive-include 15videos *.avi *.mp4 *.mov *.mkv *.wmv
 recursive-include 24videos *.avi *.mp4 *.mov *.mkv *.wmv
-recursive-include 58videos *.avi *.mp4 *.mov *.mkv *.wmv
+recursive-include 15audios *.mp3 *.wav *.ogg *.flac *.aac *.m4a
 
 # Include example data
 recursive-include ExampleData *.xlsx *.csv
@@ -33,5 +34,5 @@ global-exclude .git*
 global-exclude *.so
 global-exclude *.dylib
 global-exclude *.dll
-prune ljcr_cache
+recursive-include ljcr_cache *.txt
 prune output

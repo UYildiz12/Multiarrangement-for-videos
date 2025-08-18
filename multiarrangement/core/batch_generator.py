@@ -733,33 +733,34 @@ class BatchGenerator:
         from pathlib import Path
         
         # Try to find optimize_cover_pure.py in multiple locations
+        # Prefer the packaged version first to avoid stale duplicates at repo root
         optimize_script = None
-        
-        # 1. Try current working directory (for development)
-        cwd_script = Path.cwd() / "optimize_cover_pure.py"
-        if cwd_script.exists():
-            optimize_script = cwd_script
-        
-        # 2. Try project root (for development)
-        elif isinstance(project_root, str):
-            project_root = Path(project_root)
-        else:
-            project_root = Path(project_root)
-            
-        project_script = project_root / "optimize_cover_pure.py"
-        if project_script.exists():
-            optimize_script = project_script
-        
-        # 3. Try package data directory (for installed package)
+
+        # 1. Try package data directory (installed package or local)
+        try:
+            import multiarrangement as _ma_pkg
+            package_dir = Path(_ma_pkg.__file__).parent
+            package_script = package_dir / "optimize_cover_pure.py"
+            if package_script.exists():
+                optimize_script = package_script
+        except ImportError:
+            pass
+
+        # 2. Try project root under multiarrangement/
         if optimize_script is None:
-            try:
-                import multiarrangement
-                package_dir = Path(multiarrangement.__file__).parent
-                package_script = package_dir / "optimize_cover_pure.py"
-                if package_script.exists():
-                    optimize_script = package_script
-            except ImportError:
-                pass
+            if isinstance(project_root, str):
+                project_root = Path(project_root)
+            else:
+                project_root = Path(project_root)
+            project_script = project_root / "multiarrangement" / "optimize_cover_pure.py"
+            if project_script.exists():
+                optimize_script = project_script
+
+        # 3. Try current working directory only as last resort
+        if optimize_script is None:
+            cwd_script = Path.cwd() / "optimize_cover_pure.py"
+            if cwd_script.exists():
+                optimize_script = cwd_script
         
         if optimize_script is None:
             print("⚠ optimize_cover_pure.py not found - using fallback method")
@@ -776,7 +777,8 @@ class BatchGenerator:
                 "--v", str(self.n_videos),
                 "--k", str(self.batch_size),
                 "--outfile", output_file,
-                "--offline-first"  # Use cache if available
+                "--offline-first",  # Use cache if available
+                "--time-limit", "10"
             ]
             
             # Add any additional arguments

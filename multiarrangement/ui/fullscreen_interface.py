@@ -4,6 +4,7 @@ Fullscreen interface for multiarrangement experiments.
 
 import pygame
 import sys
+from pathlib import Path
 from .interface import BaseInterface
 from ..core.experiment import MultiarrangementExperiment
 
@@ -25,10 +26,13 @@ class FullscreenInterface(BaseInterface):
         
     def setup_display(self) -> None:
         """Setup fullscreen display."""
-        self.screen = pygame.display.set_mode(
-            (self.screen_width, self.screen_height), 
-            pygame.FULLSCREEN
-        )
+        # Use borderless fullscreen (NOFRAME) to match set-cover behavior
+        self.screen = pygame.display.set_mode((0, 0), pygame.NOFRAME)
+        # Update stored dimensions from actual screen
+        self.screen_width = self.screen.get_width()
+        self.screen_height = self.screen.get_height()
+        self.arena_center = (self.screen_width // 2, self.screen_height // 2)
+        self.arena_radius = min(self.screen_width, self.screen_height) // 2 - 100
         pygame.display.set_caption("Multiarrangement Video Similarity Experiment - Fullscreen")
         
     def draw_interface(self) -> None:
@@ -38,19 +42,7 @@ class FullscreenInterface(BaseInterface):
         # Draw arena circle
         pygame.draw.circle(self.screen, self.WHITE, self.arena_center, self.arena_radius, 4)
         
-        # Draw progress indicator (top-left)
-        current, total = self.experiment.get_progress()
-        progress_text = f"Batch {current} of {total}"
-        text_surface = self.font.render(progress_text, True, self.WHITE)
-        self.screen.blit(text_surface, (30, 30))
-        
-        # Draw instruction text (top-center)
-        instruction = "Drag videos to arrange by similarity. Double-click to replay. Press ESC to exit."
-        instruction_surface = self.font.render(instruction, True, self.WHITE)
-        instruction_rect = instruction_surface.get_rect()
-        instruction_rect.centerx = self.screen_width // 2
-        instruction_rect.y = 30
-        self.screen.blit(instruction_surface, instruction_rect)
+        # (Adaptive) No progress text at top-left
         
         # Draw video circles
         self.draw_video_circles()
@@ -62,38 +54,20 @@ class FullscreenInterface(BaseInterface):
         self.draw_done_button()
         
     def draw_done_button(self) -> None:
-        """Draw the done button for fullscreen interface."""
-        button_width = 120
-        button_height = 60
-        button_x = 50
-        button_y = self.screen_height - button_height - 50
-        
-        button_rect = pygame.Rect(button_x, button_y, button_width, button_height)
+        """Draw the done button (match set-cover style)."""
+        button_rect = pygame.Rect(50, self.screen_height - 100, 100, 50)
         
         # Check if completion criteria are met
         can_complete = self.check_completion_criteria(self.arena_center, self.arena_radius)
+        button_color = self.GREEN if can_complete else self.RED
         
-        # Create semi-transparent button
-        button_surface = pygame.Surface((button_width, button_height), pygame.SRCALPHA)
+        pygame.draw.rect(self.screen, button_color, button_rect)
+        pygame.draw.rect(self.screen, self.WHITE, button_rect, 2)
         
-        if can_complete:
-            button_color = (*self.GREEN, 180)
-            border_color = self.GREEN
-        else:
-            button_color = (*self.RED, 180)
-            border_color = self.RED
-            
-        button_surface.fill(button_color)
-        pygame.draw.rect(button_surface, border_color, button_surface.get_rect(), 3)
-        
-        # Add button text
-        text_surface = self.large_font.render("Done", True, self.WHITE)
+        text_surface = self.font.render("Done", True, self.WHITE)
         text_rect = text_surface.get_rect()
-        text_rect.center = (button_width // 2, button_height // 2)
-        button_surface.blit(text_surface, text_rect)
-        
-        # Blit button to screen
-        self.screen.blit(button_surface, button_rect)
+        text_rect.center = button_rect.center
+        self.screen.blit(text_surface, text_rect)
         
         # Store button rect for click detection
         self.done_button_rect = button_rect
@@ -113,7 +87,7 @@ class FullscreenInterface(BaseInterface):
                     
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
-                    pos = pygame.mouse.get_pos()
+                    pos = event.pos if hasattr(event, 'pos') else pygame.mouse.get_pos()
                     
                     # Check done button
                     if hasattr(self, 'done_button_rect') and self.done_button_rect.collidepoint(pos):
@@ -122,10 +96,10 @@ class FullscreenInterface(BaseInterface):
                         continue
                     
                     # Handle double-click for video playback
-                    self.handle_double_click(pos)
+                    handled = self.handle_double_click(pos)
                     
                     # Start dragging if not double-click
-                    if pygame.time.get_ticks() - self.last_click_time > self.double_click_threshold:
+                    if not handled:
                         self.handle_drag_start(pos)
                         
             elif event.type == pygame.MOUSEBUTTONUP:
@@ -134,28 +108,70 @@ class FullscreenInterface(BaseInterface):
                     
             elif event.type == pygame.MOUSEMOTION:
                 if self.dragging:
-                    pos = pygame.mouse.get_pos()
+                    pos = event.pos if hasattr(event, 'pos') else pygame.mouse.get_pos()
                     self.handle_drag_motion(pos)
                     
         # Arrange videos initially if not positioned
         if not self.video_positions and self.current_batch_videos:
             self.arrange_videos_in_circle(self.arena_center, self.arena_radius)
+
+    def handle_double_click(self, pos):
+        """Override: play videos in OpenCV popup (match set-cover)."""
+        current_time = pygame.time.get_ticks()
+        handled = False
+        if current_time - self.last_click_time <= self.double_click_threshold:
+            for i, video_filename in enumerate(self.current_batch_videos):
+                video_name = Path(video_filename).stem
+                if video_name in self.video_positions:
+                    video_pos = self.video_positions[video_name]
+                    distance = ((pos[0] - video_pos[0])**2 + (pos[1] - video_pos[1])**2) ** 0.5
+                    if distance <= 40:
+                        self.video_clicked[video_name] = True
+                        video_path = self.experiment.get_video_path(video_filename)
+                        suffix = Path(video_path).suffix.lower()
+                        if suffix in {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}:
+                            # Non-blocking audio playback to keep UI responsive
+                            self.video_processor.play_audio_nonblocking(video_path)
+                        else:
+                            # OpenCV popup on top, 2x size, ESC/Space/q to close
+                            self.video_processor.play_video_threaded(video_path)
+                        handled = True
+                        break
+        self.last_click_time = current_time
+        return handled
             
     def show_instructions(self) -> None:
-        """Show fullscreen-optimized instructions."""
-        instructions = [
-            "Welcome to the video similarity arrangement experiment.",
-            "You will arrange videos based on their similarity in a circular arena.",
-            "First, you'll watch each video in the group.",
-            "Then, drag the video circles to arrange them by similarity.",
-            "Similar videos should be placed close together.",
-            "Dissimilar videos should be placed far apart.",
-            "Double-click any circle to replay its video.",
-            "All videos must be watched and placed within the white circle.",
-            "Click the 'Done' button when satisfied with your arrangement.",
-            "Press SPACE to continue, ESC to exit."
-        ]
-        
+        """Show fullscreen-optimized instructions (supports language/custom)."""
+        # Custom instructions take precedence if provided
+        if isinstance(getattr(self, "custom_instructions", None), list):
+            for instruction in self.custom_instructions:
+                self.show_instruction_screen(instruction)
+            return
+
+        lang = getattr(self.experiment, "language", "en")
+        if lang == "tr":
+            instructions = [
+                "Video benzerliği düzenleme deneyine hoş geldiniz.",
+                "Daire içinde videoları benzerliğe göre düzenleyeceksiniz.",
+                "Önce gruptaki videoları izleyin, ardından sürükleyip yerleştirin.",
+                "Benzer videoları yakın, farklı olanları uzak yerleştirin.",
+                "Her bir daireye çift tıklayarak videoyu tekrar oynatın.",
+                "Tüm videolar izlenmeli ve beyaz dairenin içinde kalmalıdır.",
+                "Memnun kaldığınızda 'Bitti'ye tıklayın.",
+                "Devam etmek için SPACE, çıkmak için ESC." 
+            ]
+        else:
+            instructions = [
+                "Welcome to the video similarity arrangement experiment.",
+                "Arrange videos by similarity inside the white circle.",
+                "First, watch each item; then drag circles to arrange them.",
+                "Place similar videos close together; dissimilar far apart.",
+                "Double-click any circle to replay its video.",
+                "All circles must be watched and remain inside the white circle.",
+                "Click 'Done' when you are satisfied.",
+                "Press SPACE to continue, ESC to exit."
+            ]
+
         for instruction in instructions:
             self.show_instruction_screen(instruction)
             

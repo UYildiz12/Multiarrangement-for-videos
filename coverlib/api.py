@@ -40,7 +40,14 @@ def generate_cover(
         from .cache import read_blocks_file
         blocks = read_blocks_file(path, v, k)
     else:
-        cache = Path(cache_dir) if cache_dir else Path("ljcr_cache")
+        if cache_dir:
+            cache = Path(cache_dir)
+        else:
+            try:
+                import multiarrangement
+                cache = Path(multiarrangement.__file__).parent / "ljcr_cache"
+            except Exception:
+                cache = Path("ljcr_cache")
         blocks = get_seed_blocks(v, k, cache, offline_first=True, offline_only=offline_only, fetcher=fetch_ljcr_cover)
 
     counts, _ = coverage_from_blocks(v, blocks)

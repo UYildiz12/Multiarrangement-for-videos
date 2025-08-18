@@ -58,7 +58,16 @@ def show_instructions_pygame(mode: str = "video", language: str = "en"):
         show_media = (mode == "video")
         if show_media and media and media.lower().endswith(('.mp4', '.mkv')):
             # Play full video in loop until SPACE is pressed
-            video_path = os.path.join('demovids', media) if not os.path.exists(media) else media
+            # Resolve instruction video path: prefer current file path, then ./demovids, then packaged demovids
+            if os.path.exists(media):
+                video_path = media
+            else:
+                local_demo = os.path.join('demovids', media)
+                if os.path.exists(local_demo):
+                    video_path = local_demo
+                else:
+                    pkg_demo = os.path.join(os.path.dirname(__file__), 'demovids', media)
+                    video_path = pkg_demo
             cap = cv2.VideoCapture(video_path)
             while waiting:
                 for event in pygame.event.get():
@@ -252,13 +261,20 @@ def create_audio_icon(height, width):
     import os
     
     # Try to load the audio icon image - first try the new icon, then fallback to old
-    audio_icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "test_audio_icon_new.png")
+    # Probe common packaged locations
+    base = os.path.dirname(__file__)
+    # Prefer the canonical Audio.png used by the set-cover UI, then fall back
+    candidates = [
+        os.path.join(base, "Audio.png"),
+        os.path.join(base, "test_audio_icon_new.png"),
+        os.path.join(base, "data", "Audio.png"),
+        os.path.join(base, "data", "test_audio_icon_new.png"),
+        os.path.join(os.path.dirname(base), "Audio.png"),
+        os.path.join(os.path.dirname(base), "test_audio_icon_new.png"),
+    ]
+    audio_icon_path = next((p for p in candidates if os.path.exists(p)), None)
     
-    # If new icon doesn't exist, try the old one
-    if not os.path.exists(audio_icon_path):
-        audio_icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Audio.png")
-    
-    if os.path.exists(audio_icon_path):
+    if audio_icon_path and os.path.exists(audio_icon_path):
         # Load the image
         icon_img = cv2.imread(audio_icon_path, cv2.IMREAD_COLOR)
         

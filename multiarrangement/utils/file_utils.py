@@ -112,19 +112,36 @@ def get_video_files(directory: Union[str, Path], extensions: List[str] = None) -
         List of Path objects for video files
     """
     if extensions is None:
-        extensions = ['.avi', '.mp4', '.mov', '.mkv', '.wmv', '.flv', '.webm']
+        # Broaden default support to include common containers/codecs often seen in datasets
+        extensions = [
+            '.avi', '.mp4', '.mov', '.mkv', '.wmv', '.flv', '.webm',
+            '.m4v', '.mpg', '.mpeg', '.ts', '.m2ts', '.mts', '.3gp', '.ogv'
+        ]
         
     directory = Path(directory)
     
     if not directory.exists():
         raise FileNotFoundError(f"Video directory not found: {directory}")
         
-    video_files = []
-    for ext in extensions:
-        video_files.extend(directory.glob(f"*{ext}"))
-        video_files.extend(directory.glob(f"*{ext.upper()}"))
-        
-    return sorted(video_files)
+    # Normalize extension set to lowercase to match case-insensitively
+    ext_set = {e.lower() for e in extensions}
+
+    # Iterate entries once and filter by suffix to avoid duplicates on case-insensitive filesystems
+    seen: set = set()
+    video_files: List[Path] = []
+    for p in directory.iterdir():
+        if not p.is_file():
+            continue
+        if p.suffix.lower() in ext_set:
+            # Use lowercase absolute path as a stable dedup key
+            key = str(p.resolve()).lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            video_files.append(p)
+
+    # Sort by name for stable ordering
+    return sorted(video_files, key=lambda x: x.name.lower())
 
 
 def validate_batch_configuration(batches: List[List[int]], num_videos: int) -> None:

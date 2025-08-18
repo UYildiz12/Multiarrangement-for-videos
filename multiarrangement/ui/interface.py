@@ -36,6 +36,7 @@ class BaseInterface(ABC):
         self.current_batch_videos = []
         self.video_positions = {}
         self.video_clicked = {}
+        self.video_thumbnails = {}
         self.dragging = False
         self.dragged_video = None
         self.drag_offset = (0, 0)
@@ -57,6 +58,8 @@ class BaseInterface(ABC):
         # Double-click detection
         self.last_click_time = 0
         self.double_click_threshold = 350  # milliseconds
+        # Optional custom instructions (list of strings); None -> show defaults
+        self.custom_instructions = None
         
     @abstractmethod
     def setup_display(self) -> None:
@@ -80,6 +83,20 @@ class BaseInterface(ABC):
             mode: "video" or "audio"
             language: "en" (English) or "tr" (Turkish)
         """
+        # Prefer experiment-provided mode/language when available
+        try:
+            mode = getattr(self.experiment, "mode", mode)
+        except Exception:
+            pass
+        try:
+            language = getattr(self.experiment, "language", language)
+        except Exception:
+            pass
+        # If custom instructions supplied, show them and return
+        if isinstance(self.custom_instructions, list):
+            for instruction in self.custom_instructions:
+                self.show_instruction_screen(instruction)
+            return
         if language == "tr":
             if mode == "video":
                 instructions = [
@@ -188,6 +205,56 @@ class BaseInterface(ABC):
         for video in self.current_batch_videos:
             video_name = Path(video).stem
             self.video_clicked[video_name] = False
+        
+        # Precompute and cache circular thumbnail surfaces once per batch to avoid per-frame decoding
+        self.video_thumbnails = {}
+        for video in self.current_batch_videos:
+            video_name = Path(video).stem
+            try:
+                video_path = self.experiment.get_video_path(video)
+                suffix = Path(video_path).suffix.lower()
+                if suffix in {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}:
+                    # Use a robust search for the packaged audio icon. Prefer icons bundled
+                    # inside the installed package; fallback to repo root during dev.
+                    diameter = 70
+                    surface = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
+                    root = Path(__file__).parent.parent
+                    # Candidate locations (installed package and dev repo)
+                    candidates = [
+                        root / "Audio.png",
+                        root / "test_audio_icon_new.png",
+                        root / "data" / "Audio.png",
+                        root / "data" / "test_audio_icon_new.png",
+                        root.parent / "Audio.png",  # repo root (dev)
+                        root.parent / "test_audio_icon_new.png",  # repo root (dev)
+                    ]
+                    icon_path = next((p for p in candidates if p.exists()), None)
+                    try:
+                        if icon_path is None:
+                            raise FileNotFoundError("Audio icon not found in package")
+                        icon = pygame.image.load(str(icon_path))
+                        icon = pygame.transform.smoothscale(icon, (diameter, diameter))
+                        surface.blit(icon, (0, 0))
+                    except Exception:
+                        # Draw simple placeholder if icon missing
+                        pygame.draw.circle(surface, self.GRAY, (diameter//2, diameter//2), diameter//2)
+                    try:
+                        surface = surface.convert_alpha()
+                    except Exception:
+                        pass
+                    self.video_thumbnails[video_name] = surface
+                else:
+                    # Video thumbnail from first frame
+                    first_frame = self.video_processor.get_first_frame(video_path)
+                    surface = self.video_processor.create_circular_frame_surface(first_frame, 35)
+                    try:
+                        surface = surface.convert_alpha()
+                    except Exception:
+                        pass
+                    self.video_thumbnails[video_name] = surface
+            except Exception:
+                # Cache None to indicate fallback drawing
+                self.video_thumbnails[video_name] = None
             
     def arrange_videos_in_circle(self, center: Tuple[int, int], radius: int) -> None:
         """Arrange video thumbnails in a circle around the center."""
@@ -203,27 +270,42 @@ class BaseInterface(ABC):
             
             self.video_positions[video_name] = (x, y)
             
-    def handle_double_click(self, pos: Tuple[int, int]) -> None:
-        """Handle double-click events to play videos."""
+    def handle_double_click(self, pos: Tuple[int, int]) -> bool:
+        """Handle double-click events to play videos.
+
+        Returns True if a double-click was detected and handled.
+        """
         current_time = pygame.time.get_ticks()
-        
+        handled = False
         if current_time - self.last_click_time <= self.double_click_threshold:
             # Find which video was clicked
             for i, video_filename in enumerate(self.current_batch_videos):
                 video_name = Path(video_filename).stem
-                
                 if video_name in self.video_positions:
                     video_pos = self.video_positions[video_name]
                     distance = math.sqrt((pos[0] - video_pos[0])**2 + (pos[1] - video_pos[1])**2)
-                    
                     if distance <= 40:  # Within circle radius
                         # Mark as clicked and play video
                         self.video_clicked[video_name] = True
                         video_path = self.experiment.get_video_path(video_filename)
-                        self.video_processor.play_video_threaded(video_path)
+                        # Detect audio vs video by extension
+                        suffix = Path(video_path).suffix.lower()
+                        if suffix in {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}:
+                            # Play audio without blocking the UI
+                            self.video_processor.play_audio_nonblocking(video_path)
+                        else:
+                            # Play video within current Pygame screen (no minimize)
+                            self.video_processor.display_video_in_pygame(
+                                video_path,
+                                self.screen,
+                                (0, 0),
+                                self.screen.get_size()
+                            )
+                        handled = True
                         break
-                        
+        # Update last click timestamp after processing
         self.last_click_time = current_time
+        return handled
         
     def handle_drag_start(self, pos: Tuple[int, int]) -> None:
         """Handle start of dragging operation."""
@@ -290,17 +372,13 @@ class BaseInterface(ABC):
                 # Green if clicked AND in valid position, red otherwise
                 color = self.GREEN if (self.video_clicked[video_name] and in_valid_position) else self.RED
                 
-                # Draw video thumbnail if available
-                try:
-                    video_path = self.experiment.get_video_path(video_filename)
-                    first_frame = self.video_processor.get_first_frame(video_path)
-                    frame_surface = self.video_processor.create_circular_frame_surface(first_frame, 35)
-                    
+                # Draw cached video thumbnail if available; else fallback
+                frame_surface = self.video_thumbnails.get(video_name)
+                if frame_surface is not None:
                     frame_rect = frame_surface.get_rect()
                     frame_rect.center = (int(pos[0]), int(pos[1]))
                     self.screen.blit(frame_surface, frame_rect)
-                    
-                except Exception as e:
+                else:
                     # Fallback: draw a simple circle with text
                     pygame.draw.circle(self.screen, self.GRAY, (int(pos[0]), int(pos[1])), 35)
                     
@@ -389,6 +467,7 @@ class BaseInterface(ABC):
     def run(self) -> None:
         """Main interface loop."""
         self.setup_display()
+        # Show default or custom instructions
         self.show_instructions()
         self.load_current_batch()
         
@@ -469,7 +548,7 @@ class MultiarrangementInterface(BaseInterface):
                     
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
-                    pos = pygame.mouse.get_pos()
+                    pos = event.pos if hasattr(event, 'pos') else pygame.mouse.get_pos()
                     
                     # Check done button
                     if hasattr(self, 'done_button_rect') and self.done_button_rect.collidepoint(pos):
@@ -478,10 +557,10 @@ class MultiarrangementInterface(BaseInterface):
                         continue
                     
                     # Handle double-click for video playback
-                    self.handle_double_click(pos)
+                    handled = self.handle_double_click(pos)
                     
                     # Start dragging if not double-click
-                    if pygame.time.get_ticks() - self.last_click_time > self.double_click_threshold:
+                    if not handled:
                         self.handle_drag_start(pos)
                         
             elif event.type == pygame.MOUSEBUTTONUP:
@@ -490,7 +569,7 @@ class MultiarrangementInterface(BaseInterface):
                     
             elif event.type == pygame.MOUSEMOTION:
                 if self.dragging:
-                    pos = pygame.mouse.get_pos()
+                    pos = event.pos if hasattr(event, 'pos') else pygame.mouse.get_pos()
                     self.handle_drag_motion(pos)
                     
         # Arrange videos initially if not positioned
