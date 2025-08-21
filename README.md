@@ -12,14 +12,22 @@ Two complementary experiment paradigms are supported:
 - Set‑Cover (fixed batches): Precompute batches that efficiently cover pairs; run them in a controlled sequence.
 - Adaptive LTW (Lift‑the‑Weakest): After each trial, select the next subset that maximizes evidence gain for the weakest‑evidence pairs, with optional inverse‑MDS refinement.
 
-The package ships with windowed and fullscreen UIs, packaged demo media (15 videos and 15 audios), instruction videos, bundled LJCR covering‑design cache (offline‑first), CLIs, and Python APIs.
+The package ships with windowed and fullscreen UIs, packaged demo media (15 videos and 15 audios), instruction videos, bundled LJCR covering‑design cache (offline‑first), and Python APIs.
+
+## Quick Demo
+
+<video src="demovids/similar.mp4" width="640" controls loop muted playsinline>
+Your browser does not support embedded videos. 
+You can <a href="demovids/similar.mp4">download the demo MP4 here</a>.
+</video>
+
+
 
 ## What’s Included
 
 - Package code: `multiarrangement/*` (UI, core, adaptive LTW), `coverlib/*` (covering‑design tools)
 - Demo media (installed): `multiarrangement/15videos/*`, `multiarrangement/15audios/*`, `multiarrangement/sample_audio/*`, and `multiarrangement/demovids/*`
 - LJCR cache (installed): `multiarrangement/ljcr_cache/*.txt` used by covering‑design CLIs by default (offline‑first)
-- Source only (not in wheel): `24videos/`, `58videos/`, tests, legacy scripts, large examples
 
 ## Install
 
@@ -28,102 +36,100 @@ From source:
 ```bash
 git clone https://github.com/UYildiz12/Multiarrangement-for-videos.git
 cd Multiarrangement-for-videos
-pip install -e .[coverlib]
+pip install multiarrangement
 ```
 
-Requirements: Python 3.8+, NumPy ≥ 1.20, pandas ≥ 1.3, pygame ≥ 2.0, opencv‑python ≥ 4.5, openpyxl ≥ 3.0. The optional extra `[coverlib]` installs `requests/urllib3` for the `covergen` CLI.
+Requirements: Python 3.8+, NumPy ≥ 1.20, pandas ≥ 1.3, pygame ≥ 2.0, opencv‑python ≥ 4.5, openpyxl ≥ 3.0.
 
-## Demos
 
-- Set‑cover (fixed batches):
 
-```bash
-multiarrangement-demo
-```
 
-- Adaptive LTW (Lift‑the‑Weakest):
-
-```bash
-multiarrangement-demo-adaptive
-```
-
-Both demos use the packaged `15videos` and show default instruction screens (with bundled instruction clips).
-
-## CLI Usage
-
-- Windowed experiment (set‑cover):
-
-```bash
-multiarrangement --video-dir ./videos --batch-file ./batches.txt --participant-id P001
-```
-
-- Fullscreen experiment (set‑cover):
-
-```bash
-multiarrangement-fullscreen --video-dir ./videos --batch-file ./batches.txt --participant-id P001
-```
-
-- Adaptive LTW experiment:
-
-```bash
-multiarrangement-adaptive \
-  --input-dir ./videos \
-  --participant-id P001 \
-  --fullscreen \
-  --evidence-threshold 0.35 \
-  --min-subset-size 4 \
-  --max-subset-size 6 \
-  --use-inverse-mds
-```
-
-- Batch generation (set‑cover):
-
-```bash
-multiarrangement-batch-generator 24 8 --algorithm hybrid --validate --output-file batches_24x8.txt
-```
-
-- Covering‑design optimizers (offline‑first using the bundled cache):
-
-```bash
-# Fixed k
-optimize-cover --v 24 --k 8 --offline-only --outfile cover_v24_k8.txt
-
-# Flexible shrink‑only (min size 3)
-optimize-cover-flex --v 24 --k 8 --min-k-size 3 --offline-only --outfile cover_v24_var.txt
-
-# Prefetch more LJCR cache entries
-optimize-cover --bulk-download --v-min 10 --v-max 40 --k-min 3 --k-max 8
-```
-
-Notes:
-
-- If Tk is not available, pass `--video-dir`, `--batch-file`, and `--participant-id` rather than using GUI dialogs.
-- Both cover CLIs default `--cache-dir` to the packaged cache under `multiarrangement/ljcr_cache` and can run fully offline for cached (v,k).
-
+ 
 ## Python API
 
-### Set‑Cover Experiment
+
+Set‑cover Demo (fixed batches):
 
 ```python
 import multiarrangement as ma
 
-# Build batches for 24 items, size 8
-batches = ma.create_batches(24, 8)
+ma.demo()
+
+```
+
+Adaptive LTW Demo (Lift‑the‑Weakest):
+
+```python
+import multiarrangement as ma
+
+ma.demo_adaptive()
+
+```
+
+Both demos use the packaged `15videos` and show default instruction screens (with bundled instruction clips).
+
+## The simplest way to use Multiarrangement is with the minimum arguments
+```python
+
+import multiarrangement as ma
+
+input_dir = "path/to/input/directory"
+
+output_dir = "path/to/output/directory"
+
+batches = ma.create_batches(ma.auto_detect_stimuli(input_dir), 8)
+# For variable-size batches instead, set flex=True:
+# batches = ma.create_batches(ma.auto_detect_stimuli(input_dir), 8, flex=True)
+results = ma.multiarrangement(input_dir, batches, output_dir)
+results.vis()
+results.savefig(f"{output_dir}/rdm_setcover.png", title="Set‑Cover RDM")
+
+```
+
+Or if you'd like to use the LTW algorithm
+
+```python
+
+import multiarrangement as ma
+
+input_dir = "path/to/input/directory"
+output_dir = "path/to/output/directory"
+
+results = ma.multiarrangement_adaptive(input_dir, output_dir)
+results.vis()
+results.savefig(f"{output_dir}/rdm_adaptive.png", title="Adaptive LTW RDM")
+
+
+```
+
+Results file will be available via .xlsx and .csv versions in "datetime.xlsx/csv" format at output directory.
+
+### Set‑Cover Experiment (More detailed)
+
+```python
+import multiarrangement as ma
+
+# Build batches for 24 items, size 8 (hybrid by default)
+# Fixed-size batches (flex=False)
+batches = ma.create_batches(24, 8, seed=42, flex=False)
+# Or variable-size batches (shrink-only):
+# batches = ma.create_batches(24, 8, seed=42, flex=True)
 
 # Run experiment (English, windowed)
 results = ma.multiarrangement(
-    input_dir="./videos",
+    input_dir="./videos",   #Where your videos or audios are
     batches=batches,
-    output_dir="./results",
+    output_dir="./results", #Where your results will appear 
+    show_first_frames=True,
     fullscreen=False,
-    language="en",
+    language="en", # Or tr if you'd like Turkish instructions
     instructions="default"  # or None, or ["Custom", "lines"]
 )
 results.vis(title="Set‑Cover RDM")
 results.savefig("results/rdm_setcover.png", title="Set‑Cover RDM")
 ```
 
-### Adaptive LTW Experiment (with optional inverse‑MDS)
+### Adaptive LTW Experiment  (More detailed) 
 
 ```python
 import multiarrangement as ma
@@ -131,36 +137,39 @@ import multiarrangement as ma
 results = ma.multiarrangement_adaptive(
     input_dir="./videos",
     output_dir="./results",
+    participant_id="participant",
     fullscreen=True,
+    language="en",
     evidence_threshold=0.35,   # stop when min pair evidence ≥ threshold
+    utility_exponent=10.0,
+    time_limit_minutes=None,
     min_subset_size=4,
     max_subset_size=6,
     use_inverse_mds=True,      # optional inverse‑MDS refinement
     inverse_mds_max_iter=15,
     inverse_mds_step_c=0.3,
     inverse_mds_tol=1e-4,
+    instructions="default",
 )
 results.vis(title="Adaptive LTW RDM")
 results.savefig("results/rdm_adaptive.png", title="Adaptive LTW RDM")
+
+```
 
 ### Run the examples
 
 We include four examples for both paradigms (video/audio). They save heatmaps to `./results`.
 
-- From an installed package (recommended): run the in‑package example modules
-  - `python -m multiarrangement.examples.setcover_video`
-  - `python -m multiarrangement.examples.setcover_audio`
-  - `python -m multiarrangement.examples.ltw_video`
-  - `python -m multiarrangement.examples.ltw_audio`
-  - These examples auto‑resolve the packaged media and create `./results` if missing.
+```bash
+# Set-cover examples
+python -m multiarrangement.examples.setcover_video
+python -m multiarrangement.examples.setcover_audio
 
-- From the repo root (developer use): run the top‑level scripts
-  - `python setcover_video.py`
-  - `python setcover_audio.py`
-  - `python ltw_video.py`
-  - `python ltw_audio.py`
-  - These scripts assume you are in the repo root where `15videos/` and `15audios/` exist.
+# Adaptive LTW examples  
+python -m multiarrangement.examples.ltw_video
+python -m multiarrangement.examples.ltw_audio
 ```
+These examples auto‑resolve the packaged media and create `./results` if missing.
 
 ### Custom Instructions (both paradigms)
 
@@ -214,15 +223,12 @@ Key ideas:
 ## Troubleshooting
 
 - Pygame/OpenCV: on minimal Linux, install SDL2 and video codecs via your package manager.
-- Tk missing: supply `--video-dir`, `--batch-file`, and `--participant-id` on the command line.
 - Audio playback: Windows uses Windows Media Player (fallback), macOS `afplay`, Linux `paplay`/`aplay`.
 
 ## References
 
 - Inverse MDS (adaptive refinement):
   - Kriegeskorte, N., & Mur, M. (2012). Inverse MDS: optimizing the stimulus arrangements for pairwise dissimilarity measures. Frontiers in Psychology, 3, 245. https://doi.org/10.3389/fpsyg.2012.00245
-- Representational similarity analysis (context):
-  - Kriegeskorte, N., Mur, M., & Bandettini, P. (2008). Representational similarity analysis—connecting the branches of systems neuroscience. Frontiers in Systems Neuroscience, 2, 4.
 - Demo video dataset:
   - Urgen, B. A., Nizamoğlu, H., Eroğlu, A., & Orban, G. A. (2023). A large video set of natural human actions for visual and cognitive neuroscience studies and its validation with fMRI. Brain Sciences, 13(1), 61. https://doi.org/10.3390/brainsci13010061
 

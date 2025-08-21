@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multiarrangement"
-version = "0.1.0"
-description = "A psychological experiment tool for video similarity arrangement tasks"
+version = "0.1.1"
+description = "Video & audio similarity arrangement toolkit (set-cover and adaptive LTW)"
 authors = [{ name = "Umur Yıldız" }]
 requires-python = ">=3.8"
 readme = "README.md"
@@ -14,7 +14,7 @@ keywords = ["psychology", "experiment", "video", "similarity", "multiarrangement
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
-  "Topic :: Scientific/Engineering :: Psychology",
+  "Topic :: Scientific/Engineering",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.8",
   "Programming Language :: Python :: 3.9",

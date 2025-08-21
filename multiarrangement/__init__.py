@@ -1,8 +1,9 @@
 """
-Multiarrangement for Videos - A psychological experiment tool for video similarity arrangement.
+Multiarrangement — Video & Audio Similarity Arrangement Toolkit.
 
-This package provides tools for conducting multiarrangement experiments where participants
-arrange videos based on perceived similarity in a circular arena interface.
+This package provides tools for collecting human similarity judgements by
+arranging stimuli (videos or audio) in a circular arena and converting the
+placements into a full Representational Dissimilarity Matrix (RDM).
 
 Demo Videos Source:
 The demo videos included in this package are derived from:
@@ -11,7 +12,7 @@ for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. Brai
 13(1), 61. https://doi.org/10.3390/brainsci13010061
 """
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 __author__ = "Multiarrangement Team"
 
 from .core.experiment import MultiarrangementExperiment
