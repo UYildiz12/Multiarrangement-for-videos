@@ -19,7 +19,6 @@ The package ships with windowed and fullscreen UIs, packaged demo media (15 vide
 - Package code: `multiarrangement/*` (UI, core, adaptive LTW), `coverlib/*` (covering‑design tools)
 - Demo media (installed): `multiarrangement/15videos/*`, `multiarrangement/15audios/*`, `multiarrangement/sample_audio/*`, and `multiarrangement/demovids/*`
 - LJCR cache (installed): `multiarrangement/ljcr_cache/*.txt` used by covering‑design CLIs by default (offline‑first)
-- Source only (not in wheel): `24videos/`, `58videos/`, tests, legacy scripts, large examples
 
 ## Install
 
