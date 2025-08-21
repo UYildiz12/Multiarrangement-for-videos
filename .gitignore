@@ -43,5 +43,12 @@ Thumbs.db
 # *.mov
 # *.wmv
 
+# Document and executable files
+*.pdf
+*.exe
+
+# Demo media (allow demo GIF)
+# *.gif  # commented out to allow demo GIF
+
 # Participant data (optional, uncomment if you want to exclude real participant data)
 # Participantdata/ 

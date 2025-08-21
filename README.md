@@ -16,10 +16,9 @@ The package ships with windowed and fullscreen UIs, packaged demo media (15 vide
 
 ## Quick Demo
 
-<video src="demovids/similar.mp4" width="640" controls loop muted playsinline>
-Your browser does not support embedded videos. 
-You can <a href="demovids/similar.mp4">download the demo MP4 here</a>.
-</video>
+![Multiarrangement Demo](similar_demo.gif)
+
+*Demo showing the Multiarrangement interface for collecting similarity judgments*
 
 
 
