@@ -30,11 +30,7 @@ The package ships with windowed and fullscreen UIs, packaged demo media (15 vide
 
 ## Install
 
-From source:
-
 ```bash
-git clone https://github.com/UYildiz12/Multiarrangement-for-videos.git
-cd Multiarrangement-for-videos
 pip install multiarrangement
 ```
 
