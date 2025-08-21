@@ -221,8 +221,6 @@ Key ideas:
 
 - Inverse MDS (adaptive refinement):
   - Kriegeskorte, N., & Mur, M. (2012). Inverse MDS: optimizing the stimulus arrangements for pairwise dissimilarity measures. Frontiers in Psychology, 3, 245. https://doi.org/10.3389/fpsyg.2012.00245
-- Representational similarity analysis (context):
-  - Kriegeskorte, N., Mur, M., & Bandettini, P. (2008). Representational similarity analysis—connecting the branches of systems neuroscience. Frontiers in Systems Neuroscience, 2, 4.
 - Demo video dataset:
   - Urgen, B. A., Nizamoğlu, H., Eroğlu, A., & Orban, G. A. (2023). A large video set of natural human actions for visual and cognitive neuroscience studies and its validation with fMRI. Brain Sciences, 13(1), 61. https://doi.org/10.3390/brainsci13010061
 
