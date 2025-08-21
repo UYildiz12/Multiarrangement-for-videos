@@ -30,6 +30,12 @@ The package ships with windowed and fullscreen UIs, packaged demo media (15 vide
 
 ## Install
 
+### Using uv 
+```bash
+uv pip install multiarrangement
+```
+
+### Using pip
 ```bash
 pip install multiarrangement
 ```
