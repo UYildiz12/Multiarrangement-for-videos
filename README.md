@@ -12,7 +12,7 @@ Two complementary experiment paradigms are supported:
 - Set‑Cover (fixed batches): Precompute batches that efficiently cover pairs; run them in a controlled sequence.
 - Adaptive LTW (Lift‑the‑Weakest): After each trial, select the next subset that maximizes evidence gain for the weakest‑evidence pairs, with optional inverse‑MDS refinement.
 
-The package ships with windowed and fullscreen UIs, packaged demo media (15 videos and 15 audios), instruction videos, bundled LJCR covering‑design cache (offline‑first), and Python APIs.
+The package ships with windowed and fullscreen UIs, packaged demo media (15 videos and 15 audios), instruction videos, bundled LJCR covering‑design cache, and Python APIs.
 
 ## Quick Demo
 
