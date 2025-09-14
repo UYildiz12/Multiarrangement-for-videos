@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multiarrangement"
-version = "0.1.1"
+version = "0.1.2"
 description = "Video & audio similarity arrangement toolkit (set-cover and adaptive LTW)"
 authors = [{ name = "Umur Yıldız" }]
 requires-python = ">=3.8"
@@ -77,25 +77,8 @@ include = ["multiarrangement*", "coverlib*"]
   "sample_audio/*",
   "Audio.png",
   "test_audio_icon_new.png",
-  "examples/*"
+  "examples/*",
+  "ljcr_cache/*.txt",
+  "ExampleData/*"
 ]
 "*" = ["*.txt", "*.md"]
-
-[tool.setuptools.data-files]
-"multiarrangement/ljcr_cache" = [
-  "ljcr_cache/*.txt"
-]
-# Install demo assets from top-level into the package tree
-"multiarrangement/15videos" = [
-  "15videos/*.avi", "15videos/*.mp4", "15videos/*.mov", "15videos/*.mkv", "15videos/*.wmv"
-]
-"multiarrangement/demovids" = [
-  "demovids/*.avi", "demovids/*.mp4", "demovids/*.mov", "demovids/*.mkv", "demovids/*.wmv"
-]
-"multiarrangement/15audios" = [
-  "15audios/*.mp3", "15audios/*.wav", "15audios/*.ogg", "15audios/*.flac", "15audios/*.aac", "15audios/*.m4a"
-]
-"multiarrangement/sample_audio" = [
-  "sample_audio/*.mp3", "sample_audio/*.wav", "sample_audio/*.ogg", "sample_audio/*.flac", "sample_audio/*.aac", "sample_audio/*.m4a"
-]
-# No global data-files mapping; demos are bundled as package data under multiarrangement/

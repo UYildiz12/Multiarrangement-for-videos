@@ -1,25 +1,14 @@
 from pathlib import Path
 import multiarrangement as ma
-
-
-def _resolve_media_dir(name: str) -> str:
-    base = Path(ma.__file__).parent
-    p = base / name
-    if p.exists():
-        return str(p)
-    for root in (base.parent, Path.cwd()):
-        q = root / name
-        if q.exists():
-            return str(q)
-    raise FileNotFoundError(f"Media '{name}' not found under {base}, {base.parent}, or {Path.cwd()}")
+from multiarrangement.utils.file_utils import resolve_packaged_dir
 
 
 def main() -> None:
     # Prefer packaged 15audios; fallback to sample_audio
     try:
-        input_dir = _resolve_media_dir("15audios")
+        input_dir = str(resolve_packaged_dir("15audios"))
     except FileNotFoundError:
-        input_dir = _resolve_media_dir("sample_audio")
+        input_dir = str(resolve_packaged_dir("sample_audio"))
 
     n = ma.auto_detect_stimuli(input_dir)
     k = 6 if n >= 6 else max(3, n)

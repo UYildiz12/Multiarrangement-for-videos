@@ -53,21 +53,23 @@ def show_instructions_pygame(mode: str = "video", language: str = "en"):
     clock = pygame.time.Clock()
     import textwrap
     import cv2
+    from .utils.file_utils import resolve_packaged_file, resolve_packaged_dir
     for instruction, media in instructions:
         waiting = True
         show_media = (mode == "video")
         if show_media and media and media.lower().endswith(('.mp4', '.mkv')):
             # Play full video in loop until SPACE is pressed
-            # Resolve instruction video path: prefer current file path, then ./demovids, then packaged demovids
-            if os.path.exists(media):
-                video_path = media
-            else:
-                local_demo = os.path.join('demovids', media)
-                if os.path.exists(local_demo):
-                    video_path = local_demo
+            # Resolve instruction video path robustly
+            try:
+                video_path = str(resolve_packaged_file('demovids', media))
+            except FileNotFoundError:
+                # Final fallback: relative paths if running from repo
+                if os.path.exists(media):
+                    video_path = media
+                elif os.path.exists(os.path.join('demovids', media)):
+                    video_path = os.path.join('demovids', media)
                 else:
-                    pkg_demo = os.path.join(os.path.dirname(__file__), 'demovids', media)
-                    video_path = pkg_demo
+                    video_path = os.path.join(os.path.dirname(__file__), 'demovids', media)
             cap = cv2.VideoCapture(video_path)
             while waiting:
                 for event in pygame.event.get():
@@ -119,14 +121,11 @@ def show_instructions_pygame(mode: str = "video", language: str = "en"):
                 # Display image if available (only for video mode)
                 if show_media and media and media.lower().endswith(('.png', '.jpg', '.jpeg')):
                     try:
-                        # Try to load image from package data directory first
-                        import multiarrangement.data
-                        data_dir = os.path.dirname(multiarrangement.data.__file__)
-                        img_path = os.path.join(data_dir, media)
-                        
-                        # Fallback to current directory if not found in package data
+                        # Resolve packaged image path (robust to data_files placement)
+                        img_path = str(resolve_packaged_file('data', media))
                         if not os.path.exists(img_path):
-                            img_path = media
+                            # Try demovids as some images may live next to videos
+                            img_path = str(resolve_packaged_file('demovids', media))
                             
                         img = cv2.imread(img_path)
                         if img is not None:

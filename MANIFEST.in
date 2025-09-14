@@ -13,16 +13,16 @@ recursive-include multiarrangement/data *.xlsx
 recursive-include multiarrangement/data *.png *.jpg *.jpeg *.gif
 recursive-include multiarrangement/data *.mp4 *.avi *.mov *.mkv *.wmv
 
-# Include demo videos if present
-recursive-include demovids *.mp4 *.avi *.mov *.mkv *.wmv
+# Include demo videos from inside package
+recursive-include multiarrangement/demovids *.mp4 *.avi *.mov *.mkv *.wmv
 
-# Include demo video folders (exclude 58videos to keep package size reasonable)
-recursive-include 15videos *.avi *.mp4 *.mov *.mkv *.wmv
-recursive-include 24videos *.avi *.mp4 *.mov *.mkv *.wmv
-recursive-include 15audios *.mp3 *.wav *.ogg *.flac *.aac *.m4a
+# Include demo media folders inside package (exclude 58videos to keep size reasonable)
+recursive-include multiarrangement/15videos *.avi *.mp4 *.mov *.mkv *.wmv
+recursive-include multiarrangement/15audios *.mp3 *.wav *.ogg *.flac *.aac *.m4a
+recursive-include multiarrangement/sample_audio *.mp3 *.wav *.ogg *.flac *.aac *.m4a
 
 # Include example data
-recursive-include ExampleData *.xlsx *.csv
+recursive-include multiarrangement/ExampleData *.xlsx *.csv
 
 # Include standalone scripts for backward compatibility
 include *.py
@@ -34,5 +34,5 @@ global-exclude .git*
 global-exclude *.so
 global-exclude *.dylib
 global-exclude *.dll
-recursive-include ljcr_cache *.txt
+recursive-include multiarrangement/ljcr_cache *.txt
 prune output

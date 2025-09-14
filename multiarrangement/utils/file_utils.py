@@ -5,7 +5,8 @@ File utilities for multiarrangement experiments.
 import os
 import re
 from pathlib import Path
-from typing import List, Union
+from typing import List, Union, Optional
+import site
 
 
 def get_resource_path(filename: str) -> Path:
@@ -37,6 +38,79 @@ def get_resource_path(filename: str) -> Path:
         return script_path
         
     raise FileNotFoundError(f"Could not find resource file: {filename}")
+
+
+def _iter_site_package_candidates(subdir: Optional[str] = None) -> List[Path]:
+    """Yield candidate paths under site-packages that may contain our data.
+
+    We search both global and user site-packages. If ``subdir`` is provided,
+    we append it under the ``multiarrangement`` package directory.
+    """
+    candidates: List[Path] = []
+    try:
+        sp = list(site.getsitepackages())
+    except Exception:
+        sp = []
+    try:
+        usp = site.getusersitepackages()
+        if usp:
+            sp.append(usp)
+    except Exception:
+        pass
+    for base in sp:
+        p = Path(base) / "multiarrangement"
+        if subdir:
+            p = p / subdir
+        candidates.append(p)
+    return candidates
+
+
+def resolve_packaged_dir(name: str) -> Path:
+    """Resolve a packaged data directory robustly.
+
+    Search order:
+    - Inside the installed package: ``<pkg>/name``
+    - Current working directory: ``./name``
+    - Site-packages fallbacks: ``<site>/multiarrangement/name``
+
+    Returns the first existing directory with at least one file.
+    Raises FileNotFoundError if not found.
+    """
+    # 1) Package directory
+    pkg_root = Path(__file__).parent.parent  # multiarrangement/
+    candidates: List[Path] = [pkg_root / name, Path.cwd() / name]
+    candidates.extend(_iter_site_package_candidates(subdir=name))
+
+    for p in candidates:
+        try:
+            if p.exists() and any(p.iterdir()):
+                return p
+        except Exception:
+            # Ignore permission or filesystem errors
+            continue
+
+    raise FileNotFoundError(f"Could not locate packaged directory '{name}'. Searched: "
+                            f"{', '.join(str(c) for c in candidates)}")
+
+
+def resolve_packaged_file(subdir: str, filename: str) -> Path:
+    """Resolve a file within a packaged data subdirectory.
+
+    Tries the same locations as ``resolve_packaged_dir``. Returns a Path that exists.
+    Raises FileNotFoundError if not found.
+    """
+    # Assemble candidate directories and check for the file
+    dirs = [
+        Path(__file__).parent.parent / subdir,
+        Path.cwd() / subdir,
+        *_iter_site_package_candidates(subdir=subdir),
+    ]
+    for d in dirs:
+        p = d / filename
+        if p.exists():
+            return p
+    raise FileNotFoundError(f"Could not locate '{filename}' under '{subdir}'. Searched: "
+                            f"{', '.join(str(d) for d in dirs)}")
 
 
 def load_batches(batch_file: Union[str, Path]) -> List[List[int]]:

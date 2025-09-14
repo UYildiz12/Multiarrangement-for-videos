@@ -12,7 +12,7 @@ for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. Brai
 13(1), 61. https://doi.org/10.3390/brainsci13010061
 """
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __author__ = "Multiarrangement Team"
 
 from .core.experiment import MultiarrangementExperiment
@@ -107,6 +107,7 @@ def _create_flexible_batches(n_videos: int, batch_size: int, mink: int, seed: in
     import subprocess
     import tempfile
     import os
+    from .utils.file_utils import resolve_packaged_dir
     from pathlib import Path
     
     # Try to find optimize_cover_flex.py in multiple locations
@@ -320,14 +321,13 @@ def demo():
     print("🎬 Multiarrangement Demo - 15 videos, batch size 6")
     print("=" * 50)
     
-    # Resolve demo media: prefer local ./15videos, else packaged under multiarrangement/15videos
-    local_dir = os.path.join(os.getcwd(), "15videos")
-    pkg_dir = os.path.join(os.path.dirname(__file__), "15videos")
-    input_dir = local_dir if os.path.exists(local_dir) else pkg_dir
-    if not os.path.exists(input_dir):
+    # Resolve demo media robustly (handles wheels, sdists, and data_files placement)
+    try:
+        input_dir = str(resolve_packaged_dir("15videos"))
+    except FileNotFoundError:
         raise FileNotFoundError(
-            "Demo media not found. Place a '15videos' folder next to your working directory, "
-            "or install the package with demo media included."
+            "Demo media not found. Ensure the package was installed with demo media, "
+            "or place a '15videos' folder next to your working directory."
         )
     
     # Auto-detect videos
@@ -385,15 +385,9 @@ def demo_adaptive():
     print("🎬 Adaptive Multiarrangement Demo (LTW) - 15 videos")
     print("=" * 50)
 
-    # Resolve demo media: prefer local ./15videos, else packaged under multiarrangement/15videos
-    local_dir = os.path.join(os.getcwd(), "15videos")
-    pkg_dir = os.path.join(os.path.dirname(__file__), "15videos")
-    input_dir = local_dir if os.path.exists(local_dir) else pkg_dir
-    if not os.path.exists(input_dir):
-        raise FileNotFoundError(
-            "Demo media not found. Place a '15videos' folder next to your working directory, "
-            "or install the package with demo media included."
-        )
+    # Resolve demo media robustly
+    from .utils.file_utils import resolve_packaged_dir
+    input_dir = str(resolve_packaged_dir("15videos"))
 
     # Save to current directory
     output_dir = "."

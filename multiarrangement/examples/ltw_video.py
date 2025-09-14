@@ -1,21 +1,10 @@
 from pathlib import Path
 import multiarrangement as ma
-
-
-def _resolve_media_dir(name: str) -> str:
-    base = Path(ma.__file__).parent
-    p = base / name
-    if p.exists():
-        return str(p)
-    for root in (base.parent, Path.cwd()):
-        q = root / name
-        if q.exists():
-            return str(q)
-    raise FileNotFoundError(f"Media '{name}' not found under {base}, {base.parent}, or {Path.cwd()}")
+from multiarrangement.utils.file_utils import resolve_packaged_dir
 
 
 def main() -> None:
-    input_dir = _resolve_media_dir("15videos")
+    input_dir = str(resolve_packaged_dir("15videos"))
     Path("results").mkdir(exist_ok=True)
     res = ma.multiarrangement_adaptive(
         input_dir,
