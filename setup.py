@@ -46,12 +46,21 @@ ext_modules = []
 if can_build_c_extensions():
     try:
         # C extension for high-performance batch generation
+        # Platform-aware compile/link args
+        if sys.platform == "win32":
+            # MSVC: use /O2 and avoid -std=c11 (not supported)
+            compile_args = ['/O2']
+            link_args = []
+        else:
+            compile_args = ['-O3', '-std=c11']
+            link_args = ['-lm'] if 'linux' in sys.platform else []
+
         greedy_extension = Extension(
             'multiarrangement.greedy_c',
             sources=['src/greedy_module.c'],
             include_dirs=[np.get_include()],
-            extra_compile_args=['-O3', '-std=c11'],
-            extra_link_args=['-lm'] if 'linux' in sys.platform else [],
+            extra_compile_args=compile_args,
+            extra_link_args=link_args,
         )
         ext_modules = [greedy_extension]
         print("C extension will be built")
