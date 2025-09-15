@@ -18,6 +18,7 @@ recursive-include multiarrangement/demovids *.mp4 *.avi *.mov *.mkv *.wmv
 
 # Include demo media folders inside package (exclude 58videos to keep size reasonable)
 recursive-include multiarrangement/15videos *.avi *.mp4 *.mov *.mkv *.wmv
+recursive-include multiarrangement/15images *.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp
 recursive-include multiarrangement/15audios *.mp3 *.wav *.ogg *.flac *.aac *.m4a
 recursive-include multiarrangement/sample_audio *.mp3 *.wav *.ogg *.flac *.aac *.m4a
 

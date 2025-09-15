@@ -31,22 +31,40 @@ class VideoProcessor:
             ValueError: If video cannot be opened or has no frames
         """
         video_path = Path(video_path)
-        
+
         if not video_path.exists():
             raise FileNotFoundError(f"Video file not found: {video_path}")
-            
+
+        # Support images as single-frame videos
+        image_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+        if video_path.suffix.lower() in image_exts:
+            frame = cv2.imread(str(video_path), cv2.IMREAD_COLOR)
+            if frame is None:
+                raise ValueError(f"Cannot read image file: {video_path}")
+            return frame
+
         cap = cv2.VideoCapture(str(video_path))
-        
+
         if not cap.isOpened():
             raise ValueError(f"Cannot open video file: {video_path}")
-            
+
         ret, frame = cap.read()
         cap.release()
-        
+
         if not ret or frame is None:
             raise ValueError(f"Cannot read first frame from: {video_path}")
-            
+
         return frame
+
+    def load_image(self, image_path: Union[str, Path]) -> np.ndarray:
+        """Load an image file into an array (BGR)."""
+        image_path = Path(image_path)
+        if not image_path.exists():
+            raise FileNotFoundError(f"Image file not found: {image_path}")
+        img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if img is None:
+            raise ValueError(f"Cannot read image: {image_path}")
+        return img
         
     def get_first_frames_batch(self, video_paths: List[Union[str, Path]]) -> List[np.ndarray]:
         """
@@ -132,6 +150,34 @@ class VideoProcessor:
         final_surface.blit(mask_surface, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
         
         return final_surface
+
+    def display_image_in_pygame(self, image_path: Union[str, Path], screen: pygame.Surface,
+                                 position: Tuple[int, int], size: Tuple[int, int]) -> None:
+        """Display an image in the given pygame surface until SPACE/ESC."""
+        image_path = Path(image_path)
+        if not image_path.exists():
+            print(f"Image file not found: {image_path}")
+            return
+        img = cv2.imread(str(image_path), cv2.IMREAD_COLOR)
+        if img is None:
+            print(f"Cannot open image: {image_path}")
+            return
+        try:
+            img = cv2.resize(img, size)
+            surf = self.frame_to_pygame_surface(img)
+            waiting = True
+            while waiting:
+                # Clear to black and blit
+                screen.fill((0, 0, 0))
+                screen.blit(surf, position)
+                pygame.display.flip()
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        return
+                    elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_SPACE):
+                        waiting = False
+        finally:
+            pass
         
     def play_video_popup(self, video_path: Union[str, Path]) -> None:
         """
@@ -141,16 +187,34 @@ class VideoProcessor:
             video_path: Path to the video file
         """
         video_path = Path(video_path)
-        
+
         if not video_path.exists():
             print(f"Video file not found: {video_path}")
             return
-            
+
         # Check if it's an audio file
         audio_extensions = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
         if video_path.suffix.lower() in audio_extensions:
             # Handle audio files with improved playback
             self._play_audio_file(video_path)
+            return
+        # If it's an image, show it in a popup window and wait for key
+        image_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+        if video_path.suffix.lower() in image_exts:
+            img = cv2.imread(str(video_path), cv2.IMREAD_COLOR)
+            if img is None:
+                print(f"Cannot open image: {video_path}")
+                return
+            window_name = f'Image: {video_path.name}'
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            h, w = img.shape[:2]
+            cv2.resizeWindow(window_name, max(200, w), max(200, h))
+            cv2.imshow(window_name, img)
+            cv2.waitKey(0)
+            try:
+                cv2.destroyWindow(window_name)
+            except Exception:
+                pass
             return
             
         cap = cv2.VideoCapture(str(video_path))
@@ -333,37 +397,59 @@ class VideoProcessor:
             size: (width, height) size of the video display
         """
         video_path = Path(video_path)
-        
+
         if not video_path.exists():
             print(f"Video file not found: {video_path}")
             return
+
+        image_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+        if video_path.suffix.lower() in image_exts:
+            # Display a static image until ESC/SPACE/QUIT
+            img = cv2.imread(str(video_path), cv2.IMREAD_COLOR)
+            if img is None:
+                print(f"Cannot open image: {video_path}")
+                return
+            frame_resized = cv2.resize(img, size)
+            frame_surface = self.frame_to_pygame_surface(frame_resized)
+            clock = pygame.time.Clock()
+            while True:
+                screen.blit(frame_surface, position)
+                pygame.display.flip()
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        return
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key in (pygame.K_ESCAPE, pygame.K_SPACE):
+                            return
+                clock.tick(30)
             
+        # Video playback path
         cap = cv2.VideoCapture(str(video_path))
-        
+
         if not cap.isOpened():
             print(f"Cannot open video: {video_path}")
             return
-            
+
         fps = cap.get(cv2.CAP_PROP_FPS)
         delay = int(1000 / fps) if fps > 0 else 33
-        
+
         try:
             while cap.isOpened():
                 ret, frame = cap.read()
-                
+
                 if not ret:
                     # Loop video
                     cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     continue
-                    
+
                 # Resize and convert frame
                 frame_resized = cv2.resize(frame, size)
                 frame_surface = self.frame_to_pygame_surface(frame_resized)
-                
+
                 # Display frame
                 screen.blit(frame_surface, position)
                 pygame.display.flip()
-                
+
                 # Handle events
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
@@ -371,9 +457,9 @@ class VideoProcessor:
                     elif event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_ESCAPE or event.key == pygame.K_SPACE:
                             return
-                            
+
                 pygame.time.wait(delay)
-                
+
         finally:
             cap.release()
             

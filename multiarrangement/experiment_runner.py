@@ -36,6 +36,17 @@ def show_instructions_pygame(mode: str = "video", language: str = "en"):
                 ("Click 'Done' when you're satisfied with the arrangement.", "Done.mp4"),
                 ("Press SPACE to continue through these instructions.", None)
             ]
+        elif mode == "image":
+            instructions = [
+                ("Welcome to the image similarity arrangement experiment.", "img1.PNG"),
+                ("You will see groups of images that you need to arrange by similarity.", "similar.mp4"),
+                ("First, you will view all images in the group.", "Same.mkv"),
+                ("Then, arrange the image circles by dragging them.", "drag.mp4"),
+                ("Place similar images close together, dissimilar images far apart.", "similar.mp4"),
+                ("Double-click any circle to view the image again.", "Doubleclick.mp4"),
+                ("Click 'Done' when you're satisfied with the arrangement.", "Done.mp4"),
+                ("Press SPACE to continue through these instructions.", None)
+            ]
         else:
             instructions = [
                 ("Welcome to the audio similarity arrangement experiment.", "img1.PNG"),
@@ -141,7 +152,8 @@ def show_instructions_pygame(mode: str = "video", language: str = "en"):
                 # Display instruction text
                 lines = textwrap.wrap(instruction, width=50)
                 total_height = len(lines) * font.get_height()
-                if mode == "audio":
+                # Center text for audio and image modes; video uses lower offset
+                if mode in ("audio", "image"):
                     start_y = (screen.get_height() - total_height) // 2
                 else:
                     start_y = (screen.get_height() - total_height) // 2 + 350
@@ -190,6 +202,7 @@ POPUP_VIDEO_SCALE = 2.0
 # Supported file extensions
 VIDEO_EXTENSIONS = ['.avi', '.mp4', '.mov', '.mkv', '.wmv']
 AUDIO_EXTENSIONS = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a']
+IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp']
 
 # Colors
 WHITE = (255, 255, 255)
@@ -212,7 +225,7 @@ def get_media_files(directory):
     media_files = []
     for f in os.listdir(directory):
         ext = os.path.splitext(f)[1].lower()
-        if ext in VIDEO_EXTENSIONS or ext in AUDIO_EXTENSIONS:
+        if ext in VIDEO_EXTENSIONS or ext in AUDIO_EXTENSIONS or ext in IMAGE_EXTENSIONS:
             media_files.append(f)
     return media_files
 
@@ -220,6 +233,11 @@ def is_audio_file(filename):
     """Check if file is an audio file."""
     ext = os.path.splitext(filename)[1].lower()
     return ext in AUDIO_EXTENSIONS
+
+def is_image_file(filename):
+    """Check if file is an image file."""
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in IMAGE_EXTENSIONS
 
 def get_safe_fps(cap):
     """Get FPS with fallback to prevent division by zero."""
@@ -458,20 +476,28 @@ def display_video(video_path, screen, SCREEN_WIDTH, SCREEN_HEIGHT):
         cap.release()
 
 def show_set(batch, media_dir, screen, SCREEN_WIDTH, SCREEN_HEIGHT):
-    """Function takes a list and uses the videopaths to call on display_video"""
+    """Show a preview of each stimulus in the batch (videos or images)."""
     # Clear screen to pure black before showing videos
     screen.fill(BLACK)
     pygame.display.flip()
     
     for media_path in batch:
-        # Skip audio files - they can't be displayed as videos
+        full_path = os.path.join(media_dir, media_path)
+        # Skip audio files - can't display in video slot; audio will be previewed by icon later
         if is_audio_file(media_path):
             continue
-        full_path = os.path.join(media_dir, media_path)
-        display_video(full_path, screen, SCREEN_WIDTH, SCREEN_HEIGHT)
+        if is_image_file(media_path):
+            display_image(full_path, screen, SCREEN_WIDTH, SCREEN_HEIGHT)
+        else:
+            display_video(full_path, screen, SCREEN_WIDTH, SCREEN_HEIGHT)
 
 def get_first_frames(batch, media_dir, show_first_frames, frame_cache):
-    """Function takes a list as an argument then returns every first frame that can be found by using the path from the list"""
+    """Return thumbnail frames for each stimulus in the batch.
+
+    - Videos: first frame
+    - Images: the image itself
+    - Audio: audio icon
+    """
     first_frames = []
     for media_file in batch:
         media_path = os.path.join(media_dir, media_file)
@@ -495,28 +521,97 @@ def get_first_frames(batch, media_dir, show_first_frames, frame_cache):
             frame_cache[media_path] = sound_icon
             first_frames.append(sound_icon)
             continue
-            
-        # Load video frame and cache if not in cache
+        
+        # Images
+        if is_image_file(media_file):
+            img = cv2.imread(media_path)
+            if img is not None:
+                img = cv2.resize(img, (640, 480))
+                frame_cache[media_path] = img
+                first_frames.append(img)
+                continue
+            # Fall through to black placeholder if failed
+
+        # Videos: load first frame
         cap = cv2.VideoCapture(media_path)
         if cap.isOpened():
             ret, frame = cap.read()
             if ret:
-                # Resize video frame to standard dimensions (same as audio icons)
-                frame = cv2.resize(frame, (640, 480))  # width, height - match audio dimensions
-                frame_cache[media_path] = frame  # Cache the frame
+                frame = cv2.resize(frame, (640, 480))
+                frame_cache[media_path] = frame
                 first_frames.append(frame)
             else:
-                # Add a black frame as fallback
                 fallback = np.zeros((480, 640, 3), dtype=np.uint8)
                 frame_cache[media_path] = fallback
                 first_frames.append(fallback)
             cap.release()
         else:
-            # Add a black frame as fallback
             fallback = np.zeros((480, 640, 3), dtype=np.uint8)
             frame_cache[media_path] = fallback
             first_frames.append(fallback)
     return first_frames
+
+def display_image(image_path, screen, SCREEN_WIDTH, SCREEN_HEIGHT):
+    """Display a still image centered on the screen; exit on SPACE/ESC."""
+    if not os.path.exists(image_path):
+        return
+    img = cv2.imread(image_path)
+    if img is None:
+        return
+    # Fit inside preview size maintaining aspect ratio
+    target_w, target_h = VIDEO_PREVIEW_SIZE
+    h, w = img.shape[:2]
+    scale = min(target_w / w, target_h / h)
+    new_w, new_h = max(1, int(w * scale)), max(1, int(h * scale))
+    img = cv2.cvtColor(cv2.resize(img, (new_w, new_h)), cv2.COLOR_BGR2RGB)
+    surf = pygame.surfarray.make_surface(np.rot90(img))
+    pos_x = (screen.get_width() - surf.get_width()) // 2
+    pos_y = (screen.get_height() - surf.get_height()) // 2
+    waiting = True
+    while waiting:
+        screen.fill(BLACK)
+        screen.blit(surf, (pos_x, pos_y))
+        pygame.display.flip()
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                safe_pygame_quit(); sys.exit(0)
+            elif event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_SPACE):
+                waiting = False
+
+def confirm_mixed_prompt(n_vid: int, n_img: int, n_aud: int) -> bool:
+    """Show a simple pygame prompt to confirm running with mixed media.
+
+    Returns True to proceed, False to abort.
+    """
+    pygame.init()
+    # Use a small centered window to avoid conflicts with later fullscreen
+    screen = pygame.display.set_mode((800, 320))
+    font = pygame.font.Font(None, 36)
+    title = pygame.font.Font(None, 44)
+    text = [
+        "Mixed media detected in the input directory:",
+        f" - Videos: {n_vid} | Images: {n_img} | Audio: {n_aud}",
+        "Proceed with a mixed set? (Y = continue, N/ESC = cancel)"
+    ]
+    proceed = None
+    while proceed is None:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                proceed = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_n, pygame.K_ESCAPE):
+                    proceed = False
+                elif event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_SPACE):
+                    proceed = True
+        screen.fill((0,0,0))
+        y = 50
+        screen.blit(title.render(text[0], True, (255,255,255)), (40, y)); y += 60
+        screen.blit(font.render(text[1], True, (200,200,200)), (40, y)); y += 60
+        screen.blit(font.render(text[2], True, (255,255,0)), (40, y))
+        pygame.display.flip()
+        pygame.time.wait(30)
+    pygame.display.quit()
+    return bool(proceed)
 
 def save_results(df, output_dir, participant_id="participant"):
     """Save the experiment results to files."""
@@ -591,16 +686,31 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
     if not media_files:
         raise ValueError(f"No supported media files found in {input_dir}")
 
-    # Detect mode automatically
-    video_count = sum(1 for f in media_files if not is_audio_file(f))
-    audio_count = len(media_files) - video_count
-    if video_count > 0 and audio_count == 0:
+    # Detect mode automatically (video/image/audio)
+    vid = sum(1 for f in media_files if (os.path.splitext(f)[1].lower() in VIDEO_EXTENSIONS))
+    aud = sum(1 for f in media_files if (os.path.splitext(f)[1].lower() in AUDIO_EXTENSIONS))
+    img = sum(1 for f in media_files if (os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS))
+    kinds = sum(1 for c in (vid, aud, img) if c > 0)
+    if kinds == 0:
+        raise ValueError("No supported media in directory.")
+    if kinds > 1:
+        # Ask for confirmation before proceeding with mixed directory
+        if not confirm_mixed_prompt(vid, img, aud):
+            print("User declined to run with mixed media.")
+            return None
+    # Choose instruction mode by dominant or single type
+    if img > 0 and vid == 0 and aud == 0:
+        mode = "image"
+    elif vid > 0 and aud == 0 and img == 0:
         mode = "video"
-    elif audio_count > 0 and video_count == 0:
+    elif aud > 0 and vid == 0 and img == 0:
         mode = "audio"
     else:
-        mode = "video"
-        print("Warning: Mixed media detected. Defaulting to video mode.")
+        # Mixed: prefer video instructions when videos exist, else image
+        mode = "video" if vid > 0 else ("image" if img > 0 else "audio")
+
+    # Convenience flag for image-only behavior tweaks
+    image_only_mode = (mode == "image")
 
     # Show instructions for detected mode and language
     if instructions is None:
@@ -678,11 +788,7 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
         
         raise ValueError(error_msg)
     
-    # Automatically detect media type
-    video_count = sum(1 for f in media_files if not is_audio_file(f))
-    audio_count = len(media_files) - video_count
-    
-    print(f"✅ Found {len(media_files)} media files ({video_count} videos, {audio_count} audio)")
+    print(f"✅ Found {len(media_files)} media files ({vid} videos, {img} images, {aud} audio)")
     
     # Shuffle media files
     random.shuffle(media_files)
@@ -768,7 +874,8 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
         angle_step = 2 * math.pi / len(my_frames)
         frames = []
         rects = []
-        frame_clicked = [False] * len(my_frames)
+        # In image-only mode, do not require double-clicks; treat all as viewed.
+        frame_clicked = [True] * len(my_frames) if image_only_mode else [False] * len(my_frames)
         
         for i, frame in enumerate(my_frames):
             # Process frame for display
@@ -814,7 +921,10 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
         
         while running:
             all_inside = check_all_inside_improved(rects, circle_center, circle_radius)
-            all_clicked = all(frame_clicked)
+            # In image-only mode, do not require clicks at all; in mixed, images also do not require clicks
+            def is_image_idx(i: int) -> bool:
+                return os.path.splitext(batch_media[i])[1].lower() in IMAGE_EXTENSIONS
+            all_clicked = all(frame_clicked[i] or is_image_idx(i) for i in range(len(frames)))
             
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -860,14 +970,20 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     current_time = pygame.time.get_ticks()
                     if last_click_time is not None and current_time - last_click_time <= DOUBLE_CLICK_TIMEOUT:
-                        # Double click - play video (or audio via play_video->play_audio)
-                        for i in range(len(frames)):
-                           if rects[i].collidepoint(event.pos):
-                               frame_clicked[i] = True  
-                               video_path = os.path.join(input_dir, batch_media[i])  
-                               video_thread = threading.Thread(target=play_video, args=(video_path,))
-                               video_thread.start()
-                               break
+                        # Double click behavior
+                        # - Image-only: ignore double clicks completely (no popups, no state change)
+                        # - Audio/Video: allow replay (mark clicked for video/audio)
+                        if not image_only_mode:
+                            for i in range(len(frames)):
+                                if rects[i].collidepoint(event.pos):
+                                    # For images, do nothing on double-click (no popups, no state change)
+                                    if is_image_idx(i):
+                                        break
+                                    frame_clicked[i] = True
+                                    media_path_clicked = os.path.join(input_dir, batch_media[i])
+                                    video_thread = threading.Thread(target=play_video, args=(media_path_clicked,))
+                                    video_thread.start()
+                                    break
                         last_click_time = current_time
                     else:
                         # Single click - start dragging
@@ -898,8 +1014,10 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
                 # Draw the video frame first
                 screen.blit(frames[i], rects[i].topleft)
                 
-                # Determine outline color based on click status and position
-                if frame_clicked[i] and is_circle_inside_circle(rects[i], circle_center, circle_radius):
+                # Determine outline color based on click status and position.
+                # Images never require clicks (even in mixed sets); only position matters for them.
+                considered_clicked = True if (image_only_mode or is_image_idx(i)) else frame_clicked[i]
+                if considered_clicked and is_circle_inside_circle(rects[i], circle_center, circle_radius):
                     color = GREEN  # Clicked and valid position
                 else:
                     color = RED    # Not clicked yet OR invalid position

@@ -55,19 +55,19 @@ class MultiarrangementExperiment:
         self._initialize_data_structures()
         
     def _load_videos(self) -> None:
-        """Load video files from the specified directory."""
+        """Load media files (video/image/audio) from the specified directory."""
         if not self.video_directory.exists():
             raise FileNotFoundError(f"Video directory not found: {self.video_directory}")
             
-        # Get all video files (support multiple formats)
+        # Get supported media files
         video_extensions = {'.avi', '.mp4', '.mov', '.mkv', '.wmv'}
-        self.video_files = [
-            f.name for f in self.video_directory.iterdir() 
-            if f.suffix.lower() in video_extensions
-        ]
+        audio_extensions = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+        image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+        exts = video_extensions | audio_extensions | image_extensions
+        self.video_files = [f.name for f in self.video_directory.iterdir() if f.suffix.lower() in exts]
         
         if not self.video_files:
-            raise ValueError(f"No video files found in {self.video_directory}")
+            raise ValueError(f"No supported media files found in {self.video_directory}")
             
         # Extract video names (without extension)
         self.video_names = [

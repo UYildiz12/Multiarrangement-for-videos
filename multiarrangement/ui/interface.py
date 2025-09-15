@@ -60,6 +60,19 @@ class BaseInterface(ABC):
         self.double_click_threshold = 350  # milliseconds
         # Optional custom instructions (list of strings); None -> show defaults
         self.custom_instructions = None
+
+        # Detect if this session is image-only (affects click behavior)
+        try:
+            files = getattr(self.experiment, 'video_files', [])
+            video_exts = {'.avi', '.mp4', '.mov', '.mkv', '.wmv'}
+            audio_exts = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+            image_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+            vid = sum(1 for f in files if Path(f).suffix.lower() in video_exts)
+            aud = sum(1 for f in files if Path(f).suffix.lower() in audio_exts)
+            img = sum(1 for f in files if Path(f).suffix.lower() in image_exts)
+            self.is_image_only = (img > 0 and vid == 0 and aud == 0)
+        except Exception:
+            self.is_image_only = False
         
     @abstractmethod
     def setup_display(self) -> None:
@@ -78,20 +91,37 @@ class BaseInterface(ABC):
         
     def show_instructions(self, mode: str = "video", language: str = "en") -> None:
         """
-        Show experiment instructions for video or audio mode, in English or Turkish.
-        Args:
-            mode: "video" or "audio"
-            language: "en" (English) or "tr" (Turkish)
+        Show experiment instructions for video, image, or audio mode.
+        Includes mixed-directory confirmation.
         """
-        # Prefer experiment-provided mode/language when available
-        try:
-            mode = getattr(self.experiment, "mode", mode)
-        except Exception:
-            pass
-        try:
-            language = getattr(self.experiment, "language", language)
-        except Exception:
-            pass
+        # Prefer experiment-provided language when available
+        language = getattr(self.experiment, "language", language)
+
+        # Detect media composition from experiment.video_files
+        files = getattr(self.experiment, 'video_files', [])
+        video_exts = {'.avi', '.mp4', '.mov', '.mkv', '.wmv'}
+        audio_exts = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+        image_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+        vid = sum(1 for f in files if Path(f).suffix.lower() in video_exts)
+        aud = sum(1 for f in files if Path(f).suffix.lower() in audio_exts)
+        img = sum(1 for f in files if Path(f).suffix.lower() in image_exts)
+        kinds = sum(1 for c in (vid, img, aud) if c > 0)
+
+        # Mixed prompt (Y/N)
+        if kinds > 1:
+            if not self.confirm_mixed_prompt_ui(vid, img, aud):
+                self.running = False
+                return
+
+        # Choose mode (single-type or default to video>image>audio)
+        if img > 0 and vid == 0 and aud == 0:
+            mode = 'image'
+        elif vid > 0 and aud == 0 and img == 0:
+            mode = 'video'
+        elif aud > 0 and vid == 0 and img == 0:
+            mode = 'audio'
+        else:
+            mode = 'video' if vid > 0 else ('image' if img > 0 else 'audio')
         # If custom instructions supplied, show them and return
         if isinstance(self.custom_instructions, list):
             for instruction in self.custom_instructions:
@@ -108,6 +138,17 @@ class BaseInterface(ABC):
                     "Herhangi bir daireye çift tıklayarak videoyu tekrar oynatabilirsiniz.",
                     "Düzenlemeden memnun kaldığınızda 'Bitti'ye tıklayın.",
                     "Bu talimatları geçmek için BOŞLUK tuşuna basın."
+                ]
+            elif mode == "image":
+                instructions = [
+                    "Görsel benzerliği düzenleme deneyine hoş geldiniz.",
+                    "Gruplar halinde görüntüler göreceksiniz ve bunları benzerliğe göre düzenlemeniz gerekecek.",
+                    "Önce gruptaki tüm görüntülere bakacaksınız.",
+                    "Daha sonra görüntü dairelerini sürükleyerek düzenleyin.",
+                    "Benzer görüntüleri birbirine yakın, farklı olanları uzak yerleştirin.",
+                    "Herhangi bir daireye çift tıklayarak görüntüyü tekrar görüntüleyebilirsiniz.",
+                    "Düzenlemeden memnun kaldığınızda 'Bitti'ye tıklayın.",
+                    "Devam etmek için BOŞLUK tuşuna basın."
                 ]
             else:  # audio
                 instructions = [
@@ -132,6 +173,17 @@ class BaseInterface(ABC):
                     "Click 'Done' when you're satisfied with the arrangement.",
                     "Press SPACE to continue through these instructions."
                 ]
+            elif mode == "image":
+                instructions = [
+                    "Welcome to the image similarity arrangement experiment.",
+                    "You will see groups of images that you need to arrange by similarity.",
+                    "First, you will view all images in the group.",
+                    "Then, arrange the image circles by dragging them.",
+                    "Place similar images close together, dissimilar images far apart.",
+                    "Double-click any circle to view the image again.",
+                    "Click 'Done' when you're satisfied with the arrangement.",
+                    "Press SPACE to continue through these instructions."
+                ]
             else:  # audio
                 instructions = [
                     "Welcome to the audio similarity arrangement experiment.",
@@ -146,6 +198,31 @@ class BaseInterface(ABC):
         for instruction in instructions:
             self.show_instruction_screen(instruction)
             
+    def confirm_mixed_prompt_ui(self, n_vid: int, n_img: int, n_aud: int) -> bool:
+        """Show a confirmation overlay for mixed media; return True to proceed."""
+        msg1 = "Mixed media detected in the input directory:"
+        msg2 = f"Videos: {n_vid} | Images: {n_img} | Audio: {n_aud}"
+        msg3 = "Proceed with a mixed set? (Y = continue, N/ESC = cancel)"
+
+        waiting = True
+        while waiting:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return False
+                elif event.type == pygame.KEYDOWN:
+                    if event.key in (pygame.K_n, pygame.K_ESCAPE):
+                        return False
+                    if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_SPACE):
+                        return True
+            self.screen.fill(self.BLACK)
+            y = self.screen.get_height()//2 - 60
+            for idx, msg in enumerate((msg1, msg2, msg3)):
+                surf = (self.large_font if idx==0 else self.font).render(msg, True, (255,255,255) if idx<2 else (255,255,0))
+                rect = surf.get_rect(center=(self.screen.get_width()//2, y + idx*40))
+                self.screen.blit(surf, rect)
+            pygame.display.flip()
+            self.clock.tick(60)
+
     def show_instruction_screen(self, message: str) -> None:
         """Show a single instruction screen."""
         waiting = True
@@ -179,15 +256,29 @@ class BaseInterface(ABC):
             self.clock.tick(60)
             
     def show_videos_preview(self) -> None:
-        """Show all videos in the current batch."""
-        for video_filename in self.current_batch_videos:
-            video_path = self.experiment.get_video_path(video_filename)
-            self.video_processor.display_video_in_pygame(
-                video_path, 
-                self.screen,
-                (0, 0),
-                self.screen.get_size()
-            )
+        """Show all stimuli (video/image) in the current batch."""
+        image_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+        audio_exts = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+        for fn in self.current_batch_videos:
+            path = self.experiment.get_video_path(fn)
+            suffix = Path(path).suffix.lower()
+            if suffix in audio_exts:
+                # Skip auto-play in preview for audio; user can double-click later
+                continue
+            elif suffix in image_exts:
+                self.video_processor.display_image_in_pygame(
+                    path,
+                    self.screen,
+                    (0, 0),
+                    self.screen.get_size()
+                )
+            else:
+                self.video_processor.display_video_in_pygame(
+                    path,
+                    self.screen,
+                    (0, 0),
+                    self.screen.get_size()
+                )
             
     def load_current_batch(self) -> None:
         """Load the current batch of videos."""
@@ -202,9 +293,19 @@ class BaseInterface(ABC):
         self.video_clicked = {}
         
         # Initialize clicked state
+        image_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+        audio_exts = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
         for video in self.current_batch_videos:
             video_name = Path(video).stem
-            self.video_clicked[video_name] = False
+            # Pre-mark images as viewed in all sessions (image-only or mixed)
+            try:
+                suffix = Path(self.experiment.get_video_path(video)).suffix.lower()
+            except Exception:
+                suffix = Path(video).suffix.lower()
+            if suffix in image_exts:
+                self.video_clicked[video_name] = True
+            else:
+                self.video_clicked[video_name] = False
         
         # Precompute and cache circular thumbnail surfaces once per batch to avoid per-frame decoding
         self.video_thumbnails = {}
@@ -243,6 +344,10 @@ class BaseInterface(ABC):
                     except Exception:
                         pass
                     self.video_thumbnails[video_name] = surface
+                elif suffix in {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}:
+                    # Image thumbnail from image file
+                    img = self.video_processor.load_image(video_path)
+                    surface = self.video_processor.create_circular_frame_surface(img, 35)
                 else:
                     # Video thumbnail from first frame
                     first_frame = self.video_processor.get_first_frame(video_path)
@@ -286,15 +391,23 @@ class BaseInterface(ABC):
                     distance = math.sqrt((pos[0] - video_pos[0])**2 + (pos[1] - video_pos[1])**2)
                     if distance <= 40:  # Within circle radius
                         # Mark as clicked and play video
-                        self.video_clicked[video_name] = True
+                        # Mark as clicked for audio/video; images depend on session mode
                         video_path = self.experiment.get_video_path(video_filename)
-                        # Detect audio vs video by extension
+                        # Detect audio vs video/image by extension
                         suffix = Path(video_path).suffix.lower()
                         if suffix in {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}:
                             # Play audio without blocking the UI
+                            self.video_clicked[video_name] = True
                             self.video_processor.play_audio_nonblocking(video_path)
+                            handled = True
+                            break
+                        elif suffix in {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}:
+                            # Images: do nothing on double-click in all sessions (image-only or mixed)
+                            handled = False
+                            break
                         else:
                             # Play video within current Pygame screen (no minimize)
+                            self.video_clicked[video_name] = True
                             self.video_processor.display_video_in_pygame(
                                 video_path,
                                 self.screen,

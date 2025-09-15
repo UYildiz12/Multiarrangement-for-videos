@@ -12,7 +12,7 @@ for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. Brai
 13(1), 61. https://doi.org/10.3390/brainsci13010061
 """
 
-__version__ = "0.1.4"
+__version__ = "0.1.6"
 __author__ = "Multiarrangement Team"
 
 from .core.experiment import MultiarrangementExperiment
@@ -213,6 +213,7 @@ def auto_detect_stimuli(input_dir: str) -> int:
     # Supported file extensions
     video_extensions = ['.avi', '.mp4', '.mov', '.mkv', '.wmv']
     audio_extensions = ['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a']
+    image_extensions = ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp']
     
     if not os.path.exists(input_dir):
         raise ValueError(f"Directory '{input_dir}' does not exist!")
@@ -220,7 +221,7 @@ def auto_detect_stimuli(input_dir: str) -> int:
     media_files = []
     for file in os.listdir(input_dir):
         ext = os.path.splitext(file)[1].lower()
-        if ext in video_extensions or ext in audio_extensions:
+        if ext in video_extensions or ext in audio_extensions or ext in image_extensions:
             media_files.append(file)
     
     return len(media_files)
@@ -478,7 +479,146 @@ __all__ = [
     "validate_batches",
     "multiarrangement",
     "demo",
+    "demo_audio",
+    "demo_image",
+    "demo_audio_adaptive",
+    "demo_image_adaptive",
     "demo_adaptive",
     "multiarrangement_adaptive",
     "Results",
 ]
+
+
+def _resolve_or_generate_15images() -> str:
+    """Resolve a '15images' directory or generate from packaged 15videos.
+
+    Returns a directory path containing 15 image files. If no 15images is
+    bundled, it will extract first frames from the packaged 15videos into a
+    temporary directory for demo use.
+    """
+    import os
+    from .utils.file_utils import resolve_packaged_dir
+    from pathlib import Path
+    import tempfile
+    import cv2
+
+    try:
+        # Prefer packaged images if present
+        return str(resolve_packaged_dir("15images"))
+    except FileNotFoundError:
+        pass
+
+    # Fallback: generate images from packaged 15videos
+    try:
+        vids = resolve_packaged_dir("15videos")
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            "Neither '15images' nor '15videos' found in the installed package. "
+            "Please provide an images folder or install demos."
+        )
+
+    outdir = Path(tempfile.mkdtemp(prefix="ma_15images_"))
+    print(f"🖼️ Generating demo images from first frames in: {vids}\n→ Output: {outdir}")
+    count = 0
+    for p in sorted(Path(vids).iterdir()):
+        if p.suffix.lower() not in {'.avi', '.mp4', '.mov', '.mkv', '.wmv'}:
+            continue
+        cap = cv2.VideoCapture(str(p))
+        ret, frame = cap.read()
+        cap.release()
+        if ret and frame is not None:
+            # Resize modestly to keep thumbnails reasonable
+            h, w = frame.shape[:2]
+            scale = min(480 / max(1,h), 640 / max(1,w))
+            frame = cv2.resize(frame, (max(1,int(w*scale)), max(1,int(h*scale))))
+            cv2.imwrite(str(outdir / f"img_{count:03d}.png"), frame)
+            count += 1
+        if count >= 15:
+            break
+    if count == 0:
+        raise RuntimeError("Failed to generate images from demo videos.")
+    return str(outdir)
+
+
+def demo_audio():
+    """Run an audio-only demo using packaged '15audios' (fallback: 'sample_audio')."""
+    import os
+    from .utils.file_utils import resolve_packaged_dir
+    print("🔊 Multiarrangement Audio Demo - 15 items")
+    try:
+        input_dir = str(resolve_packaged_dir("15audios"))
+    except FileNotFoundError:
+        input_dir = str(resolve_packaged_dir("sample_audio"))
+    n = auto_detect_stimuli(input_dir)
+    batches = create_batches(n, 6)
+    validate_batches(batches, n)
+    print(f"📁 Results will be saved to current directory: {os.path.abspath('.')}")
+    res = multiarrangement(
+        input_dir=input_dir,
+        batches=batches,
+        output_dir=".",
+        show_first_frames=True,
+        fullscreen=True,
+        language="en",
+        instructions="default",
+    )
+    return res
+
+
+def demo_image():
+    """Run an image-only demo using '15images' or generated from '15videos'."""
+    import os
+    input_dir = _resolve_or_generate_15images()
+    n = auto_detect_stimuli(input_dir)
+    batches = create_batches(n, 6)
+    validate_batches(batches, n)
+    print(f"📁 Results will be saved to current directory: {os.path.abspath('.')}")
+    res = multiarrangement(
+        input_dir=input_dir,
+        batches=batches,
+        output_dir=".",
+        show_first_frames=True,
+        fullscreen=True,
+        language="en",
+        instructions="default",
+    )
+    return res
+
+
+def demo_audio_adaptive():
+    """Run the adaptive (LTW) demo with audio-only stimuli."""
+    import os
+    from .utils.file_utils import resolve_packaged_dir
+    print("🔊 Adaptive Audio Demo - 15 items")
+    try:
+        input_dir = str(resolve_packaged_dir("15audios"))
+    except FileNotFoundError:
+        input_dir = str(resolve_packaged_dir("sample_audio"))
+    print(f"📁 Results will be saved to current directory: {os.path.abspath('.')}")
+    return multiarrangement_adaptive(
+        input_dir=input_dir,
+        output_dir=".",
+        fullscreen=True,
+        language="en",
+        evidence_threshold=0.35,
+        min_subset_size=4,
+        max_subset_size=6,
+        use_inverse_mds=True,
+    )
+
+
+def demo_image_adaptive():
+    """Run the adaptive (LTW) demo with image-only stimuli."""
+    import os
+    input_dir = _resolve_or_generate_15images()
+    print(f"📁 Results will be saved to current directory: {os.path.abspath('.')}")
+    return multiarrangement_adaptive(
+        input_dir=input_dir,
+        output_dir=".",
+        fullscreen=True,
+        language="en",
+        evidence_threshold=0.35,
+        min_subset_size=4,
+        max_subset_size=6,
+        use_inverse_mds=True,
+    )

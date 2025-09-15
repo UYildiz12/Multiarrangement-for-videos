@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multiarrangement"
-version = "0.1.4"
+version = "0.1.6"
 description = "Video & audio similarity arrangement toolkit (set-cover and adaptive LTW)"
 authors = [{ name = "Umur Yıldız" }]
 requires-python = ">=3.8"
@@ -53,6 +53,10 @@ multiarrangement-batch-generator = "multiarrangement.cli:batch_generator_cli"
 multiarrangement-adaptive = "multiarrangement.cli:main_adaptive"
 multiarrangement-demo = "multiarrangement:demo"
 multiarrangement-demo-adaptive = "multiarrangement:demo_adaptive"
+multiarrangement-demo-audio = "multiarrangement:demo_audio"
+multiarrangement-demo-image = "multiarrangement:demo_image"
+multiarrangement-demo-audio-adaptive = "multiarrangement:demo_audio_adaptive"
+multiarrangement-demo-image-adaptive = "multiarrangement:demo_image_adaptive"
 covergen = "coverlib.cli:main"
 optimize-cover = "multiarrangement.optimize_cover_pure:main"
 optimize-cover-flex = "multiarrangement.optimize_cover_flex:main"
@@ -72,6 +76,7 @@ include = ["multiarrangement*", "coverlib*"]
 "multiarrangement" = [
   "*.py",
   "15videos/*",
+  "15images/*",
   "demovids/*",
   "15audios/*",
   "sample_audio/*",

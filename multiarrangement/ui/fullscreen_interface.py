@@ -126,16 +126,21 @@ class FullscreenInterface(BaseInterface):
                     video_pos = self.video_positions[video_name]
                     distance = ((pos[0] - video_pos[0])**2 + (pos[1] - video_pos[1])**2) ** 0.5
                     if distance <= 40:
-                        self.video_clicked[video_name] = True
                         video_path = self.experiment.get_video_path(video_filename)
                         suffix = Path(video_path).suffix.lower()
                         if suffix in {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}:
-                            # Non-blocking audio playback to keep UI responsive
+                            # Mark as clicked and play audio without blocking the UI
+                            self.video_clicked[video_name] = True
                             self.video_processor.play_audio_nonblocking(video_path)
+                            handled = True
+                        elif suffix in {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}:
+                            # Images: do nothing on double-click in all sessions (image-only or mixed)
+                            handled = False
                         else:
-                            # OpenCV popup on top, 2x size, ESC/Space/q to close
+                            # Mark as clicked and open video in popup
+                            self.video_clicked[video_name] = True
                             self.video_processor.play_video_threaded(video_path)
-                        handled = True
+                            handled = True
                         break
         self.last_click_time = current_time
         return handled
@@ -149,28 +154,97 @@ class FullscreenInterface(BaseInterface):
             return
 
         lang = getattr(self.experiment, "language", "en")
-        if lang == "tr":
-            instructions = [
-                "Video benzerliği düzenleme deneyine hoş geldiniz.",
-                "Daire içinde videoları benzerliğe göre düzenleyeceksiniz.",
-                "Önce gruptaki videoları izleyin, ardından sürükleyip yerleştirin.",
-                "Benzer videoları yakın, farklı olanları uzak yerleştirin.",
-                "Her bir daireye çift tıklayarak videoyu tekrar oynatın.",
-                "Tüm videolar izlenmeli ve beyaz dairenin içinde kalmalıdır.",
-                "Memnun kaldığınızda 'Bitti'ye tıklayın.",
-                "Devam etmek için SPACE, çıkmak için ESC." 
-            ]
+        files = getattr(self.experiment, 'video_files', [])
+        video_exts = {'.avi', '.mp4', '.mov', '.mkv', '.wmv'}
+        audio_exts = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
+        image_exts = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
+        vid = sum(1 for f in files if Path(f).suffix.lower() in video_exts)
+        aud = sum(1 for f in files if Path(f).suffix.lower() in audio_exts)
+        img = sum(1 for f in files if Path(f).suffix.lower() in image_exts)
+        kinds = sum(1 for c in (vid, img, aud) if c > 0)
+
+        if kinds > 1:
+            if not self.confirm_mixed_prompt_ui(vid, img, aud):
+                self.running = False
+                return
+
+        if img > 0 and vid == 0 and aud == 0:
+            mode = 'image'
+        elif vid > 0 and aud == 0 and img == 0:
+            mode = 'video'
+        elif aud > 0 and vid == 0 and img == 0:
+            mode = 'audio'
         else:
-            instructions = [
-                "Welcome to the video similarity arrangement experiment.",
-                "Arrange videos by similarity inside the white circle.",
-                "First, watch each item; then drag circles to arrange them.",
-                "Place similar videos close together; dissimilar far apart.",
-                "Double-click any circle to replay its video.",
-                "All circles must be watched and remain inside the white circle.",
-                "Click 'Done' when you are satisfied.",
-                "Press SPACE to continue, ESC to exit."
-            ]
+            mode = 'video' if vid > 0 else ('image' if img > 0 else 'audio')
+
+        if lang == "tr":
+            if mode == 'video':
+                instructions = [
+                    "Video benzerliği düzenleme deneyine hoş geldiniz.",
+                    "Daire içinde videoları benzerliğe göre düzenleyeceksiniz.",
+                    "Önce gruptaki videoları izleyin, ardından sürükleyip yerleştirin.",
+                    "Benzer videoları yakın, farklı olanları uzak yerleştirin.",
+                    "Her bir daireye çift tıklayarak videoyu tekrar oynatın.",
+                    "Tüm daireler beyaz dairenin içinde kalmalıdır.",
+                    "Memnun kaldığınızda 'Bitti'ye tıklayın.",
+                    "Devam etmek için SPACE, çıkmak için ESC."
+                ]
+            elif mode == 'image':
+                instructions = [
+                    "Görsel benzerliği düzenleme deneyine hoş geldiniz.",
+                    "Daire içinde görüntüleri benzerliğe göre düzenleyeceksiniz.",
+                    "Önce gruptaki görüntülere bakın, ardından sürükleyip yerleştirin.",
+                    "Benzer görüntüleri yakın, farklı olanları uzak yerleştirin.",
+                    "Her bir daireye çift tıklayarak görüntüyü tekrar görüntüleyin.",
+                    "Tüm daireler beyaz dairenin içinde kalmalıdır.",
+                    "Memnun kaldığınızda 'Bitti'ye tıklayın.",
+                    "Devam etmek için SPACE, çıkmak için ESC."
+                ]
+            else:  # audio
+                instructions = [
+                    "Ses benzerliği düzenleme deneyine hoş geldiniz.",
+                    "Daire içinde sesleri benzerliğe göre düzenleyeceksiniz.",
+                    "Önce gruptaki sesleri dinleyin, ardından sürükleyip yerleştirin.",
+                    "Benzer sesleri yakın, farklı olanları uzak yerleştirin.",
+                    "Her bir daireye çift tıklayarak sesi tekrar dinleyin.",
+                    "Tüm daireler beyaz dairenin içinde kalmalıdır.",
+                    "Memnun kaldığınızda 'Bitti'ye tıklayın.",
+                    "Devam etmek için SPACE, çıkmak için ESC."
+                ]
+        else:
+            if mode == 'video':
+                instructions = [
+                    "Welcome to the video similarity arrangement experiment.",
+                    "Arrange videos by similarity inside the white circle.",
+                    "First, watch each item; then drag circles to arrange them.",
+                    "Place similar videos close together; dissimilar far apart.",
+                    "Double-click any circle to replay its video.",
+                    "All circles must remain inside the white circle.",
+                    "Click 'Done' when you are satisfied.",
+                    "Press SPACE to continue, ESC to exit."
+                ]
+            elif mode == 'image':
+                instructions = [
+                    "Welcome to the image similarity arrangement experiment.",
+                    "Arrange images by similarity inside the white circle.",
+                    "First, view each item; then drag circles to arrange them.",
+                    "Place similar images close together; dissimilar far apart.",
+                    "Double-click any circle to view the image again.",
+                    "All circles must remain inside the white circle.",
+                    "Click 'Done' when you are satisfied.",
+                    "Press SPACE to continue, ESC to exit."
+                ]
+            else:  # audio
+                instructions = [
+                    "Welcome to the audio similarity arrangement experiment.",
+                    "Arrange sounds by similarity inside the white circle.",
+                    "First, listen to each item; then drag circles to arrange them.",
+                    "Place similar sounds close together; dissimilar far apart.",
+                    "Double-click any circle to replay its sound.",
+                    "All circles must remain inside the white circle.",
+                    "Click 'Done' when you are satisfied.",
+                    "Press SPACE to continue, ESC to exit."
+                ]
 
         for instruction in instructions:
             self.show_instruction_screen(instruction)

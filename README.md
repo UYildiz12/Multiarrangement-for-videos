@@ -25,7 +25,11 @@ The package ships with windowed and fullscreen UIs, packaged demo media (15 vide
 ## What’s Included
 
 - Package code: `multiarrangement/*` (UI, core, adaptive LTW), `coverlib/*` (covering‑design tools)
-- Demo media (installed): `multiarrangement/15videos/*`, `multiarrangement/15audios/*`, `multiarrangement/sample_audio/*`, and `multiarrangement/demovids/*`
+- Demo media (installed):
+  - Videos: `multiarrangement/15videos/*`
+  - Images: `multiarrangement/15images/*`
+  - Audio:  `multiarrangement/15audios/*`, `multiarrangement/sample_audio/*`
+  - Instruction clips: `multiarrangement/demovids/*`
 - LJCR cache (installed): `multiarrangement/ljcr_cache/*.txt` used by covering‑design CLIs by default (offline‑first)
 
 ## Install
@@ -69,6 +73,20 @@ ma.demo_adaptive()
 
 Both demos use the packaged `15videos` and show default instruction screens (with bundled instruction clips).
 
+Image/Audio Demos (package assets):
+
+```python
+import multiarrangement as ma
+
+# Audio-only demos
+ma.demo_audio()             # set‑cover
+ma.demo_audio_adaptive()    # adaptive LTW
+
+# Image-only demos (uses packaged 15images; if missing, auto‑generates from 15videos)
+ma.demo_image()             # set‑cover
+ma.demo_image_adaptive()    # adaptive LTW
+```
+
 ## The simplest way to use Multiarrangement is with the minimum arguments
 ```python
 
@@ -104,6 +122,10 @@ results.savefig(f"{output_dir}/rdm_adaptive.png", title="Adaptive LTW RDM")
 ```
 
 Results file will be available via .xlsx and .csv versions in "datetime.xlsx/csv" format at output directory.
+
+Notes:
+- Image stimuli are supported alongside video/audio. The UI will show image‑specific instructions for image‑only folders.
+- If a directory mixes media types (e.g., images + videos), a confirmation prompt appears so you can cancel or proceed.
 
 ### Set‑Cover Experiment (More detailed)
 
@@ -171,6 +193,22 @@ python -m multiarrangement.examples.ltw_video
 python -m multiarrangement.examples.ltw_audio
 ```
 These examples auto‑resolve the packaged media and create `./results` if missing.
+
+### CLI Demos
+
+```bash
+# Video demos
+multiarrangement-demo
+multiarrangement-demo-adaptive
+
+# Audio demos
+multiarrangement-demo-audio
+multiarrangement-demo-audio-adaptive
+
+# Image demos
+multiarrangement-demo-image
+multiarrangement-demo-image-adaptive
+```
 
 ### Custom Instructions (both paradigms)
 
