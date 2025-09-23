@@ -194,21 +194,6 @@ python -m multiarrangement.examples.ltw_audio
 ```
 These examples auto‑resolve the packaged media and create `./results` if missing.
 
-### CLI Demos
-
-```bash
-# Video demos
-multiarrangement-demo
-multiarrangement-demo-adaptive
-
-# Audio demos
-multiarrangement-demo-audio
-multiarrangement-demo-audio-adaptive
-
-# Image demos
-multiarrangement-demo-image
-multiarrangement-demo-image-adaptive
-```
 
 ### Custom Instructions (both paradigms)
 
@@ -236,7 +221,7 @@ ma.multiarrangement_adaptive(
 )
 ```
 
-Key ideas:
+Notes:
 
 - Evidence is normalized per trial: `w_ij = (d_ij / max_d)^2` so absolute pixel scale does not dominate.
 - Next subset is chosen greedily to maximize (utility gain)/(time cost), starting from the globally weakest‑evidence pair.
