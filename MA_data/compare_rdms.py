@@ -3,13 +3,29 @@ RDM Comparison Script for Research Methods Paper
 Compares two different data collection methods for measuring representational dissimilarity
 """
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy.stats import spearmanr, pearsonr
-from scipy.spatial.distance import squareform
-from sklearn.metrics import mean_squared_error, mean_absolute_error
+from __future__ import annotations
+
 import os
+import random
+from pathlib import Path
+from typing import Optional, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from scipy.stats import pearsonr, spearmanr
+from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+DEFAULT_SEED = 20240215
+BOOTSTRAP_SAMPLES = 5000
+
+
+def set_global_seeds(seed: int = DEFAULT_SEED) -> None:
+    """Set all RNG seeds used by this module."""
+
+    random.seed(seed)
+    np.random.seed(seed)
+
 
 def load_rdm(filepath):
     """Load RDM from CSV file - returns numpy array and labels.
@@ -53,7 +69,94 @@ def safe_normalize(arr):
         return np.zeros_like(arr)
     return (arr - mn) / rng
 
-def compare_rdms(rdm1_matrix, rdm2_matrix, method1_name="Method 1", method2_name="Method 2"):
+def concordance_correlation_coefficient(x: np.ndarray, y: np.ndarray) -> float:
+    """Compute Lin's concordance correlation coefficient for two vectors."""
+
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    cov_xy = np.cov(x, y, ddof=0)[0, 1]
+    mean_x = np.mean(x)
+    mean_y = np.mean(y)
+    var_x = np.var(x, ddof=0)
+    var_y = np.var(y, ddof=0)
+    denom = var_x + var_y + (mean_x - mean_y) ** 2
+    if denom == 0:
+        return float("nan")
+    return float(2 * cov_xy / denom)
+
+
+def deming_regression(x: np.ndarray, y: np.ndarray, lambda_: float = 1.0) -> Tuple[float, float]:
+    """Compute slope and intercept for Deming regression with ratio lambda_."""
+
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    x_mean = np.mean(x)
+    y_mean = np.mean(y)
+    s_xx = np.var(x, ddof=1)
+    s_yy = np.var(y, ddof=1)
+    s_xy = np.cov(x, y, ddof=1)[0, 1]
+
+    term = s_yy - lambda_ * s_xx
+    slope = (term + np.sqrt(term**2 + 4 * lambda_ * s_xy**2)) / (2 * s_xy)
+    intercept = y_mean - slope * x_mean
+    return float(slope), float(intercept)
+
+
+def bootstrap_deming_ci(
+    x: np.ndarray,
+    y: np.ndarray,
+    *,
+    lambda_: float = 1.0,
+    n_boot: int = BOOTSTRAP_SAMPLES,
+    alpha: float = 0.05,
+    rng: Optional[np.random.Generator] = None,
+) -> Tuple[Tuple[float, float], Tuple[float, float]]:
+    """Return bootstrap confidence intervals for Deming slope and intercept."""
+
+    if rng is None:
+        rng = np.random.default_rng()
+
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    slopes = np.empty(n_boot, dtype=float)
+    intercepts = np.empty(n_boot, dtype=float)
+
+    for i in range(n_boot):
+        idx = rng.integers(0, x.size, size=x.size)
+        slopes[i], intercepts[i] = deming_regression(x[idx], y[idx], lambda_=lambda_)
+
+    lower_q, upper_q = alpha / 2.0, 1.0 - alpha / 2.0
+    slope_ci = (
+        float(np.quantile(slopes, lower_q)),
+        float(np.quantile(slopes, upper_q)),
+    )
+    intercept_ci = (
+        float(np.quantile(intercepts, lower_q)),
+        float(np.quantile(intercepts, upper_q)),
+    )
+    return slope_ci, intercept_ci
+
+
+def bland_altman_stats(x: np.ndarray, y: np.ndarray) -> Tuple[float, Tuple[float, float]]:
+    """Return Bland–Altman mean difference and limits of agreement (x - y)."""
+
+    diff = np.asarray(x, dtype=float) - np.asarray(y, dtype=float)
+    mean_diff = float(np.mean(diff))
+    std_diff = float(np.std(diff, ddof=1))
+    loa = (mean_diff - 1.96 * std_diff, mean_diff + 1.96 * std_diff)
+    return mean_diff, loa
+
+
+def compare_rdms(
+    rdm1_matrix,
+    rdm2_matrix,
+    method1_name="Method 1",
+    method2_name="Method 2",
+    *,
+    bootstrap_samples: int = BOOTSTRAP_SAMPLES,
+    rng: Optional[np.random.Generator] = None,
+):
     """
     Compare two RDMs using multiple metrics
     
@@ -101,7 +204,27 @@ def compare_rdms(rdm1_matrix, rdm2_matrix, method1_name="Method 1", method2_name
         'mae_normalized': mae_norm,
         'n_comparisons': len(rdm1_lower)
     }
-    
+
+    results['ccc'] = concordance_correlation_coefficient(rdm1_lower, rdm2_lower)
+
+    slope, intercept = deming_regression(rdm1_lower, rdm2_lower)
+    results['deming_slope'] = slope
+    results['deming_intercept'] = intercept
+
+    if bootstrap_samples and bootstrap_samples > 0:
+        slope_ci, intercept_ci = bootstrap_deming_ci(
+            rdm1_lower,
+            rdm2_lower,
+            n_boot=bootstrap_samples,
+            rng=rng,
+        )
+        results['deming_slope_ci'] = slope_ci
+        results['deming_intercept_ci'] = intercept_ci
+
+    mean_diff, loa = bland_altman_stats(rdm1_lower, rdm2_lower)
+    results['bland_altman_mean_diff'] = mean_diff
+    results['bland_altman_loa'] = loa
+
     return results, rdm1_lower, rdm2_lower, rdm1_norm, rdm2_norm
 
 def plot_rdm_comparison(rdm1_matrix, rdm2_matrix, subject_id, method1_name="Behavior", method2_name="Multi-arrangement"):
@@ -191,6 +314,10 @@ def plot_normalized_scatter(rdm1_norm, rdm2_norm, subject_id, results,
     plt.tight_layout()
     return fig
 
+def format_ci(ci: Tuple[float, float]) -> str:
+    return f"[{ci[0]:.4f}, {ci[1]:.4f}]"
+
+
 def print_comparison_report(results, subject_id):
     """
     Print a formatted report of comparison metrics
@@ -208,6 +335,19 @@ def print_comparison_report(results, subject_id):
     print(f"\n--- Error Metrics (Normalized 0-1 Scale) ---")
     print(f"Root Mean Square Error (RMSE): {results['rmse_normalized']:.4f}")
     print(f"Mean Absolute Error (MAE):     {results['mae_normalized']:.4f}")
+
+    print(f"\n--- Agreement Metrics ---")
+    print(f"Concordance Correlation Coefficient: {results['ccc']:.4f}")
+    if 'deming_slope' in results:
+        slope_ci = format_ci(results.get('deming_slope_ci', (float('nan'), float('nan'))))
+        intercept_ci = format_ci(results.get('deming_intercept_ci', (float('nan'), float('nan'))))
+        print(f"Deming slope: {results['deming_slope']:.4f}")
+        print(f"Deming intercept: {results['deming_intercept']:.4f}")
+        print(f"Deming slope 95% CI: {slope_ci}")
+        print(f"Deming intercept 95% CI: {intercept_ci}")
+    mean_diff, loa = results['bland_altman_mean_diff'], results['bland_altman_loa']
+    print(f"Bland–Altman mean diff: {mean_diff:.4f}")
+    print(f"Bland–Altman LoA: [{loa[0]:.4f}, {loa[1]:.4f}]")
     print(f"\n{'='*70}\n")
 
 def create_summary_comparison(results_sub1, results_sub2):
@@ -271,139 +411,230 @@ def create_summary_comparison(results_sub1, results_sub2):
     plt.tight_layout()
     return fig
 
-def main():
-    """
-    Main function to run the RDM comparison analysis
-    """
-    print("\n" + "="*70)
-    print("RDM COMPARISON ANALYSIS: Behavior vs Multi-arrangement Methods")
-    print("="*70)
-    
-    # Load data
-    print("\nLoading data files...")
-    base_dir = os.path.dirname(__file__)
-    behavior_sub1_fp = os.path.join(base_dir, 'BehaviorSub1_rdm_normalized.csv')
-    behavior_sub2_fp = os.path.join(base_dir, 'BehaviorSub2_rdm_normalized.csv')
-    ma_sub1_fp = os.path.join(base_dir, 'rdm_sub1_ma_normalized.csv')
-    ma_sub2_fp = os.path.join(base_dir, 'rdm_sub2_ma_normalized.csv')
 
-    # Check files exist
-    for p in [behavior_sub1_fp, behavior_sub2_fp, ma_sub1_fp, ma_sub2_fp]:
-        if not os.path.exists(p):
-            raise FileNotFoundError(f"Required data file not found: {p}")
+def _save_fig(fig: plt.Figure, path: Path) -> None:
+    fig.savefig(path, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    try:
+        rel = path.relative_to(Path.cwd())
+    except ValueError:
+        rel = path
+    print(f"Saved: {rel}")
 
-    behavior_sub1, labels1 = load_rdm(behavior_sub1_fp)
-    ma_sub1, _ = load_rdm(ma_sub1_fp)
-    behavior_sub2, labels2 = load_rdm(behavior_sub2_fp)
-    ma_sub2, _ = load_rdm(ma_sub2_fp)
-    print("Data loaded successfully!")
-    
-    # Subject 1 analysis
-    print("\n" + "="*70)
-    print("ANALYZING SUBJECT 1")
-    print("="*70)
-    results_sub1, rdm1_lower, rdm2_lower, rdm1_norm, rdm2_norm = compare_rdms(
-        behavior_sub1, ma_sub1, "Behavior", "Multi-arrangement"
-    )
-    print_comparison_report(results_sub1, 1)
-    
-    # Create visualizations for Subject 1
-    fig1 = plot_rdm_comparison(behavior_sub1, ma_sub1, 1)
-    fig1.savefig('subject1_rdm_comparison.png', dpi=300, bbox_inches='tight')
-    print("Saved: subject1_rdm_comparison.png")
-    
-    fig1_scatter = plot_normalized_scatter(rdm1_norm, rdm2_norm, 1, results_sub1)
-    fig1_scatter.savefig('subject1_normalized_scatter.png', dpi=300, bbox_inches='tight')
-    print("Saved: subject1_normalized_scatter.png")
-    
-    # Subject 2 analysis
-    print("\n" + "="*70)
-    print("ANALYZING SUBJECT 2")
-    print("="*70)
-    results_sub2, rdm1_lower_s2, rdm2_lower_s2, rdm1_norm_s2, rdm2_norm_s2 = compare_rdms(
-        behavior_sub2, ma_sub2, "Behavior", "Multi-arrangement"
-    )
-    print_comparison_report(results_sub2, 2)
-    
-    # Create visualizations for Subject 2
-    fig2 = plot_rdm_comparison(behavior_sub2, ma_sub2, 2)
-    fig2.savefig('subject2_rdm_comparison.png', dpi=300, bbox_inches='tight')
-    print("Saved: subject2_rdm_comparison.png")
-    
-    fig2_scatter = plot_normalized_scatter(rdm1_norm_s2, rdm2_norm_s2, 2, results_sub2)
-    fig2_scatter.savefig('subject2_normalized_scatter.png', dpi=300, bbox_inches='tight')
-    print("Saved: subject2_normalized_scatter.png")
-    
-    # Summary comparison
-    fig_summary = create_summary_comparison(results_sub1, results_sub2)
-    fig_summary.savefig('summary_comparison.png', dpi=300, bbox_inches='tight')
-    print("Saved: summary_comparison.png")
-    
-    # Create a combined results table for easy reporting
-    print("\n" + "="*70)
-    print("RESULTS TABLE FOR MANUSCRIPT")
-    print("="*70)
-    
-    # Create data manually as lists
+
+def _results_table(results_sub1: dict, results_sub2: dict) -> np.ndarray:
     subjects = ['Subject 1', 'Subject 2', 'Mean']
-    pearson_r = [
-        results_sub1['pearson_r'], 
+    pearson_r = np.array([
+        results_sub1['pearson_r'],
         results_sub2['pearson_r'],
-        (results_sub1['pearson_r'] + results_sub2['pearson_r']) / 2
-    ]
-    pearson_p = [
-        results_sub1['pearson_p'], 
+        (results_sub1['pearson_r'] + results_sub2['pearson_r']) / 2,
+    ])
+    pearson_p = np.array([
+        results_sub1['pearson_p'],
         results_sub2['pearson_p'],
-        np.nan
-    ]
-    spearman_r = [
-        results_sub1['spearman_r'], 
+        np.nan,
+    ])
+    spearman_r = np.array([
+        results_sub1['spearman_r'],
         results_sub2['spearman_r'],
-        (results_sub1['spearman_r'] + results_sub2['spearman_r']) / 2
-    ]
-    spearman_p = [
-        results_sub1['spearman_p'], 
+        (results_sub1['spearman_r'] + results_sub2['spearman_r']) / 2,
+    ])
+    spearman_p = np.array([
+        results_sub1['spearman_p'],
         results_sub2['spearman_p'],
-        np.nan
-    ]
-    rmse_norm = [
-        results_sub1['rmse_normalized'], 
+        np.nan,
+    ])
+    rmse_norm = np.array([
+        results_sub1['rmse_normalized'],
         results_sub2['rmse_normalized'],
-        (results_sub1['rmse_normalized'] + results_sub2['rmse_normalized']) / 2
-    ]
-    mae_norm = [
-        results_sub1['mae_normalized'], 
+        (results_sub1['rmse_normalized'] + results_sub2['rmse_normalized']) / 2,
+    ])
+    mae_norm = np.array([
+        results_sub1['mae_normalized'],
         results_sub2['mae_normalized'],
-        (results_sub1['mae_normalized'] + results_sub2['mae_normalized']) / 2
-    ]
-    
-    # Print table without pandas
+        (results_sub1['mae_normalized'] + results_sub2['mae_normalized']) / 2,
+    ])
+
+    table = np.column_stack([
+        subjects,
+        pearson_r,
+        pearson_p,
+        spearman_r,
+        spearman_p,
+        rmse_norm,
+        mae_norm,
+    ])
+    return table
+
+
+def _print_results_table(table: np.ndarray) -> None:
     print(f"\n{'Subject':<15} {'Pearson r':>12} {'Pearson p':>12} {'Spearman ρ':>12} {'Spearman p':>12} {'RMSE(norm)':>12} {'MAE(norm)':>12}")
     print("-" * 100)
-    for i in range(3):
-        p_str = f"{pearson_p[i]:.2e}" if not np.isnan(pearson_p[i]) else "   --    "
-        s_str = f"{spearman_p[i]:.2e}" if not np.isnan(spearman_p[i]) else "   --    "
-        print(f"{subjects[i]:<15} {pearson_r[i]:>12.4f} {p_str:>12} {spearman_r[i]:>12.4f} {s_str:>12} {rmse_norm[i]:>12.4f} {mae_norm[i]:>12.4f}")
+    for row in table:
+        subject = row[0]
+        pearson_r, pearson_p, spearman_r, spearman_p, rmse_norm, mae_norm = row[1:]
+        p_str = f"{float(pearson_p):.2e}" if not np.isnan(float(pearson_p)) else "   --    "
+        s_str = f"{float(spearman_p):.2e}" if not np.isnan(float(spearman_p)) else "   --    "
+        print(
+            f"{subject:<15} {float(pearson_r):>12.4f} {p_str:>12} {float(spearman_r):>12.4f} {s_str:>12} {float(rmse_norm):>12.4f} {float(mae_norm):>12.4f}"
+        )
     print("")
-    
-    # Save to CSV manually
-    with open('comparison_results_table.csv', 'w') as f:
-        f.write("Subject,Pearson_r,Pearson_p,Spearman_rho,Spearman_p,RMSE_normalized,MAE_normalized\n")
-        for i in range(3):
-            f.write(f"{subjects[i]},{pearson_r[i]},{pearson_p[i]},{spearman_r[i]},{spearman_p[i]},{rmse_norm[i]},{mae_norm[i]}\n")
-    print("Saved: comparison_results_table.csv")
-    
-    print("\n" + "="*70)
-    print("ANALYSIS COMPLETE!")
-    print("="*70)
-    print("\nGenerated files:")
-    print("  - subject1_rdm_comparison.png")
-    print("  - subject1_normalized_scatter.png")
-    print("  - subject2_rdm_comparison.png")
-    print("  - subject2_normalized_scatter.png")
-    print("  - summary_comparison.png")
-    print("  - comparison_results_table.csv")
-    print("\n" + "="*70 + "\n")
+
+
+def _write_results_csv(table: np.ndarray, output_path: Path) -> None:
+    header = "Subject,Pearson_r,Pearson_p,Spearman_rho,Spearman_p,RMSE_normalized,MAE_normalized\n"
+    with output_path.open('w', encoding='utf-8') as f:
+        f.write(header)
+        for row in table:
+            f.write(
+                f"{row[0]},{float(row[1])},{row[2]},{float(row[3])},{row[4]},{float(row[5])},{float(row[6])}\n"
+            )
+    try:
+        rel = output_path.relative_to(Path.cwd())
+    except ValueError:
+        rel = output_path
+    print(f"Saved: {rel}")
+
+
+def run_analysis(
+    *,
+    output_dir: Optional[Path] = None,
+    seed: int = DEFAULT_SEED,
+    bootstrap_samples: int = BOOTSTRAP_SAMPLES,
+    alpha: float = 0.05,
+    verbose: bool = True,
+):
+    """Execute the full RDM comparison analysis pipeline."""
+
+    set_global_seeds(seed)
+    rng_master = np.random.default_rng(seed)
+
+    base_dir = Path(__file__).resolve().parent
+    data_paths = {
+        'behavior_sub1': base_dir / 'BehaviorSub1_rdm_normalized.csv',
+        'behavior_sub2': base_dir / 'BehaviorSub2_rdm_normalized.csv',
+        'ma_sub1': base_dir / 'rdm_sub1_ma_normalized.csv',
+        'ma_sub2': base_dir / 'rdm_sub2_ma_normalized.csv',
+    }
+
+    for path in data_paths.values():
+        if not path.exists():
+            raise FileNotFoundError(f"Required data file not found: {path}")
+
+    if output_dir is None:
+        output_dir = base_dir
+    else:
+        output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if verbose:
+        print("\n" + "=" * 70)
+        print("RDM COMPARISON ANALYSIS: Behavior vs Multi-arrangement Methods")
+        print("=" * 70)
+        print("\nLoading data files...")
+
+    behavior_sub1, _ = load_rdm(data_paths['behavior_sub1'])
+    ma_sub1, _ = load_rdm(data_paths['ma_sub1'])
+    behavior_sub2, _ = load_rdm(data_paths['behavior_sub2'])
+    ma_sub2, _ = load_rdm(data_paths['ma_sub2'])
+
+    if verbose:
+        print("Data loaded successfully!")
+
+    rng_sub1 = np.random.default_rng(rng_master.integers(0, 2**32 - 1))
+    rng_sub2 = np.random.default_rng(rng_master.integers(0, 2**32 - 1))
+
+    if verbose:
+        print("\n" + "=" * 70)
+        print("ANALYZING SUBJECT 1")
+        print("=" * 70)
+
+    results_sub1, rdm1_lower, rdm2_lower, rdm1_norm, rdm2_norm = compare_rdms(
+        behavior_sub1,
+        ma_sub1,
+        "Behavior",
+        "Multi-arrangement",
+        bootstrap_samples=bootstrap_samples,
+        rng=rng_sub1,
+    )
+    if verbose:
+        print_comparison_report(results_sub1, 1)
+
+    fig1 = plot_rdm_comparison(behavior_sub1, ma_sub1, 1)
+    _save_fig(fig1, output_dir / 'subject1_rdm_comparison.png')
+
+    fig1_scatter = plot_normalized_scatter(rdm1_norm, rdm2_norm, 1, results_sub1)
+    _save_fig(fig1_scatter, output_dir / 'subject1_normalized_scatter.png')
+
+    if verbose:
+        print("\n" + "=" * 70)
+        print("ANALYZING SUBJECT 2")
+        print("=" * 70)
+
+    results_sub2, rdm1_lower_s2, rdm2_lower_s2, rdm1_norm_s2, rdm2_norm_s2 = compare_rdms(
+        behavior_sub2,
+        ma_sub2,
+        "Behavior",
+        "Multi-arrangement",
+        bootstrap_samples=bootstrap_samples,
+        rng=rng_sub2,
+    )
+    if verbose:
+        print_comparison_report(results_sub2, 2)
+
+    fig2 = plot_rdm_comparison(behavior_sub2, ma_sub2, 2)
+    _save_fig(fig2, output_dir / 'subject2_rdm_comparison.png')
+
+    fig2_scatter = plot_normalized_scatter(rdm1_norm_s2, rdm2_norm_s2, 2, results_sub2)
+    _save_fig(fig2_scatter, output_dir / 'subject2_normalized_scatter.png')
+
+    fig_summary = create_summary_comparison(results_sub1, results_sub2)
+    _save_fig(fig_summary, output_dir / 'summary_comparison.png')
+
+    if verbose:
+        print("\n" + "=" * 70)
+        print("RESULTS TABLE FOR MANUSCRIPT")
+        print("=" * 70)
+
+    table = _results_table(results_sub1, results_sub2)
+    if verbose:
+        _print_results_table(table)
+
+    _write_results_csv(table, output_dir / 'comparison_results_table.csv')
+
+    if verbose:
+        print("\n" + "=" * 70)
+        print("ANALYSIS COMPLETE!")
+        print("=" * 70)
+        print("\nGenerated files:")
+        for name in [
+            'subject1_rdm_comparison.png',
+            'subject1_normalized_scatter.png',
+            'subject2_rdm_comparison.png',
+            'subject2_normalized_scatter.png',
+            'summary_comparison.png',
+            'comparison_results_table.csv',
+        ]:
+            print(f"  - {name}")
+        print("\n" + "=" * 70 + "\n")
+
+    summary_metrics = {
+        'pearson_mean': (results_sub1['pearson_r'] + results_sub2['pearson_r']) / 2,
+        'spearman_mean': (results_sub1['spearman_r'] + results_sub2['spearman_r']) / 2,
+        'rmse_norm_mean': (results_sub1['rmse_normalized'] + results_sub2['rmse_normalized']) / 2,
+        'mae_norm_mean': (results_sub1['mae_normalized'] + results_sub2['mae_normalized']) / 2,
+    }
+
+    return {
+        'subject_1': results_sub1,
+        'subject_2': results_sub2,
+        'summary': summary_metrics,
+        'output_dir': output_dir,
+    }
+
+
+def main():
+    run_analysis()
 
 if __name__ == "__main__":
     main()
