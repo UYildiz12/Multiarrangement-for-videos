@@ -613,17 +613,7 @@ def confirm_mixed_prompt(n_vid: int, n_img: int, n_aud: int) -> bool:
     pygame.display.quit()
     return bool(proceed)
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
 def save_results(df, output_dir, participant_id="participant", timestamp: Optional[str] = None):
-=======
-=======
->>>>>>> e44c880afc7a9196c8fc6e3a60ca6646f4aaad17
-=======
->>>>>>> e44c880afc7a9196c8fc6e3a60ca6646f4aaad17
-def save_results(df, output_dir, participant_id="participant"):
->>>>>>> e44c880afc7a9196c8fc6e3a60ca6646f4aaad17
     """Save the experiment results to files."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
