@@ -32,6 +32,8 @@ class AdaptiveConfig:
     evidence_threshold: float = 0.5  # stop when min pair evidence >= threshold
     utility_exponent: float = 10.0   # d in u(w)=1-exp(-d w)
     time_limit_seconds: Optional[float] = None  # total wall time limit
+    target_time_seconds: Optional[float] = None  # per-trial target time (soft, enforced with tolerance)
+    target_time_tolerance: float = 0.05         # allowable fractional overshoot
     min_subset_size: int = 3
     max_subset_size: Optional[int] = None
     time_cost_exponent: float = 1.5
@@ -40,6 +42,27 @@ class AdaptiveConfig:
     inverse_mds_max_iter: int = 15
     inverse_mds_tol: float = 1e-4
     inverse_mds_step_c: float = 0.3
+    # New policy controls
+    evidence_alpha: float = 2.0                # exponent for evidence weights
+    unseen_boost: float = 0.0                 # add to utility for unseen items
+    recency_penalty: float = 0.0              # penalize recently used items
+    recency_decay: float = 0.85               # decay multiplier per trial for recency state
+    stress_weight: float = 0.0                # weight for local stress heuristic
+    max_jaccard: Optional[float] = None       # hard cap on Jaccard overlap vs. last subset
+    overlap_penalty: float = 0.0              # soft penalty on overlap
+    duration_cost_weight: float = 0.0         # add duration-weighted cost
+    duration_cost_cap_per_item: Optional[float] = None  # cap per-item duration cost (sec)
+    robust_method: Optional[str] = None       # 'winsor' | 'huber' | None
+    robust_winsor_high: float = 0.98          # winsor high cutoff for normalized distances
+    robust_huber_c: float = 0.9               # huber c threshold for normalized distances
+    evidence_weight_mode: str = 'k2012'       # 'max' | 'rms' | 'k2012' (default: 'k2012')
+    # Long-clip safeguards
+    long_clip_threshold_seconds: Optional[float] = None
+    min_long_clip_inclusion_rate: float = 0.0
+    long_clip_boost: float = 0.0
+    stop_on_utility: bool = False             # compare threshold on u(W)=1-exp(-dW) instead of raw W
+    avoid_anchor_reuse: bool = False          # avoid reusing the exact previous anchor pair
+    cold_start_require_unseen_trials: int = 0 # require at least one unseen in early trials
 
 
 class AdaptiveMultiarrangementExperiment:
@@ -89,6 +112,11 @@ class AdaptiveMultiarrangementExperiment:
             print(f"[info] Detected {self.n} media files. First few: {sample}")
 
         # State
+        try:
+            import os as _os
+            self.rng_seed = int.from_bytes(_os.urandom(8), 'little')
+        except Exception:
+            self.rng_seed = None
         self.current_subset_indices: List[int] = list(range(self.n))  # trial 1: all items
         self.trials: List[TrialArrangement] = []
         self.trial_counter = 0
@@ -100,6 +128,58 @@ class AdaptiveMultiarrangementExperiment:
         self.W = np.zeros((self.n, self.n), dtype=float)
 
         self.video_processor = VideoProcessor()
+        # Policy state: seen, recent, durations
+        self.seen = np.zeros((self.n,), dtype=bool)
+        self.recent = np.zeros((self.n,), dtype=float)
+        self.last_subset: Optional[List[int]] = None
+        self.last_anchor_pair: Optional[Tuple[int, int]] = None
+        self.durations = self._estimate_durations()
+        # Long-clip mask and inclusion counts
+        self.inclusion_counts = np.zeros((self.n,), dtype=int)
+        thr = self.config.long_clip_threshold_seconds
+        self.long_clip_mask = None
+        if thr is not None:
+            try:
+                self.long_clip_mask = (self.durations >= float(thr))
+            except Exception:
+                self.long_clip_mask = None
+
+    def _estimate_durations(self) -> np.ndarray:
+        """Estimate per-item review durations (in seconds) for time-aware costs.
+
+        Videos: from OpenCV props (frames/fps). Images: small constant (0.5s).
+        Audio: try WAV via wave; else fallback to small constant (3s).
+        """
+        import cv2, wave, contextlib
+        out = np.zeros((self.n,), dtype=float)
+        for i, fn in enumerate(self.video_files):
+            p = self.get_video_path(fn)
+            ext = str(p.suffix).lower()
+            try:
+                if ext in {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}:
+                    out[i] = 0.5
+                elif ext in {'.mp3', '.ogg', '.flac', '.aac', '.m4a'}:
+                    # Unknown compressed length without external libs; fallback
+                    out[i] = 3.0
+                elif ext in {'.wav'}:
+                    with contextlib.closing(wave.open(str(p), 'r')) as f:
+                        frames = f.getnframes(); rate = f.getframerate()
+                        out[i] = float(frames) / float(rate) if rate > 0 else 3.0
+                else:
+                    cap = cv2.VideoCapture(str(p))
+                    if cap.isOpened():
+                        frames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        out[i] = float(frames / fps) if fps and fps > 0 else 5.0
+                    else:
+                        out[i] = 5.0
+                    try:
+                        cap.release()
+                    except Exception:
+                        pass
+            except Exception:
+                out[i] = 3.0
+        return out
 
     # --- UI contract methods ---
     def get_current_batch_videos(self) -> List[str]:
@@ -120,7 +200,15 @@ class AdaptiveMultiarrangementExperiment:
         self.trials.append(TrialArrangement(subset=list(self.current_subset_indices), positions=positions_by_idx))
 
         # Re-estimate D and W using all trials so far
-        self.D_est, self.W = estimate_rdm_weighted_average(self.n, self.trials)
+        self.D_est, self.W = estimate_rdm_weighted_average(
+            self.n,
+            self.trials,
+            alpha=float(self.config.evidence_alpha),
+            robust_method=self.config.robust_method,
+            robust_winsor_high=float(self.config.robust_winsor_high),
+            robust_huber_c=float(self.config.robust_huber_c),
+            weight_mode=str(self.config.evidence_weight_mode),
+        )
         # Optional inverse-MDS refinement
         if self.config.use_inverse_mds:
             self.D_est = refine_rdm_inverse_mds(
@@ -130,6 +218,17 @@ class AdaptiveMultiarrangementExperiment:
                 tol=self.config.inverse_mds_tol,
                 step_c=self.config.inverse_mds_step_c,
             )
+        # Update policy state: mark seen and update recency with decay
+        if positions_by_idx:
+            sel = list(positions_by_idx.keys())
+            self.seen[sel] = True
+            # decay then bump
+            self.recent *= float(self.config.recency_decay)
+            self.recent[sel] += 1.0
+            # Track inclusion counts
+            for idx in sel:
+                if 0 <= idx < self.n:
+                    self.inclusion_counts[idx] += 1
 
     def advance_to_next_batch(self) -> bool:
         self.trial_counter += 1
@@ -139,15 +238,26 @@ class AdaptiveMultiarrangementExperiment:
             self.experiment_completed = True
             return False
 
-        # Evidence criterion: min off-diagonal W >= threshold
+        # Evidence criterion: either min W >= threshold or min u(W) >= threshold
         iu = np.triu_indices(self.n, 1)
         if iu[0].size > 0:
-            min_w = float(np.min(self.W[iu]))
-            if min_w >= self.config.evidence_threshold:
-                self.experiment_completed = True
-                return False
+            if self.config.stop_on_utility:
+                # u(W) = 1 - exp(-d W)
+                d = float(self.config.utility_exponent)
+                u_vals = 1.0 - np.exp(-d * self.W[iu])
+                min_u = float(np.min(u_vals))
+                if min_u >= self.config.evidence_threshold:
+                    self.experiment_completed = True
+                    return False
+            else:
+                min_w = float(np.min(self.W[iu]))
+                if min_w >= self.config.evidence_threshold:
+                    self.experiment_completed = True
+                    return False
 
         # Choose next subset via lift-the-weakest
+        # Set optional avoidance of the last anchor pair
+        avoid_pair = self.last_anchor_pair if self.config.avoid_anchor_reuse else None
         next_subset = select_next_subset_lift_weakest(
             self.D_est,
             self.W,
@@ -156,6 +266,26 @@ class AdaptiveMultiarrangementExperiment:
             arena_max=self.config.arena_max,
             min_size=self.config.min_subset_size,
             max_size=self.config.max_subset_size or self.n,
+            seen=self.seen,
+            recent=self.recent,
+            last_subset=self.last_subset,
+            avoid_anchor_pair=avoid_pair,
+            max_jaccard=self.config.max_jaccard,
+            overlap_penalty=self.config.overlap_penalty,
+            recency_penalty=self.config.recency_penalty,
+            unseen_boost=self.config.unseen_boost,
+            stress_weight=self.config.stress_weight,
+            durations=self.durations,
+            duration_cost_weight=self.config.duration_cost_weight,
+            target_time_seconds=self.config.target_time_seconds,
+            target_time_tolerance=self.config.target_time_tolerance,
+            duration_cost_cap_per_item=self.config.duration_cost_cap_per_item,
+            inclusion_counts=self.inclusion_counts,
+            long_clip_mask=self.long_clip_mask,
+            min_long_clip_inclusion_rate=self.config.min_long_clip_inclusion_rate,
+            long_clip_boost=self.config.long_clip_boost,
+            trials_so_far=self.trial_counter,
+            require_unseen=(self.trial_counter < int(self.config.cold_start_require_unseen_trials)),
         )
 
         # Diagnostic: print chosen subset size and a few names
@@ -178,6 +308,11 @@ class AdaptiveMultiarrangementExperiment:
                 next_subset = next_subset + [remaining[0]]
 
         self.current_subset_indices = next_subset
+        self.last_subset = list(next_subset)
+        # Update last anchor pair from the first two indices (selection starts from anchors)
+        if len(next_subset) >= 2:
+            a, b = int(next_subset[0]), int(next_subset[1])
+            self.last_anchor_pair = (min(a, b), max(a, b))
         return True
 
     def is_experiment_complete(self) -> bool:
@@ -207,6 +342,7 @@ class AdaptiveMultiarrangementExperiment:
             "trials": [[int(i) for i in t.subset] for t in self.trials],
             "evidence_threshold": float(self.config.evidence_threshold),
             "utility_exponent": float(self.config.utility_exponent),
+            "rng_seed": int(self.rng_seed) if self.rng_seed is not None else None,
         }
         import json
         with open(output_dir / f"{base}_meta.json", "w", encoding="utf-8") as f:

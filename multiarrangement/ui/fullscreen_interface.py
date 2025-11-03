@@ -49,6 +49,10 @@ class FullscreenInterface(BaseInterface):
         
         # Draw connections while dragging
         self.draw_connections_while_dragging(self.arena_center, self.arena_radius)
+
+        # Optional magnifier overlay (center-locked)
+        if self.magnify_active:
+            self.draw_magnifier_overlay()
         
         # Draw done button (bottom-left)
         self.draw_done_button()
@@ -84,6 +88,11 @@ class FullscreenInterface(BaseInterface):
                 elif event.key == pygame.K_F11:
                     # Toggle fullscreen (though we start in fullscreen)
                     pass
+                elif event.key == pygame.K_z:
+                    self.magnify_active = True
+            elif event.type == pygame.KEYUP:
+                if event.key == pygame.K_z:
+                    self.magnify_active = False
                     
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click

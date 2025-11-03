@@ -5,6 +5,7 @@ Base interface class for multiarrangement experiments.
 import pygame
 import sys
 import math
+import random
 import threading
 import textwrap
 from pathlib import Path
@@ -365,13 +366,16 @@ class BaseInterface(ABC):
         """Arrange video thumbnails in a circle around the center."""
         num_videos = len(self.current_batch_videos)
         angle_step = 2 * math.pi / num_videos
-        
+
         for i, video_filename in enumerate(self.current_batch_videos):
             video_name = Path(video_filename).stem
-            angle = i * angle_step
+            # Add slight randomization to reduce positional bias
+            jitter = random.uniform(-0.35, 0.35)
+            angle = i * angle_step + jitter
             
-            x = center[0] + (radius + 100) * math.cos(angle)
-            y = center[1] - (radius + 100) * math.sin(angle)
+            ring = radius + 100 + random.uniform(-20, 20)
+            x = center[0] + ring * math.cos(angle)
+            y = center[1] - ring * math.sin(angle)
             
             self.video_positions[video_name] = (x, y)
             
@@ -528,9 +532,25 @@ class BaseInterface(ABC):
                     )
                     
                     if other_distance <= arena_radius - 40:
-                        pygame.draw.line(self.screen, (255, 0, 0, 128), 
+                        # Calculate distance between dragged token and this token
+                        token_distance = math.sqrt(
+                            (dragged_pos[0] - pos[0])**2 + 
+                            (dragged_pos[1] - pos[1])**2
+                        )
+                        
+                        # Scale thickness and opacity with proximity (closer = thicker/more opaque)
+                        max_possible_distance = arena_radius * 2
+                        proximity_factor = max(0, 1 - (token_distance / max_possible_distance))
+                        
+                        thickness = int(1 + proximity_factor * 7)  # 1 to 8
+                        opacity = int(50 + proximity_factor * 205)  # 50 to 255
+                        
+                        # Light red color with variable opacity
+                        color = (255, 0, 0, opacity)
+                        
+                        pygame.draw.line(self.screen, color, 
                                        (int(dragged_pos[0]), int(dragged_pos[1])),
-                                       (int(pos[0]), int(pos[1])), 3)
+                                       (int(pos[0]), int(pos[1])), thickness)
                                        
     def finish_batch(self) -> None:
         """Finish the current batch and record results."""
@@ -626,6 +646,10 @@ class MultiarrangementInterface(BaseInterface):
         
         # Draw connections while dragging
         self.draw_connections_while_dragging(self.arena_center, self.arena_radius)
+
+        # Optional magnifier overlay (center-locked)
+        if self.magnify_active:
+            self.draw_magnifier_overlay()
         
         # Draw done button
         self.draw_done_button()
@@ -658,6 +682,11 @@ class MultiarrangementInterface(BaseInterface):
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
+                elif event.key == pygame.K_z:
+                    self.magnify_active = True
+            elif event.type == pygame.KEYUP:
+                if event.key == pygame.K_z:
+                    self.magnify_active = False
                     
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 if event.button == 1:  # Left click
@@ -688,3 +717,27 @@ class MultiarrangementInterface(BaseInterface):
         # Arrange videos initially if not positioned
         if not self.video_positions and self.current_batch_videos:
             self.arrange_videos_in_circle(self.arena_center, self.arena_radius)
+
+    def draw_magnifier_overlay(self) -> None:
+        """Draw a simple center-locked magnifier showing the arena area enlarged."""
+        try:
+            w_src, h_src = self.magnify_box
+            cx, cy = self.arena_center
+            x0 = max(0, cx - w_src // 2)
+            y0 = max(0, cy - h_src // 2)
+            x0 = min(x0, max(0, self.screen.get_width() - w_src))
+            y0 = min(y0, max(0, self.screen.get_height() - h_src))
+            src_rect = pygame.Rect(x0, y0, w_src, h_src)
+            sub = self.screen.subsurface(src_rect).copy()
+            w_dst = int(w_src * self.magnify_scale)
+            h_dst = int(h_src * self.magnify_scale)
+            zoomed = pygame.transform.smoothscale(sub, (w_dst, h_dst))
+            # Blit to top-right corner with border
+            margin = 12
+            dst_x = self.screen.get_width() - w_dst - margin
+            dst_y = margin
+            pygame.draw.rect(self.screen, self.WHITE, (dst_x - 2, dst_y - 2, w_dst + 4, h_dst + 4), 2)
+            self.screen.blit(zoomed, (dst_x, dst_y))
+        except Exception:
+            # Fail silently if subsurface/scale fails
+            pass

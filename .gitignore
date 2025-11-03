@@ -26,6 +26,7 @@ var/
 # Virtual Environment
 venv/
 ENV/
+.venv/
 
 # IDE files
 .idea/
@@ -42,14 +43,13 @@ Thumbs.db
 # *.avi
 # *.mov
 # *.wmv
-
 # Document and executable files
 *.pdf
 *.exe
+*.zip
 
 # Demo media (allow demo GIF)
 # *.gif  # commented out to allow demo GIF
 
 # Participant data (optional, uncomment if you want to exclude real participant data)
-# Participantdata/ 
-1
+# Participantdata/

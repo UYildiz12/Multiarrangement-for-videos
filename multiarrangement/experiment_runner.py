@@ -613,12 +613,23 @@ def confirm_mixed_prompt(n_vid: int, n_img: int, n_aud: int) -> bool:
     pygame.display.quit()
     return bool(proceed)
 
+<<<<<<< HEAD
+<<<<<<< HEAD
+<<<<<<< HEAD
+def save_results(df, output_dir, participant_id="participant", timestamp: Optional[str] = None):
+=======
+=======
+>>>>>>> e44c880afc7a9196c8fc6e3a60ca6646f4aaad17
+=======
+>>>>>>> e44c880afc7a9196c8fc6e3a60ca6646f4aaad17
 def save_results(df, output_dir, participant_id="participant"):
+>>>>>>> e44c880afc7a9196c8fc6e3a60ca6646f4aaad17
     """Save the experiment results to files."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+    if not timestamp:
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
     
     # Save distance matrix as CSV
     csv_path = output_path / f"{participant_id}_distances_{timestamp}.csv"
@@ -648,8 +659,29 @@ def safe_pygame_quit():
         pass
     pygame.quit()
 
-def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str, 
-                                show_first_frames: bool = True, fullscreen: bool = True, language: str = "en", instructions="default"):
+def run_multiarrangement_experiment(
+    input_dir: str,
+    batches,
+    output_dir: str,
+    *,
+    show_first_frames: bool = True,
+    fullscreen: bool = True,
+    language: str = "en",
+    instructions = "default",
+    # Fusion controls (set‑cover)
+    setcover_weight_mode: str = 'max',
+    setcover_weight_alpha: float = 2.0,
+    rng_seed: int = None,
+    use_inverse_mds: bool = False,
+    inverse_mds_max_iter: int = 15,
+    inverse_mds_step_c: float = 0.3,
+    inverse_mds_tol: float = 1e-4,
+    max_adjacent_overlap: Optional[int] = None,
+    # Robust weighting options for set‑cover fusion
+    robust_method: Optional[str] = None,  # 'winsor' | 'huber' | None
+    robust_winsor_high: float = 0.98,
+    robust_huber_c: float = 0.9,
+):
     """
     Run the main multiarrangement experiment.
     
@@ -659,11 +691,26 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
         output_dir: Directory to save results  
         show_first_frames: Whether to show video frames
         fullscreen: Whether to run in fullscreen mode
+        setcover_weight_mode: 'max' (per‑trial max‑norm), 'rms' (RMS‑matched), or 'k2012' (raw‑distance weights with RMS‑matched numerator)
         
     Returns:
         Path to saved results file
     """
     
+    # Seed RNG for reproducibility (shuffle, seating jitter, etc.)
+    try:
+        import os as _os
+        if rng_seed is None:
+            rng_seed = int.from_bytes(_os.urandom(8), 'little')
+        random.seed(int(rng_seed))
+        try:
+            import numpy as _np
+            _np.random.seed(int(rng_seed) & 0x7fffffff)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
     # Handle batches input
     if isinstance(batches, (str, Path)):
         # Load from file
@@ -672,6 +719,34 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
     else:
         # Use provided list
         batch_list = batches
+
+    # Optional: reorder to reduce adjacent overlap (interleaving)
+    def _reorder_min_adjacent_overlap(bl: list[list[int]], max_overlap: int) -> list[list[int]]:
+        if not bl:
+            return bl
+        rem = bl[:]
+        ordered = [rem.pop(0)]
+        last = set(ordered[-1])
+        while rem:
+            # pick batch with minimal overlap with last; tie-breaker: smaller overlap then shorter length
+            best_i = None
+            best_score = None
+            for idx, cand in enumerate(rem):
+                ov = len(last & set(cand))
+                score = (ov, len(cand))
+                if best_score is None or score < best_score:
+                    best_score = score; best_i = idx
+            chosen = rem.pop(best_i)
+            ordered.append(chosen)
+            last = set(chosen)
+        # If the best effort still violates the max_overlap, it's unavoidable under given batches
+        return ordered
+
+    if isinstance(max_adjacent_overlap, int):
+        try:
+            batch_list = _reorder_min_adjacent_overlap(batch_list, max_adjacent_overlap)
+        except Exception:
+            pass
     
     # Validate batch configuration
     all_indices = set()
@@ -809,12 +884,14 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
     
     pygame.display.set_caption("Multiarrangement Experiment")
     
-    # Initialize DataFrame for distance matrix
+    # Initialize accumulation buffers for weighted fusion
     n_media = len(media_names)
-    df = pd.DataFrame([[None for _ in range(n_media)] for _ in range(n_media)], 
-                      index=media_names, columns=media_names)
-    for i in range(n_media):
-        df.iloc[i, i] = 0
+    name_to_idx = {name: i for i, name in enumerate(media_names)}
+    # Num and W per Ma.md/README: per-trial max-normalized distances; weights = (d/max)^alpha
+    Num = np.zeros((n_media, n_media), dtype=float)
+    W = np.zeros((n_media, n_media), dtype=float)
+    # For optional inverse-MDS, keep trial arrangements
+    trial_arrangements = []  # list of (subset_indices, positions_by_index)
     
     frame_cache = {}
     
@@ -839,6 +916,7 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
         pygame.display.flip()
     
     # Process each batch
+    trial_logs = []  # per-trial subset indices and positions
     for batch_indexes in batch_list:
         batch_media = [media_files[i] for i in batch_indexes]
         frame_names = []
@@ -934,36 +1012,75 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
                     if event.key == pygame.K_ESCAPE:
                         safe_pygame_quit()
                         return None
-                elif event.type == pygame.MOUSEBUTTONDOWN and button_rect.collidepoint(event.pos):    
+                elif event.type == pygame.MOUSEBUTTONDOWN and button_rect.collidepoint(event.pos):
                     if all_inside and all_clicked:
-                        # Calculate distances and save
+                        # Calculate distances for this trial
                         centers = [rect.center for rect in rects]
+                        # Build names and indices for items in this batch
+                        frame_names = []
+                        frame_indices = []
                         for media_file in batch_media[:len(centers)]:
-                            frame_name = os.path.splitext(media_file)[0]  
-                            frame_names.append(frame_name)
-                        
-                        for i in range(len(centers)):
-                            for j in range(i+1, len(centers)):
-                                dx = centers[i][0] - centers[j][0]
-                                dy = centers[i][1] - centers[j][1]
-                                distance = np.sqrt(dx**2 + dy**2)
-                                
-                                if frame_names[i] in df.columns and frame_names[j] in df.index:
-                                    if isinstance(df.loc[frame_names[i], frame_names[j]], list):
-                                        df.loc[frame_names[i], frame_names[j]].append(distance)
-                                        df.loc[frame_names[j], frame_names[i]].append(distance)
-                                    else:
-                                        df.loc[frame_names[i], frame_names[j]] = [distance]
-                                        df.loc[frame_names[j], frame_names[i]] = [distance]
-                        
-                        # Calculate averages
-                        for i in range(len(centers)):
-                            for j in range(i+1, len(centers)):
-                                if isinstance(df.loc[frame_names[i], frame_names[j]], list):
-                                    avg_distance = np.mean(df.loc[frame_names[i], frame_names[j]])
-                                    df.loc[frame_names[i], frame_names[j]] = avg_distance
-                                    df.loc[frame_names[j], frame_names[i]] = avg_distance
-                        
+                            name = os.path.splitext(media_file)[0]
+                            frame_names.append(name)
+                            frame_indices.append(name_to_idx[name])
+
+                        # Compute pairwise distances and per-trial max
+                        m = len(centers)
+                        if m >= 2:
+                            dists = np.zeros((m, m), dtype=float)
+                            maxd = 0.0
+                            for i in range(m):
+                                xi, yi = centers[i]
+                                for j in range(i+1, m):
+                                    xj, yj = centers[j]
+                                    dij = float(np.hypot(xi - xj, yi - yj))
+                                    dists[i, j] = dists[j, i] = dij
+                                    if dij > maxd:
+                                        maxd = dij
+                            # Per-trial normalization and weighted accumulation
+                            if setcover_weight_mode == 'max':
+                                if maxd <= 1e-12:
+                                    norm = 0.0
+                                else:
+                                    norm = 1.0 / maxd
+                                alpha = float(setcover_weight_alpha)
+                                for i in range(m):
+                                    gi = frame_indices[i]
+                                    for j in range(i+1, m):
+                                        gj = frame_indices[j]
+                                        dnorm = dists[i, j] * norm
+                                        # Optional robust weighting (winsor or huber)
+                                        if robust_method == 'winsor':
+                                            hi = float(robust_winsor_high)
+                                            if hi > 0.0:
+                                                dnorm = min(dnorm, hi)
+                                            w = dnorm ** alpha
+                                        elif robust_method == 'huber':
+                                            c = float(robust_huber_c)
+                                            if dnorm <= 0.0:
+                                                w = 0.0
+                                            else:
+                                                wfactor = 1.0 if dnorm <= c else (c / dnorm)
+                                                w = (dnorm ** alpha) * wfactor
+                                        else:
+                                            w = dnorm ** alpha
+                                        # accumulate symmetric
+                                        Num[gi, gj] += w * dnorm
+                                        Num[gj, gi] += w * dnorm
+                                        W[gi, gj] += w
+                                        W[gj, gi] += w
+                            # Per-trial log
+                            positions_by_index = {int(frame_indices[i]): [float(centers[i][0]), float(centers[i][1])] for i in range(m)}
+                            trial_logs.append({
+                                "subset": [int(x) for x in frame_indices],
+                                "positions": positions_by_index,
+                            })
+
+                            # Record trial for optional inverse-MDS refinement
+                            if use_inverse_mds:
+                                positions_by_index = {frame_indices[i]: (float(centers[i][0]), float(centers[i][1])) for i in range(m)}
+                                trial_arrangements.append((list(frame_indices), positions_by_index))
+
                         running = False
                         break
                 
@@ -1029,13 +1146,26 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
             # Draw pairwise connection lines OVER the video circles while dragging
             if dragging and dragged_frame_index is not None:
                 if is_circle_inside_circle(rects[dragged_frame_index], circle_center, circle_radius):
-                    # Draw red lines from dragged frame to all other frames inside the circle
+                    # Draw lines from dragged frame to all other frames inside the circle
+                    # Line thickness and opacity scale with proximity
                     for i in range(len(frames)):
                         if i != dragged_frame_index and is_circle_inside_circle(rects[i], circle_center, circle_radius):
+                            # Calculate distance between dragged frame and this frame
+                            dragged_center = rects[dragged_frame_index].center
+                            other_center = rects[i].center
+                            distance = math.sqrt((dragged_center[0] - other_center[0])**2 + (dragged_center[1] - other_center[1])**2)
+                            
+                            # Scale thickness and opacity with proximity (closer = thicker/more opaque)
+                            max_possible_distance = circle_radius * 2
+                            proximity_factor = max(0, 1 - (distance / max_possible_distance))
+                            
+                            thickness = int(1 + proximity_factor * 7)  # 1 to 8
+                            opacity = int(50 + proximity_factor * 205)  # 50 to 255
+                            
                             # Create semi-transparent surface for the line
                             s = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-                            # Draw red line with opacity OVER the video circles
-                            pygame.draw.line(s, RED + (115,), rects[dragged_frame_index].center, rects[i].center, 7)          
+                            # Draw red line with variable opacity
+                            pygame.draw.line(s, RED + (opacity,), dragged_center, other_center, thickness)          
                             screen.blit(s, (0, 0))
             
             # Draw button
@@ -1046,9 +1176,153 @@ def run_multiarrangement_experiment(input_dir: str, batches, output_dir: str,
             
             pygame.display.flip()
     
-    # Save results and cleanup
+    # Compute fused D_hat using requested weight mode
+    if setcover_weight_mode == 'max':
+        with np.errstate(divide='ignore', invalid='ignore'):
+            D_hat = np.divide(Num, W, out=np.zeros_like(Num), where=W > 0)
+        np.fill_diagonal(D_hat, 0.0)
+    elif setcover_weight_mode in ('rms', 'k2012'):
+        try:
+            from .adaptive.lift_weakest import estimate_rdm_weighted_average, TrialArrangement
+            trials = []
+            for t in trial_logs:
+                subset = list(map(int, t["subset"]))
+                positions = {int(k): (float(v[0]), float(v[1])) for k, v in t["positions"].items()}
+                trials.append(TrialArrangement(subset=subset, positions=positions))
+            D_hat, W_est = estimate_rdm_weighted_average(
+                n_media,
+                trials,
+                alpha=float(setcover_weight_alpha),
+                robust_method=robust_method,
+                robust_winsor_high=float(robust_winsor_high),
+                robust_huber_c=float(robust_huber_c),
+                weight_mode=('k2012' if setcover_weight_mode == 'k2012' else 'rms'),
+            )
+            np.fill_diagonal(D_hat, 0.0)
+            W = W_est
+        except Exception as e:
+            print(f"Warning: RMS-weighted fusion failed, falling back to max-normalized: {e}")
+            with np.errstate(divide='ignore', invalid='ignore'):
+                D_hat = np.divide(Num, W, out=np.zeros_like(Num), where=W > 0)
+            np.fill_diagonal(D_hat, 0.0)
+    else:
+        print(f"Warning: Unknown setcover_weight_mode='{setcover_weight_mode}', using 'max'.")
+        with np.errstate(divide='ignore', invalid='ignore'):
+            D_hat = np.divide(Num, W, out=np.zeros_like(Num), where=W > 0)
+        np.fill_diagonal(D_hat, 0.0)
+
+    # Final RMS renormalization for 'max' mode (single end-of-run rescale)
     try:
-        result_file = save_results(df, output_dir)
+        if setcover_weight_mode == 'max':
+            iu = np.triu_indices_from(D_hat, k=1)
+            rms = float(np.sqrt(np.mean(D_hat[iu] * D_hat[iu]))) if iu[0].size else 0.0
+            if rms > 1e-12:
+                D_hat *= (1.0 / rms)
+                np.fill_diagonal(D_hat, 0.0)
+    except Exception:
+        pass
+
+    # Optional inverse-MDS refinement over collected trials
+    if use_inverse_mds and trial_arrangements:
+        try:
+            # Reuse adaptive utilities
+            from .adaptive.lift_weakest import refine_rdm_inverse_mds, TrialArrangement
+            trials = [TrialArrangement(subset=sub, positions=pos) for (sub, pos) in trial_arrangements]
+            D_hat = refine_rdm_inverse_mds(
+                D_hat,
+                trials,
+                max_iter=int(inverse_mds_max_iter),
+                tol=float(inverse_mds_tol),
+                step_c=float(inverse_mds_step_c),
+            )
+            np.fill_diagonal(D_hat, 0.0)
+        except Exception as e:
+            print(f"Warning: inverse-MDS refinement failed: {e}")
+
+    # Create DataFrame for saving/compatibility
+    df = pd.DataFrame(D_hat, index=media_names, columns=media_names)
+
+    # Save results and reproducibility metadata, then cleanup
+    try:
+        # Share a single timestamp across artifacts
+        timestamp = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
+        participant_id = "participant"
+        result_file = save_results(df, output_dir, participant_id=participant_id, timestamp=timestamp)
+
+        # Compute schedule coverage diagnostics
+        # Degrees per item
+        deg = [0] * n_media
+        for b in batch_list:
+            for idx in b:
+                if 0 <= idx < n_media:
+                    deg[idx] += 1
+        # Pair coverage
+        pair_counts = {}
+        for b in batch_list:
+            bb = list(sorted(set(int(x) for x in b if 0 <= x < n_media)))
+            for a in range(len(bb)):
+                for c in range(a+1, len(bb)):
+                    i, j = bb[a], bb[c]
+                    key = (i, j) if i < j else (j, i)
+                    pair_counts[key] = pair_counts.get(key, 0) + 1
+        total_pairs = n_media * (n_media - 1) // 2
+        pairs_covered = len(pair_counts)
+        coverage_complete = (pairs_covered == total_pairs)
+        lambda_max = max(pair_counts.values()) if pair_counts else 0
+        # Histograms
+        from collections import Counter
+        deg_hist = dict(sorted(Counter(deg).items()))
+        cov_hist = dict(sorted(Counter(pair_counts.values()).items()))
+
+        meta = {
+            "mode": "set-cover",
+            "timestamp": timestamp,
+            "input_dir": str(input_dir),
+            "n_items": int(n_media),
+            "labels": list(media_names),
+            "batches": [[int(x) for x in batch] for batch in batch_list],
+            "n_batches": int(len(batch_list)),
+            "batch_sizes": [int(len(b)) for b in batch_list],
+            "interleaving_max_adjacent_overlap": max_adjacent_overlap,
+            "fusion": {
+                "alpha": float(setcover_weight_alpha),
+                "weight_mode": str(setcover_weight_mode),
+                "robust_method": robust_method,
+                "robust_winsor_high": float(robust_winsor_high),
+                "robust_huber_c": float(robust_huber_c),
+                "inverse_mds": bool(use_inverse_mds),
+                "inverse_mds_max_iter": int(inverse_mds_max_iter),
+                "inverse_mds_step_c": float(inverse_mds_step_c),
+                "inverse_mds_tol": float(inverse_mds_tol),
+            },
+            "trials": trial_logs,
+            "coverage": {
+                "total_pairs": int(total_pairs),
+                "pairs_covered": int(pairs_covered),
+                "coverage_complete": bool(coverage_complete),
+                "lambda_max": int(lambda_max),
+                "deg_hist": deg_hist,
+                "pair_coverage_hist": cov_hist,
+            },
+            "artifacts": {
+                "csv": result_file,
+                # Excel path mirrors CSV name
+                "excel": str(Path(result_file).with_suffix('.xlsx')),
+            },
+            "notes": [
+                "UI used randomized seating jitter; distances depend on participant actions.",
+            ],
+            "rng_seed": int(rng_seed) if rng_seed is not None else None,
+        }
+        try:
+            meta_path = Path(output_dir) / f"{participant_id}_meta_{timestamp}.json"
+            import json
+            with open(meta_path, 'w', encoding='utf-8') as f:
+                json.dump(meta, f, indent=2)
+            print(f"Metadata saved to: {meta_path}")
+        except Exception as e:
+            print(f"Warning: failed to write metadata JSON: {e}")
+
         safe_pygame_quit()
         return result_file
     except Exception as e:

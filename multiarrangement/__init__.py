@@ -20,7 +20,7 @@ from .ui.interface import MultiarrangementInterface
 from .utils.video_processing import VideoProcessor
 from .utils.data_processing import DataProcessor
 from .core.batch_generator import BatchGenerator
-from typing import List
+from typing import List, Optional
 from .adaptive.adaptive_experiment import AdaptiveMultiarrangementExperiment, AdaptiveConfig
 from .results import Results
 
@@ -263,8 +263,28 @@ def validate_batches(batches, n_videos: int):
     
     print(f"✅ Batch validation passed: {n_unique_indices} indices for {n_videos} videos")
 
-def multiarrangement(input_dir: str, batches, output_dir: str, 
-                    show_first_frames: bool = True, fullscreen: bool = True, language: str = "en", instructions="default"):
+def multiarrangement(
+    input_dir: str,
+    batches,
+    output_dir: str,
+    *,
+    show_first_frames: bool = True,
+    fullscreen: bool = True,
+    language: str = "en",
+    instructions = "default",
+    # Set‑cover fusion controls (Ma.md alignment)
+    setcover_weight_alpha: float = 2.0,
+    setcover_weight_mode: str = 'max',
+    rng_seed: int = None,
+    use_inverse_mds: bool = False,
+    inverse_mds_max_iter: int = 15,
+    inverse_mds_step_c: float = 0.3,
+    inverse_mds_tol: float = 1e-4,
+    max_adjacent_overlap: Optional[int] = None,
+    robust_method: Optional[str] = None,
+    robust_winsor_high: float = 0.98,
+    robust_huber_c: float = 0.9,
+):
     """
     Run the multiarrangement experiment.
     
@@ -274,9 +294,11 @@ def multiarrangement(input_dir: str, batches, output_dir: str,
         output_dir: Directory to save results
         show_first_frames: Whether to show video frames (True) or ? emoji (False)
         fullscreen: Whether to run in fullscreen mode
+        setcover_weight_mode: 'max' (per‑trial max‑norm), 'rms' (RMS‑matched), or 'k2012' (raw‑distance weights + RMS‑matched numerator)
+        rng_seed: Optional integer RNG seed recorded in metadata and used for shuffles
     
     Returns:
-        Path to the saved distance matrix file
+        Results: convenience wrapper with matrix/labels and plotting helpers.
     
          Example:
          >>> import multiarrangement as ma
@@ -286,17 +308,41 @@ def multiarrangement(input_dir: str, batches, output_dir: str,
     from .experiment_runner import run_multiarrangement_experiment
     csv_path = run_multiarrangement_experiment(
         input_dir=input_dir,
-        batches=batches, 
+        batches=batches,
         output_dir=output_dir,
         show_first_frames=show_first_frames,
         fullscreen=fullscreen,
         language=language,
-        instructions=instructions
+        instructions=instructions,
+        setcover_weight_mode=str(setcover_weight_mode),
+        setcover_weight_alpha=float(setcover_weight_alpha),
+        rng_seed=rng_seed,
+        use_inverse_mds=bool(use_inverse_mds),
+        inverse_mds_max_iter=int(inverse_mds_max_iter),
+        inverse_mds_step_c=float(inverse_mds_step_c),
+        inverse_mds_tol=float(inverse_mds_tol),
+        max_adjacent_overlap=max_adjacent_overlap,
+        robust_method=robust_method,
+        robust_winsor_high=float(robust_winsor_high),
+        robust_huber_c=float(robust_huber_c),
     )
     # Wrap results with a convenient visualization helper
     try:
         res = Results.from_csv(csv_path)
-        res.meta.update({"mode": "set-cover", "input_dir": input_dir})
+        res.meta.update({
+            "mode": "set-cover",
+            "input_dir": input_dir,
+            "setcover_weight_alpha": float(setcover_weight_alpha),
+            "setcover_weight_mode": str(setcover_weight_mode),
+            "use_inverse_mds": bool(use_inverse_mds),
+            "inverse_mds_max_iter": int(inverse_mds_max_iter),
+            "inverse_mds_step_c": float(inverse_mds_step_c),
+            "inverse_mds_tol": float(inverse_mds_tol),
+            "max_adjacent_overlap": max_adjacent_overlap,
+            "robust_method": robust_method,
+            "robust_winsor_high": float(robust_winsor_high),
+            "robust_huber_c": float(robust_huber_c),
+        })
         return res
     except Exception:
         return csv_path
@@ -416,6 +462,8 @@ def multiarrangement_adaptive(
     evidence_threshold: float = 0.5,
     utility_exponent: float = 10.0,
     time_limit_minutes: float = None,
+    target_time_seconds: float = None,
+    target_time_tolerance: float = 0.05,
     min_subset_size: int = 3,
     max_subset_size: int = None,
     use_inverse_mds: bool = False,
@@ -423,6 +471,26 @@ def multiarrangement_adaptive(
     inverse_mds_step_c: float = 0.3,
     inverse_mds_tol: float = 1e-4,
     instructions = "default",
+    # New policy options (safe defaults preserve current behavior)
+    evidence_alpha: float = 2.0,
+    unseen_boost: float = 0.0,
+    recency_penalty: float = 0.0,
+    recency_decay: float = 0.85,
+    stress_weight: float = 0.0,
+    max_jaccard: Optional[float] = None,
+    overlap_penalty: float = 0.0,
+    duration_cost_weight: float = 0.0,
+    duration_cost_cap_per_item: float = None,
+    robust_method: Optional[str] = None,
+    robust_winsor_high: float = 0.98,
+    robust_huber_c: float = 0.9,
+    long_clip_threshold_seconds: float = None,
+    min_long_clip_inclusion_rate: float = 0.0,
+    long_clip_boost: float = 0.0,
+    avoid_anchor_reuse: bool = False,
+    cold_start_require_unseen_trials: int = 0,
+    evidence_weight_mode: str = 'k2012',
+    stop_on_utility: bool = False,
 ):
     """
     Run the adaptive lift-the-weakest multiarrangement experiment.
@@ -435,12 +503,33 @@ def multiarrangement_adaptive(
         evidence_threshold=evidence_threshold,
         utility_exponent=utility_exponent,
         time_limit_seconds=(time_limit_minutes * 60.0) if time_limit_minutes else None,
+        target_time_seconds=target_time_seconds if target_time_seconds is not None else None,
+        target_time_tolerance=float(target_time_tolerance),
         min_subset_size=max(3, int(min_subset_size)),
         max_subset_size=int(max_subset_size) if max_subset_size is not None else None,
         use_inverse_mds=use_inverse_mds,
         inverse_mds_max_iter=inverse_mds_max_iter,
         inverse_mds_step_c=inverse_mds_step_c,
         inverse_mds_tol=inverse_mds_tol,
+        evidence_alpha=evidence_alpha,
+        unseen_boost=unseen_boost,
+        recency_penalty=recency_penalty,
+        recency_decay=recency_decay,
+        stress_weight=stress_weight,
+        max_jaccard=max_jaccard,
+        overlap_penalty=overlap_penalty,
+        duration_cost_weight=duration_cost_weight,
+        duration_cost_cap_per_item=duration_cost_cap_per_item if duration_cost_cap_per_item is not None else None,
+        robust_method=robust_method,
+        robust_winsor_high=robust_winsor_high,
+        robust_huber_c=robust_huber_c,
+        long_clip_threshold_seconds=long_clip_threshold_seconds if long_clip_threshold_seconds is not None else None,
+        min_long_clip_inclusion_rate=float(min_long_clip_inclusion_rate),
+        long_clip_boost=float(long_clip_boost),
+        avoid_anchor_reuse=avoid_anchor_reuse,
+        cold_start_require_unseen_trials=int(cold_start_require_unseen_trials),
+        evidence_weight_mode=evidence_weight_mode,
+        stop_on_utility=stop_on_utility,
     )
 
     exp = AdaptiveMultiarrangementExperiment(

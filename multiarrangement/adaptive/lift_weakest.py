@@ -67,10 +67,19 @@ def estimate_rdm_weighted_average(
     *,
     max_iter: int = 30,
     tol: float = 1e-6,
+    alpha: float = 2.0,
+    robust_method: Optional[str] = None,  # 'winsor' | 'huber' | 'resid_huber' | 'winsor_resid_huber' | None
+    robust_winsor_high: float = 0.98,
+    robust_huber_c: float = 0.9,
+    weight_mode: str = 'max',  # 'max' (dnorm=d/max), 'rms' (scaled to match RMS), or 'k2012' (raw unscaled^alpha weights)
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Estimate full RDM (n x n) via weighted average of iteratively scaled subset RDMS.
 
-    Weight per pair in a trial is the square of the unscaled on-screen distance (evidence weight).
+    Weight per pair in a trial is configurable via `weight_mode`:
+        - 'k2012': evidence weight equals unscaled on-screen distance^alpha (typically alpha=2),
+                   matching the description in inversemdsalgos.txt (no per-trial normalization).
+        - 'max':   evidence weight equals (d_ij / max_d_in_trial)^alpha (per-trial max normalization).
+        - 'rms':   evidence weight uses RMS-matched distances (D_scaled)^alpha.
     Each trial subset distance matrix is scaled to match the current RDM estimate on its pairs.
 
     Args:
@@ -94,22 +103,6 @@ def estimate_rdm_weighted_average(
             continue
         D_sub = _pairwise_distances_from_positions(subset, t.positions)
         trial_info.append((subset, D_sub))
-
-    # Initialize W with normalized evidence weights per trial: (d_ij / max_d)^2
-    W = np.zeros((n_items, n_items), dtype=float)
-    for subset, D_sub in trial_info:
-        m = len(subset)
-        iu_sub = np.triu_indices(m, 1)
-        maxd = float(np.max(D_sub[iu_sub])) if iu_sub[0].size else 0.0
-        scale = (1.0 / maxd) if maxd > 1e-12 else 0.0
-        for a in range(m):
-            ia = subset[a]
-            for b in range(a + 1, m):
-                ib = subset[b]
-                dij = D_sub[a, b] * scale
-                w = dij * dij
-                W[ia, ib] += w
-                W[ib, ia] += w
 
     # Seed current estimate D
     D = np.zeros((n_items, n_items), dtype=float)
@@ -135,7 +128,7 @@ def estimate_rdm_weighted_average(
                 ia = subset[a]
                 for b in range(a + 1, m):
                     ib = subset[b]
-                    w = D_sub[a, b] ** 2
+                    w = (D_sub[a, b] ** float(alpha))
                     num[ia, ib] += D_sub[a, b] * w
                     den[ia, ib] += w
                     num[ib, ia] += D_sub[a, b] * w
@@ -151,6 +144,11 @@ def estimate_rdm_weighted_average(
         D *= (1.0 / rms_D)
 
     # Alternating scaling / averaging
+    # Parse robust options
+    _robust_winsor = (robust_method in ('winsor', 'winsor_resid_huber'))
+    _robust_huber_dist = (robust_method == 'huber')
+    _robust_huber_resid = (robust_method in ('resid_huber', 'winsor_resid_huber'))
+
     for _ in range(max_iter):
         D_prev = D.copy()
 
@@ -174,20 +172,105 @@ def estimate_rdm_weighted_average(
         den = np.zeros((n_items, n_items), dtype=float)
         for subset, D_scaled, D_unscaled in scaled_subs:
             m = len(subset)
-            iu_sub = np.triu_indices(m, 1)
-            maxd = float(np.max(D_unscaled[iu_sub])) if iu_sub[0].size else 0.0
-            scale_w = (1.0 / maxd) if maxd > 1e-12 else 0.0
+            # Current D on subset for residuals (same scale as D_scaled)
+            D_slice = np.zeros((m, m), dtype=float)
             for a in range(m):
                 ia = subset[a]
-                for b in range(a + 1, m):
+                for b in range(m):
                     ib = subset[b]
-                    # evidence weight normalized within each trial
-                    dij = D_unscaled[a, b] * scale_w
-                    w = dij * dij
-                    num[ia, ib] += D_scaled[a, b] * w
-                    den[ia, ib] += w
-                    num[ib, ia] += D_scaled[a, b] * w
-                    den[ib, ia] += w
+                    D_slice[a, b] = D[ia, ib]
+            if weight_mode == 'max':
+                iu_sub = np.triu_indices(m, 1)
+                maxd = float(np.max(D_unscaled[iu_sub])) if iu_sub[0].size else 0.0
+                scale_w = (1.0 / maxd) if maxd > 1e-12 else 0.0
+                for a in range(m):
+                    ia = subset[a]
+                    for b in range(a + 1, m):
+                        ib = subset[b]
+                        # evidence weight normalized within each trial (max-normalized)
+                        dij = D_unscaled[a, b] * scale_w
+                        if _robust_winsor:
+                            hi = float(robust_winsor_high)
+                            if hi > 0.0:
+                                dij = min(dij, hi)
+                        if _robust_huber_dist:
+                            c = float(robust_huber_c)
+                            if dij <= 0.0:
+                                w = 0.0
+                            else:
+                                wfactor = 1.0 if dij <= c else (c / dij)
+                                w = (dij ** float(alpha)) * wfactor
+                        else:
+                            w = dij ** float(alpha)
+                        # Residual Huber on RMS scale (D_scaled vs current D on subset)
+                        if _robust_huber_resid:
+                            r = abs(D_scaled[a, b] - D_slice[a, b])
+                            c = float(robust_huber_c)
+                            if r > 1e-12:
+                                w *= (1.0 if r <= c else (c / r))
+                        num[ia, ib] += D_scaled[a, b] * w
+                        den[ia, ib] += w
+                        num[ib, ia] += D_scaled[a, b] * w
+                        den[ib, ia] += w
+            elif weight_mode == 'k2012':
+                # Use unscaled on-screen distances directly for weighting (no per-trial normalization)
+                # WARNING: robust thresholds assume normalized distances; use with care.
+                for a in range(m):
+                    ia = subset[a]
+                    for b in range(a + 1, m):
+                        ib = subset[b]
+                        dij = D_unscaled[a, b]
+                        if _robust_winsor:
+                            hi = float(robust_winsor_high)
+                            if hi > 0.0:
+                                dij = min(dij, hi)
+                        if _robust_huber_dist:
+                            c = float(robust_huber_c)
+                            if dij <= 0.0:
+                                w = 0.0
+                            else:
+                                wfactor = 1.0 if dij <= c else (c / dij)
+                                w = (dij ** float(alpha)) * wfactor
+                        else:
+                            w = dij ** float(alpha)
+                        if _robust_huber_resid:
+                            r = abs(D_scaled[a, b] - D_slice[a, b])
+                            c = float(robust_huber_c)
+                            if r > 1e-12:
+                                w *= (1.0 if r <= c else (c / r))
+                        num[ia, ib] += D_scaled[a, b] * w
+                        den[ia, ib] += w
+                        num[ib, ia] += D_scaled[a, b] * w
+                        den[ib, ia] += w
+            else:  # weight_mode == 'rms'
+                # use RMS-matched distances (D_scaled) directly for weighting
+                for a in range(m):
+                    ia = subset[a]
+                    for b in range(a + 1, m):
+                        ib = subset[b]
+                        dij = D_scaled[a, b]
+                        if _robust_winsor:
+                            hi = float(robust_winsor_high)
+                            if hi > 0.0:
+                                dij = min(dij, hi)
+                        if _robust_huber_dist:
+                            c = float(robust_huber_c)
+                            if dij <= 0.0:
+                                w = 0.0
+                            else:
+                                wfactor = 1.0 if dij <= c else (c / dij)
+                                w = (dij ** float(alpha)) * wfactor
+                        else:
+                            w = dij ** float(alpha)
+                        if _robust_huber_resid:
+                            r = abs(D_scaled[a, b] - D_slice[a, b])
+                            c = float(robust_huber_c)
+                            if r > 1e-12:
+                                w *= (1.0 if r <= c else (c / r))
+                        num[ia, ib] += D_scaled[a, b] * w
+                        den[ia, ib] += w
+                        num[ib, ia] += D_scaled[a, b] * w
+                        den[ib, ia] += w
         with np.errstate(invalid="ignore", divide="ignore"):
             D = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
             D = np.nan_to_num(D)
@@ -203,6 +286,118 @@ def estimate_rdm_weighted_average(
             break
 
     np.fill_diagonal(D, 0.0)
+    # Build and return W according to requested weight_mode using final D
+    W = np.zeros((n_items, n_items), dtype=float)
+    for subset, D_sub in trial_info:
+        m = len(subset)
+        if weight_mode == 'max':
+            iu_sub = np.triu_indices(m, 1)
+            maxd = float(np.max(D_sub[iu_sub])) if iu_sub[0].size else 0.0
+            scale = (1.0 / maxd) if maxd > 1e-12 else 0.0
+            # D_slice and D_scaled for residual weighting
+            D_slice = np.zeros((m, m), dtype=float)
+            for a in range(m):
+                ia = subset[a]
+                for b in range(m):
+                    ib = subset[b]
+                    D_slice[a, b] = D[ia, ib]
+            s_match = _scale_to_match_rms(D_sub, D_slice)
+            D_scaled = D_sub * s_match
+            for a in range(m):
+                ia = subset[a]
+                for b in range(a + 1, m):
+                    ib = subset[b]
+                    dij = D_sub[a, b] * scale
+                    if _robust_winsor:
+                        hi = float(robust_winsor_high)
+                        if hi > 0.0:
+                            dij = min(dij, hi)
+                    if _robust_huber_dist:
+                        c = float(robust_huber_c)
+                        if dij <= 0.0:
+                            w = 0.0
+                        else:
+                            wfactor = 1.0 if dij <= c else (c / dij)
+                            w = (dij ** float(alpha)) * wfactor
+                    else:
+                        w = dij ** float(alpha)
+                    if _robust_huber_resid:
+                        r = abs(D_scaled[a, b] - D_slice[a, b])
+                        c = float(robust_huber_c)
+                        if r > 1e-12:
+                            w *= (1.0 if r <= c else (c / r))
+                    W[ia, ib] += w
+                    W[ib, ia] += w
+        elif weight_mode == 'k2012':
+            # Use unscaled on-screen distances directly (no normalization) for W
+            # Prepare residuals
+            D_slice = np.zeros((m, m), dtype=float)
+            for a in range(m):
+                ia = subset[a]
+                for b in range(m):
+                    ib = subset[b]
+                    D_slice[a, b] = D[ia, ib]
+            s_match = _scale_to_match_rms(D_sub, D_slice)
+            D_scaled = D_sub * s_match
+            for a in range(m):
+                ia = subset[a]
+                for b in range(a + 1, m):
+                    ib = subset[b]
+                    dij = D_sub[a, b]
+                    if _robust_winsor:
+                        hi = float(robust_winsor_high)
+                        if hi > 0.0:
+                            dij = min(dij, hi)
+                    if _robust_huber_dist:
+                        c = float(robust_huber_c)
+                        if dij <= 0.0:
+                            w = 0.0
+                        else:
+                            wfactor = 1.0 if dij <= c else (c / dij)
+                            w = (dij ** float(alpha)) * wfactor
+                    else:
+                        w = dij ** float(alpha)
+                    if _robust_huber_resid:
+                        r = abs(D_scaled[a, b] - D_slice[a, b])
+                        c = float(robust_huber_c)
+                        if r > 1e-12:
+                            w *= (1.0 if r <= c else (c / r))
+                    W[ia, ib] += w
+                    W[ib, ia] += w
+        else:
+            # Compute RMS match to final D on subset
+            D_slice = np.zeros((m, m), dtype=float)
+            for a in range(m):
+                ia = subset[a]
+                for b in range(m):
+                    ib = subset[b]
+                    D_slice[a, b] = D[ia, ib]
+            s = _scale_to_match_rms(D_sub, D_slice)
+            for a in range(m):
+                ia = subset[a]
+                for b in range(a + 1, m):
+                    ib = subset[b]
+                    dij = D_sub[a, b] * s
+                    if _robust_winsor:
+                        hi = float(robust_winsor_high)
+                        if hi > 0.0:
+                            dij = min(dij, hi)
+                    if _robust_huber_dist:
+                        c = float(robust_huber_c)
+                        if dij <= 0.0:
+                            w = 0.0
+                        else:
+                            wfactor = 1.0 if dij <= c else (c / dij)
+                            w = (dij ** float(alpha)) * wfactor
+                    else:
+                        w = dij ** float(alpha)
+                    if _robust_huber_resid:
+                        r = abs((D_sub[a, b] * s) - D_slice[a, b])
+                        c = float(robust_huber_c)
+                        if r > 1e-12:
+                            w *= (1.0 if r <= c else (c / r))
+                    W[ia, ib] += w
+                    W[ib, ia] += w
     np.fill_diagonal(W, 0.0)
     return D, W
 
@@ -266,6 +461,28 @@ def select_next_subset_lift_weakest(
     arena_max: float = 1.0,
     min_size: int = 3,
     max_size: Optional[int] = None,
+    # Policy refinements (safe defaults preserve original behavior)
+    seen: Optional[np.ndarray] = None,
+    recent: Optional[np.ndarray] = None,
+    last_subset: Optional[List[int]] = None,
+    avoid_anchor_pair: Optional[Tuple[int, int]] = None,
+    max_jaccard: Optional[float] = None,
+    overlap_penalty: float = 0.0,
+    recency_penalty: float = 0.0,
+    unseen_boost: float = 0.0,
+    stress_weight: float = 0.0,
+    durations: Optional[np.ndarray] = None,
+    duration_cost_weight: float = 0.0,
+    require_unseen: bool = False,
+    # Time targeting and long‑clip safeguards
+    target_time_seconds: Optional[float] = None,
+    target_time_tolerance: float = 0.05,
+    duration_cost_cap_per_item: Optional[float] = None,
+    inclusion_counts: Optional[np.ndarray] = None,
+    long_clip_mask: Optional[np.ndarray] = None,
+    min_long_clip_inclusion_rate: float = 0.0,
+    long_clip_boost: float = 0.0,
+    trials_so_far: int = 0,
 ) -> List[int]:
     """Greedy lift-the-weakest subset selection maximizing trial efficiency.
 
@@ -280,8 +497,18 @@ def select_next_subset_lift_weakest(
     iu = np.triu_indices(n, 1)
     if iu[0].size == 0:
         return []
-    flat_idx = np.argmin(masked[iu])
-    j, k = iu[0][flat_idx], iu[1][flat_idx]
+    # Pick weakest pair; allow avoiding last anchor if requested
+    order = np.argsort(masked[iu])
+    j = k = None
+    for flat_idx in order:
+        a, b = iu[0][flat_idx], iu[1][flat_idx]
+        if avoid_anchor_pair is not None and (min(a, b), max(a, b)) == (min(avoid_anchor_pair[0], avoid_anchor_pair[1]), max(avoid_anchor_pair[0], avoid_anchor_pair[1])):
+            continue
+        j, k = a, b
+        break
+    if j is None:
+        flat_idx = int(order[0])
+        j, k = iu[0][flat_idx], iu[1][flat_idx]
 
     nextISS: List[int] = [j, k]
     # Diagnostic
@@ -295,19 +522,92 @@ def select_next_subset_lift_weakest(
     if max_size is None:
         max_size = n
 
+    # Helper: stress score for candidate relative to S (dispersion over current members)
+    def _stress(x: int, S: List[int]) -> float:
+        if not S:
+            return 0.0
+        vals = np.array([float(D[x, s]) for s in S], dtype=float)
+        return float(np.std(vals)) if vals.size else 0.0
+
+    # Helper: Jaccard penalty/constraint relative to last subset
+    def _overlap_pen(candidate: List[int]) -> float:
+        if not last_subset or not candidate:
+            return 0.0
+        A, B = set(candidate), set(last_subset)
+        if not A or not B:
+            return 0.0
+        jacc = len(A & B) / float(len(A | B))
+        if max_jacc is not None and jacc > max_jacc:
+            return float('inf')
+        return float(overlap_penalty) * jacc
+
+    # Helper: duration-aware cost term
+    def _duration_cost(candidate: List[int]) -> float:
+        if durations is None:
+            return 0.0
+        try:
+            vals = np.array([float(durations[i]) for i in candidate], dtype=float)
+            if duration_cost_cap_per_item is not None:
+                vals = np.minimum(vals, float(duration_cost_cap_per_item))
+            return float(duration_cost_weight) * float(np.sum(vals))
+        except Exception:
+            return 0.0
+
+    def _estimated_time(candidate: List[int]) -> float:
+        if durations is None:
+            return float(len(candidate) ** time_cost_exponent)
+        vals = np.array([float(durations[i]) for i in candidate], dtype=float)
+        if duration_cost_cap_per_item is not None:
+            vals = np.minimum(vals, float(duration_cost_cap_per_item))
+        return float(np.sum(vals))
+
     # Phase 1: grow to required minimum size regardless of TE sign
     while len(nextISS) < min_size and len(nextISS) < max_size and available:
         best_te = -1e18
         best_item: Optional[int] = None
-        for i in list(available):
+        # If require_unseen and current candidate has no unseen members, restrict pool to unseen when possible
+        pool = list(available)
+        if require_unseen and seen is not None and not any((not bool(seen[x])) for x in nextISS):
+            unseen_pool = [i for i in pool if 0 <= i < len(seen) and not bool(seen[i])]
+            if unseen_pool:
+                pool = unseen_pool
+        for i in pool:
             candidate = nextISS + [i]
             dW = _predict_evidence_gain_for_subset(candidate, D, arena_max=arena_max)
             delta = 0.0
             for (a, b), inc in dW.items():
                 w0 = W[a, b]
                 delta += (_utility(w0 + inc, utility_exponent) - _utility(w0, utility_exponent))
-            cost = _trial_cost(len(candidate), exponent=time_cost_exponent)
-            te = (delta / cost) if cost > 0 else -1e18
+            # Policy shaping
+            if seen is not None and unseen_boost and 0 <= i < len(seen) and not bool(seen[i]):
+                delta += float(unseen_boost)
+            if recency_penalty and recent is not None and 0 <= i < len(recent):
+                delta -= float(recency_penalty) * float(recent[i])
+            if stress_weight:
+                delta += float(stress_weight) * _stress(i, nextISS)
+            # Encourage long clips if below minimum inclusion rate
+            if (
+                long_clip_mask is not None and inclusion_counts is not None and trials_so_far > 0 and
+                min_long_clip_inclusion_rate > 0.0 and 0 <= i < len(long_clip_mask) and bool(long_clip_mask[i])
+            ):
+                rate_i = float(inclusion_counts[i]) / float(trials_so_far)
+                if rate_i < float(min_long_clip_inclusion_rate):
+                    delta += float(long_clip_boost)
+            # Cost and penalties
+            cost = _trial_cost(len(candidate), exponent=time_cost_exponent) + _duration_cost(candidate)
+            pen = _overlap_pen(candidate)
+            # Respect target time if provided (beyond min_size)
+            if target_time_seconds is not None and len(candidate) >= min_size:
+                t_est = _estimated_time(candidate)
+                if t_est > float(target_time_seconds) * (1.0 + float(target_time_tolerance)):
+                    te = -1e18
+                    if te > best_te:
+                        best_te = te; best_item = None
+                    continue
+            if pen == float('inf'):
+                te = -1e18
+            else:
+                te = (delta / cost) - pen if cost > 0 else -1e18
             if te > best_te:
                 best_te = te
                 best_item = i
@@ -333,9 +633,36 @@ def select_next_subset_lift_weakest(
             for (a, b), inc in gain_pairs:
                 w0 = W[a, b]
                 delta += (_utility(w0 + inc, utility_exponent) - _utility(w0, utility_exponent))
-            # Cost
-            cost = _trial_cost(len(candidate), exponent=time_cost_exponent)
-            te = (delta / cost) if cost > 0 else 0.0
+            # Policy shaping
+            if seen is not None and unseen_boost and 0 <= i < len(seen) and not bool(seen[i]):
+                delta += float(unseen_boost)
+            if recency_penalty and recent is not None and 0 <= i < len(recent):
+                delta -= float(recency_penalty) * float(recent[i])
+            if stress_weight:
+                delta += float(stress_weight) * _stress(i, nextISS)
+            # Encourage long clips if below minimum inclusion rate
+            if (
+                long_clip_mask is not None and inclusion_counts is not None and trials_so_far > 0 and
+                min_long_clip_inclusion_rate > 0.0 and 0 <= i < len(long_clip_mask) and bool(long_clip_mask[i])
+            ):
+                rate_i = float(inclusion_counts[i]) / float(trials_so_far)
+                if rate_i < float(min_long_clip_inclusion_rate):
+                    delta += float(long_clip_boost)
+            # Cost & penalties
+            cost = _trial_cost(len(candidate), exponent=time_cost_exponent) + _duration_cost(candidate)
+            pen = _overlap_pen(candidate)
+            # Respect target time if provided (beyond min_size)
+            if target_time_seconds is not None and len(candidate) >= min_size:
+                t_est = _estimated_time(candidate)
+                if t_est > float(target_time_seconds) * (1.0 + float(target_time_tolerance)):
+                    te = -1e18
+                    if te > best_te:
+                        best_te = te; best_item = None
+                    continue
+            if pen == float('inf'):
+                te = -1e18
+            else:
+                te = (delta / cost) - pen if cost > 0 else 0.0
             if te > best_te:
                 best_te = te
                 best_item = i
