@@ -1,8 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "../lib/api";
+import { useKey } from "../lib/KeyContext";
 import ChainBuilder from "../components/ChainBuilder";
+import Link from "next/link";
+import { EyeIcon, EyeOffIcon } from "../components/EyeIcon";
 
 interface StudySummary {
     id: string;
@@ -49,10 +53,23 @@ interface ChainSessionsData {
     participants: ChainSession[];
 }
 
-type Tab = "studies" | "chains" | "settings";
+type Tab = "studies" | "chains";
 
 export default function AdminPage() {
-    const [adminSecret, setAdminSecret] = useState("");
+    return (
+        <Suspense fallback={<div style={{ minHeight: "100vh", background: "#000", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>Loading...</div>}>
+            <AdminContent />
+        </Suspense>
+    );
+}
+
+function AdminContent() {
+    const searchParams = useSearchParams();
+    const { adminKey, setAdminKey, isAuthenticated, isLocalBypass, authReady, generateKey, generating } = useKey();
+    const [keyInput, setKeyInput] = useState("");
+    const [showKey, setShowKey] = useState(false);
+    const [copied, setCopied] = useState(false);
+    const [justGenerated, setJustGenerated] = useState(false);
     const [activeTab, setActiveTab] = useState<Tab>("studies");
     const [studies, setStudies] = useState<StudySummary[]>([]);
     const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -67,48 +84,94 @@ export default function AdminPage() {
     const [loadingChainSessions, setLoadingChainSessions] = useState(false);
 
     useEffect(() => {
-        const saved = sessionStorage.getItem("adminSecret");
-        if (saved) setAdminSecret(saved);
-    }, []);
+        if (adminKey) setKeyInput(adminKey);
+    }, [adminKey]);
 
-    const loadStudies = async () => {
-        if (!adminSecret.trim()) {
-            setError("Admin secret required.");
-            return;
+    // Auto-load studies if authenticated
+    useEffect(() => {
+        if (!authReady) return;
+        if (studies.length === 0 && !loadingStudies) {
+            loadStudies(adminKey);
         }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isAuthenticated, authReady]);
+
+    // Auto-select study from URL
+    useEffect(() => {
+        const studyFromUrl = searchParams.get("study");
+        if (studyFromUrl && studies.length > 0) {
+            loadSessions(studyFromUrl);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [studies]);
+
+    const handleKeySubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        setAdminKey(keyInput);
+        loadStudies(keyInput);
+    };
+
+    const handleGenerate = async () => {
+        try {
+            const key = await generateKey();
+            setKeyInput(key);
+            setJustGenerated(true);
+            setShowKey(true);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to generate key");
+        }
+    };
+
+    const handleCopyKey = () => {
+        navigator.clipboard.writeText(keyInput || adminKey);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    const buildKeyHeaders = (keyOverride?: string): Record<string, string> => {
+        const key = (keyOverride ?? adminKey).trim();
+        return key ? { "x-experimenter-key": key } : {};
+    };
+
+    const describeAuthError = (err: unknown, fallback: string, keyOverride?: string) => {
+        const msg = err instanceof Error ? err.message : fallback;
+        if (!msg.includes("API error 401")) {
+            return msg;
+        }
+        const activeKey = (keyOverride ?? adminKey).trim();
+        if (activeKey) {
+            return msg;
+        }
+        return "Experimenter key required to log your experiments and share them online. We strongly recommend always immediately backing up your data.";
+    };
+
+    const loadStudies = async (key?: string) => {
         setError(null);
         setLoadingStudies(true);
         try {
-            sessionStorage.setItem("adminSecret", adminSecret);
             const data = await apiFetch<StudySummary[]>("/api/v1/admin/studies", {
-                headers: { "x-admin-secret": adminSecret },
+                headers: buildKeyHeaders(key),
             });
             setStudies(data);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to load studies";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to load studies", key));
         } finally {
             setLoadingStudies(false);
         }
     };
 
     const loadSessions = async (studyId: string) => {
-        if (!adminSecret.trim()) {
-            setError("Admin secret required.");
-            return;
-        }
         setError(null);
         setLoadingSessions(true);
         setSelectedStudyId(studyId);
         try {
             const data = await apiFetch<SessionSummary[]>(
                 `/api/v1/admin/studies/${studyId}/sessions`,
-                { headers: { "x-admin-secret": adminSecret } }
+                { headers: buildKeyHeaders() }
             );
             setSessions(data);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to load sessions";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to load sessions"));
         } finally {
             setLoadingSessions(false);
         }
@@ -116,7 +179,9 @@ export default function AdminPage() {
 
     const downloadResults = async (sessionId: string) => {
         try {
-            const data = await apiFetch(`/api/v1/sessions/${sessionId}/results`);
+            const data = await apiFetch(`/api/v1/sessions/${sessionId}/results`, {
+                headers: buildKeyHeaders(),
+            });
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
@@ -125,8 +190,7 @@ export default function AdminPage() {
             a.click();
             URL.revokeObjectURL(url);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to download results";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to download results"));
         }
     };
 
@@ -135,12 +199,11 @@ export default function AdminPage() {
         try {
             await apiFetch(`/api/v1/admin/sessions/${sessionId}`, {
                 method: "DELETE",
-                headers: { "x-admin-secret": adminSecret },
+                headers: buildKeyHeaders(),
             });
             setSessions(sessions.filter((s) => s.id !== sessionId));
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to delete session";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to delete session"));
         }
     };
 
@@ -149,7 +212,7 @@ export default function AdminPage() {
         try {
             await apiFetch(`/api/v1/admin/studies/${studyId}`, {
                 method: "DELETE",
-                headers: { "x-admin-secret": adminSecret },
+                headers: buildKeyHeaders(),
             });
             setStudies(studies.filter((s) => s.id !== studyId));
             if (selectedStudyId === studyId) {
@@ -157,8 +220,7 @@ export default function AdminPage() {
                 setSessions([]);
             }
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to delete study";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to delete study"));
         }
     };
 
@@ -167,11 +229,12 @@ export default function AdminPage() {
         setSelectedChainId(chainId);
         setError(null);
         try {
-            const data = await apiFetch<ChainSessionsData>(`/api/v1/chains/${chainId}/sessions`);
+            const data = await apiFetch<ChainSessionsData>(`/api/v1/chains/${chainId}/sessions`, {
+                headers: buildKeyHeaders(),
+            });
             setChainSessions(data);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to load chain sessions";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to load chain sessions"));
         } finally {
             setLoadingChainSessions(false);
         }
@@ -182,14 +245,14 @@ export default function AdminPage() {
         try {
             await apiFetch(`/api/v1/chains/${chainId}/sessions/${chainSessionId}`, {
                 method: "DELETE",
+                headers: buildKeyHeaders(),
             });
             // Reload chain sessions
             if (selectedChainId) {
                 loadChainSessions(selectedChainId);
             }
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to delete chain session";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to delete chain session"));
         }
     };
 
@@ -208,7 +271,7 @@ export default function AdminPage() {
     return (
         <div
             style={{
-                minHeight: "100vh",
+                minHeight: "calc(100vh - 56px)",
                 background: "#000",
                 color: "#fff",
                 padding: 40,
@@ -217,52 +280,174 @@ export default function AdminPage() {
             }}
         >
             <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-                <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>Admin Dashboard</h1>
+                {/* Breadcrumb */}
+                <div style={{ marginBottom: 8, fontSize: 13, color: "#555" }}>
+                    <Link href="/" style={{ color: "#666", textDecoration: "none" }}>Dashboard</Link>
+                    <span style={{ margin: "0 8px" }}>/</span>
+                    <span style={{ color: "#fff" }}>Experimenter</span>
+                </div>
+
+                <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>Experimenter Panel</h1>
                 <p style={{ color: "#666", fontSize: 14, marginBottom: 24 }}>
                     Manage studies, chains, and view participant results.
                 </p>
 
-                {/* Admin Secret Input */}
-                <div style={{ background: "#111", padding: 20, borderRadius: 8, marginBottom: 24 }}>
-                    <label style={{ color: "#aaa", fontSize: 12, marginBottom: 6, display: "block" }}>
-                        Admin Secret
-                    </label>
-                    <div style={{ display: "flex", gap: 8 }}>
-                        <input
-                            type="password"
-                            value={adminSecret}
-                            onChange={(e) => setAdminSecret(e.target.value)}
-                            style={{
-                                flex: 1,
-                                padding: "8px 12px",
-                                borderRadius: 4,
-                                border: "1px solid #444",
-                                background: "#1a1a1a",
-                                color: "#fff",
-                                fontSize: 14,
-                            }}
-                        />
+                {!authReady ? (
+                    <div style={{ background: "#111", padding: 24, borderRadius: 10, marginBottom: 24, color: "#888", fontSize: 13 }}>
+                        Checking auth mode...
+                    </div>
+                ) : (
+                    <>
+                {/* Experimenter Key Input */}
+                {!isAuthenticated ? (
+                    <div style={{ background: "#111", padding: 24, borderRadius: 10, marginBottom: 24 }}>
+                        <label style={{ color: "#aaa", fontSize: 12, marginBottom: 8, display: "block" }}>
+                            Experimenter Key
+                        </label>
+                        <form onSubmit={handleKeySubmit} style={{ display: "flex", gap: 8 }}>
+                            <input
+                                type={showKey ? "text" : "password"}
+                                value={keyInput}
+                                onChange={(e) => { setKeyInput(e.target.value); setJustGenerated(false); }}
+                                placeholder="Enter your experimenter key..."
+                                style={{
+                                    flex: 1,
+                                    padding: "10px 14px",
+                                    borderRadius: 8,
+                                    border: "1px solid #444",
+                                    background: "#1a1a1a",
+                                    color: "#fff",
+                                    fontSize: 14,
+                                    fontFamily: justGenerated ? "monospace" : "inherit",
+                                }}
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowKey(!showKey)}
+                                style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #444", background: "#1a1a1a", color: "#888", cursor: "pointer", display: "flex", alignItems: "center" }}
+                                title={showKey ? "Hide key" : "Show key"}
+                            >
+                                {showKey ? <EyeOffIcon size={18} color="#888" /> : <EyeIcon size={18} color="#888" />}
+                            </button>
+                            <button
+                                type="submit"
+                                disabled={loadingStudies}
+                                style={{
+                                    padding: "10px 20px",
+                                    borderRadius: 8,
+                                    border: "none",
+                                    background: "linear-gradient(135deg, #00ff88 0%, #00cc66 100%)",
+                                    color: "#000",
+                                    fontWeight: 600,
+                                    cursor: loadingStudies ? "not-allowed" : "pointer",
+                                }}
+                            >
+                                {loadingStudies ? "Loading..." : "Enter"}
+                            </button>
+                        </form>
+
+                        <div style={{ marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
+                            <div style={{ flex: 1, height: 1, background: "#333" }} />
+                            <span style={{ color: "#555", fontSize: 12 }}>or</span>
+                            <div style={{ flex: 1, height: 1, background: "#333" }} />
+                        </div>
+
                         <button
-                            onClick={loadStudies}
-                            disabled={loadingStudies}
+                            onClick={handleGenerate}
+                            disabled={generating}
                             style={{
-                                padding: "8px 16px",
-                                borderRadius: 6,
-                                border: "1px solid #444",
-                                background: "#1a1a1a",
-                                color: "#fff",
-                                cursor: loadingStudies ? "not-allowed" : "pointer",
+                                width: "100%",
+                                marginTop: 16,
+                                padding: "12px 24px",
+                                borderRadius: 8,
+                                border: "1px dashed #444",
+                                background: "transparent",
+                                color: "#aaa",
+                                fontSize: 14,
+                                cursor: generating ? "not-allowed" : "pointer",
+                                transition: "all 0.2s ease",
                             }}
                         >
-                            {loadingStudies ? "Loading..." : "Load Data"}
+                            {generating ? "Generating..." : "Generate New Experimenter Key"}
                         </button>
+
+                        {justGenerated && (
+                            <div style={{
+                                marginTop: 16,
+                                background: "#1a1200",
+                                border: "1px solid #554400",
+                                borderRadius: 10,
+                                padding: 16,
+                            }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                                    <span style={{ fontSize: 16 }}>⚠️</span>
+                                    <strong style={{ color: "#ffcc00", fontSize: 14 }}>Save Your Key!</strong>
+                                </div>
+                                <p style={{ color: "#cca700", fontSize: 13, margin: "0 0 12px", lineHeight: 1.5 }}>
+                                    This key is your only way to access your experiments later.
+                                    The server does not store it. Copy it somewhere safe now.
+                                </p>
+                                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                    <code style={{
+                                        flex: 1,
+                                        padding: "10px 14px",
+                                        background: "#0a0a0a",
+                                        border: "1px solid #333",
+                                        borderRadius: 8,
+                                        color: "#00ff88",
+                                        fontSize: 13,
+                                        fontFamily: "monospace",
+                                        wordBreak: "break-all",
+                                    }}>
+                                        {keyInput}
+                                    </code>
+                                    <button
+                                        onClick={handleCopyKey}
+                                        style={{
+                                            padding: "10px 16px",
+                                            borderRadius: 8,
+                                            border: "1px solid #333",
+                                            background: copied ? "#00ff88" : "#222",
+                                            color: copied ? "#000" : "#fff",
+                                            fontSize: 13,
+                                            fontWeight: 600,
+                                            cursor: "pointer",
+                                            whiteSpace: "nowrap",
+                                            transition: "all 0.2s",
+                                        }}
+                                    >
+                                        {copied ? "✓ Copied" : "Copy"}
+                                    </button>
+                                </div>
+                                <p style={{ color: "#887700", fontSize: 11, margin: "10px 0 0", fontStyle: "italic" }}>
+                                    After copying, click &quot;Enter&quot; above to access your experiments.
+                                </p>
+                            </div>
+                        )}
+
+                        {error && (
+                            <div style={{ marginTop: 12, color: "#ff6666", fontSize: 13 }}>
+                                {error}
+                            </div>
+                        )}
                     </div>
-                    {error && (
-                        <div style={{ marginTop: 8, color: "#ff6666", fontSize: 13 }}>
-                            {error}
+                ) : (
+                    <>
+                    {isLocalBypass && !adminKey.trim() && (
+                        <div style={{ marginBottom: 16, padding: 12, background: "rgba(0, 255, 136, 0.08)", border: "1px solid #1e5f45", borderRadius: 8, color: "#8ddfbf", fontSize: 13 }}>
+                            Running in local keyless mode. Experimenter key entry is optional.
                         </div>
                     )}
-                </div>
+                    {error && (
+                        <div style={{ marginBottom: 16, padding: 12, background: "rgba(255,0,0,0.1)", border: "1px solid #f66", borderRadius: 8, color: "#f66", fontSize: 13 }}>
+                            {error}
+                        </div>
+                    )
+                    }
+                    </>
+                )}
+                </>
+                )}
 
                 {/* Tabs */}
                 <div style={{ borderBottom: "1px solid #333", marginBottom: 24 }}>
@@ -278,12 +463,7 @@ export default function AdminPage() {
                     >
                         Chains
                     </button>
-                    <button
-                        onClick={() => setActiveTab("settings")}
-                        style={tabStyle(activeTab === "settings")}
-                    >
-                        Settings
-                    </button>
+
                 </div>
 
                 {/* Tab Content */}
@@ -430,7 +610,7 @@ export default function AdminPage() {
                     <div>
                         <ChainBuilder
                             onChainSelected={loadChainSessions}
-                            adminSecret={adminSecret}
+                            adminSecret={adminKey}
                         />
 
                         {/* Chain Sessions Viewer */}
@@ -607,17 +787,8 @@ export default function AdminPage() {
                     </div>
                 )}
 
-                {activeTab === "settings" && (
-                    <div style={{ background: "#111", padding: 32, borderRadius: 12, textAlign: "center" }}>
-                        <div style={{ fontSize: 48, marginBottom: 16 }}>⚙️</div>
-                        <h3 style={{ margin: 0, color: "#888" }}>Settings</h3>
-                        <p style={{ color: "#555", fontSize: 13, maxWidth: 400, margin: "12px auto 0" }}>
-                            Admin configuration options will be available here in future updates.
-                        </p>
-                    </div>
-                )}
+
             </div>
         </div >
     );
 }
-

@@ -61,6 +61,179 @@ def _scale_to_match_rms(A: np.ndarray, B: np.ndarray) -> float:
     return rms_B / rms_A
 
 
+def _prepare_trial_info(
+    trials: Iterable[TrialArrangement],
+) -> List[Tuple[List[int], np.ndarray]]:
+    """Convert TrialArrangement objects into distance matrices."""
+    trial_info: List[Tuple[List[int], np.ndarray]] = []
+    for t in trials:
+        subset = list(t.subset)
+        m = len(subset)
+        if m < 2:
+            continue
+        if not t.positions:
+            continue
+        D_sub = _pairwise_distances_from_positions(subset, t.positions)
+        trial_info.append((subset, D_sub))
+    return trial_info
+
+
+def _accumulate_weights(
+    trial_info: List[Tuple[List[int], np.ndarray]],
+    D_reference: Optional[np.ndarray],
+    *,
+    weight_mode: str,
+    alpha: float,
+    robust_method: Optional[str],
+    robust_winsor_high: float,
+    robust_huber_c: float,
+) -> np.ndarray:
+    """Aggregate evidence weights given per-trial distances."""
+    if not trial_info:
+        return np.zeros((0, 0), dtype=float) if D_reference is None else np.zeros_like(D_reference)
+
+    n_items = D_reference.shape[0] if D_reference is not None else max((max(subset) for subset, _ in trial_info), default=-1) + 1
+    W = np.zeros((n_items, n_items), dtype=float)
+
+    _robust_winsor = (robust_method in ('winsor', 'winsor_resid_huber'))
+    _robust_huber_dist = (robust_method == 'huber')
+    _robust_huber_resid = (robust_method in ('resid_huber', 'winsor_resid_huber'))
+
+    for subset, D_sub in trial_info:
+        m = len(subset)
+        D_slice = None
+        if D_reference is not None and D_reference.size:
+            D_slice = np.zeros((m, m), dtype=float)
+            for a in range(m):
+                ia = subset[a]
+                for b in range(m):
+                    ib = subset[b]
+                    D_slice[a, b] = D_reference[ia, ib]
+
+        if weight_mode == 'max':
+            iu_sub = np.triu_indices(m, 1)
+            maxd = float(np.max(D_sub[iu_sub])) if iu_sub[0].size else 0.0
+            scale = (1.0 / maxd) if maxd > 1e-12 else 0.0
+            D_scaled = None
+            if D_slice is not None:
+                s_match = _scale_to_match_rms(D_sub, D_slice)
+                D_scaled = D_sub * s_match
+            for a in range(m):
+                ia = subset[a]
+                for b in range(a + 1, m):
+                    ib = subset[b]
+                    dij = D_sub[a, b] * scale
+                    if _robust_winsor:
+                        hi = float(robust_winsor_high)
+                        if hi > 0.0:
+                            dij = min(dij, hi)
+                    if _robust_huber_dist:
+                        c = float(robust_huber_c)
+                        if dij <= 0.0:
+                            w = 0.0
+                        else:
+                            wfactor = 1.0 if dij <= c else (c / dij)
+                            w = (dij ** float(alpha)) * wfactor
+                    else:
+                        w = dij ** float(alpha)
+                    if _robust_huber_resid and D_slice is not None and D_scaled is not None:
+                        r = abs(D_scaled[a, b] - D_slice[a, b])
+                        c = float(robust_huber_c)
+                        if r > 1e-12:
+                            w *= (1.0 if r <= c else (c / r))
+                    W[ia, ib] += w
+                    W[ib, ia] += w
+        elif weight_mode == 'k2012':
+            D_scaled = None
+            if D_slice is not None:
+                s_match = _scale_to_match_rms(D_sub, D_slice)
+                D_scaled = D_sub * s_match
+            for a in range(m):
+                ia = subset[a]
+                for b in range(a + 1, m):
+                    ib = subset[b]
+                    dij = D_sub[a, b]
+                    if _robust_winsor:
+                        hi = float(robust_winsor_high)
+                        if hi > 0.0:
+                            dij = min(dij, hi)
+                    if _robust_huber_dist:
+                        c = float(robust_huber_c)
+                        if dij <= 0.0:
+                            w = 0.0
+                        else:
+                            wfactor = 1.0 if dij <= c else (c / dij)
+                            w = (dij ** float(alpha)) * wfactor
+                    else:
+                        w = dij ** float(alpha)
+                    if _robust_huber_resid and D_slice is not None and D_scaled is not None:
+                        r = abs(D_scaled[a, b] - D_slice[a, b])
+                        c = float(robust_huber_c)
+                        if r > 1e-12:
+                            w *= (1.0 if r <= c else (c / r))
+                    W[ia, ib] += w
+                    W[ib, ia] += w
+        else:  # 'rms'
+            s = 1.0
+            if D_slice is not None:
+                s = _scale_to_match_rms(D_sub, D_slice)
+            for a in range(m):
+                ia = subset[a]
+                for b in range(a + 1, m):
+                    ib = subset[b]
+                    dij = D_sub[a, b] * s
+                    if _robust_winsor:
+                        hi = float(robust_winsor_high)
+                        if hi > 0.0:
+                            dij = min(dij, hi)
+                    if _robust_huber_dist:
+                        c = float(robust_huber_c)
+                        if dij <= 0.0:
+                            w = 0.0
+                        else:
+                            wfactor = 1.0 if dij <= c else (c / dij)
+                            w = (dij ** float(alpha)) * wfactor
+                    else:
+                        w = dij ** float(alpha)
+                    if _robust_huber_resid and D_slice is not None:
+                        r = abs((D_sub[a, b] * s) - D_slice[a, b])
+                        c = float(robust_huber_c)
+                        if r > 1e-12:
+                            w *= (1.0 if r <= c else (c / r))
+                    W[ia, ib] += w
+                    W[ib, ia] += w
+
+    np.fill_diagonal(W, 0.0)
+    return W
+
+
+def compute_evidence_matrix(
+    n_items: int,
+    trials: Iterable[TrialArrangement],
+    *,
+    D_reference: Optional[np.ndarray] = None,
+    weight_mode: str = 'max',
+    alpha: float = 2.0,
+    robust_method: Optional[str] = None,
+    robust_winsor_high: float = 0.98,
+    robust_huber_c: float = 0.9,
+) -> np.ndarray:
+    """Public helper to accumulate evidence weights from trials."""
+    trials = list(trials)
+    trial_info = _prepare_trial_info(trials)
+    if D_reference is None:
+        D_reference = np.zeros((n_items, n_items), dtype=float)
+    return _accumulate_weights(
+        trial_info,
+        D_reference,
+        weight_mode=weight_mode,
+        alpha=alpha,
+        robust_method=robust_method,
+        robust_winsor_high=robust_winsor_high,
+        robust_huber_c=robust_huber_c,
+    )
+
+
 def estimate_rdm_weighted_average(
     n_items: int,
     trials: Iterable[TrialArrangement],
@@ -94,15 +267,7 @@ def estimate_rdm_weighted_average(
         - W: accumulated evidence weights matrix (n x n), symmetric, zeros on diagonal
     """
     trials = list(trials)
-    # Precompute per-trial subset index mapping and distance matrices
-    trial_info = []
-    for t in trials:
-        subset = list(t.subset)
-        m = len(subset)
-        if m < 2:
-            continue
-        D_sub = _pairwise_distances_from_positions(subset, t.positions)
-        trial_info.append((subset, D_sub))
+    trial_info = _prepare_trial_info(trials)
 
     # Seed current estimate D
     D = np.zeros((n_items, n_items), dtype=float)
@@ -287,118 +452,15 @@ def estimate_rdm_weighted_average(
 
     np.fill_diagonal(D, 0.0)
     # Build and return W according to requested weight_mode using final D
-    W = np.zeros((n_items, n_items), dtype=float)
-    for subset, D_sub in trial_info:
-        m = len(subset)
-        if weight_mode == 'max':
-            iu_sub = np.triu_indices(m, 1)
-            maxd = float(np.max(D_sub[iu_sub])) if iu_sub[0].size else 0.0
-            scale = (1.0 / maxd) if maxd > 1e-12 else 0.0
-            # D_slice and D_scaled for residual weighting
-            D_slice = np.zeros((m, m), dtype=float)
-            for a in range(m):
-                ia = subset[a]
-                for b in range(m):
-                    ib = subset[b]
-                    D_slice[a, b] = D[ia, ib]
-            s_match = _scale_to_match_rms(D_sub, D_slice)
-            D_scaled = D_sub * s_match
-            for a in range(m):
-                ia = subset[a]
-                for b in range(a + 1, m):
-                    ib = subset[b]
-                    dij = D_sub[a, b] * scale
-                    if _robust_winsor:
-                        hi = float(robust_winsor_high)
-                        if hi > 0.0:
-                            dij = min(dij, hi)
-                    if _robust_huber_dist:
-                        c = float(robust_huber_c)
-                        if dij <= 0.0:
-                            w = 0.0
-                        else:
-                            wfactor = 1.0 if dij <= c else (c / dij)
-                            w = (dij ** float(alpha)) * wfactor
-                    else:
-                        w = dij ** float(alpha)
-                    if _robust_huber_resid:
-                        r = abs(D_scaled[a, b] - D_slice[a, b])
-                        c = float(robust_huber_c)
-                        if r > 1e-12:
-                            w *= (1.0 if r <= c else (c / r))
-                    W[ia, ib] += w
-                    W[ib, ia] += w
-        elif weight_mode == 'k2012':
-            # Use unscaled on-screen distances directly (no normalization) for W
-            # Prepare residuals
-            D_slice = np.zeros((m, m), dtype=float)
-            for a in range(m):
-                ia = subset[a]
-                for b in range(m):
-                    ib = subset[b]
-                    D_slice[a, b] = D[ia, ib]
-            s_match = _scale_to_match_rms(D_sub, D_slice)
-            D_scaled = D_sub * s_match
-            for a in range(m):
-                ia = subset[a]
-                for b in range(a + 1, m):
-                    ib = subset[b]
-                    dij = D_sub[a, b]
-                    if _robust_winsor:
-                        hi = float(robust_winsor_high)
-                        if hi > 0.0:
-                            dij = min(dij, hi)
-                    if _robust_huber_dist:
-                        c = float(robust_huber_c)
-                        if dij <= 0.0:
-                            w = 0.0
-                        else:
-                            wfactor = 1.0 if dij <= c else (c / dij)
-                            w = (dij ** float(alpha)) * wfactor
-                    else:
-                        w = dij ** float(alpha)
-                    if _robust_huber_resid:
-                        r = abs(D_scaled[a, b] - D_slice[a, b])
-                        c = float(robust_huber_c)
-                        if r > 1e-12:
-                            w *= (1.0 if r <= c else (c / r))
-                    W[ia, ib] += w
-                    W[ib, ia] += w
-        else:
-            # Compute RMS match to final D on subset
-            D_slice = np.zeros((m, m), dtype=float)
-            for a in range(m):
-                ia = subset[a]
-                for b in range(m):
-                    ib = subset[b]
-                    D_slice[a, b] = D[ia, ib]
-            s = _scale_to_match_rms(D_sub, D_slice)
-            for a in range(m):
-                ia = subset[a]
-                for b in range(a + 1, m):
-                    ib = subset[b]
-                    dij = D_sub[a, b] * s
-                    if _robust_winsor:
-                        hi = float(robust_winsor_high)
-                        if hi > 0.0:
-                            dij = min(dij, hi)
-                    if _robust_huber_dist:
-                        c = float(robust_huber_c)
-                        if dij <= 0.0:
-                            w = 0.0
-                        else:
-                            wfactor = 1.0 if dij <= c else (c / dij)
-                            w = (dij ** float(alpha)) * wfactor
-                    else:
-                        w = dij ** float(alpha)
-                    if _robust_huber_resid:
-                        r = abs((D_sub[a, b] * s) - D_slice[a, b])
-                        c = float(robust_huber_c)
-                        if r > 1e-12:
-                            w *= (1.0 if r <= c else (c / r))
-                    W[ia, ib] += w
-                    W[ib, ia] += w
-    np.fill_diagonal(W, 0.0)
+    W = _accumulate_weights(
+        trial_info,
+        D,
+        weight_mode=weight_mode,
+        alpha=alpha,
+        robust_method=robust_method,
+        robust_winsor_high=robust_winsor_high,
+        robust_huber_c=robust_huber_c,
+    )
     return D, W
 
 
@@ -537,7 +599,7 @@ def select_next_subset_lift_weakest(
         if not A or not B:
             return 0.0
         jacc = len(A & B) / float(len(A | B))
-        if max_jacc is not None and jacc > max_jacc:
+        if max_jaccard is not None and jacc > max_jaccard:
             return float('inf')
         return float(overlap_penalty) * jacc
 

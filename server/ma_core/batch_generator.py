@@ -358,6 +358,93 @@ class BatchGenerator:
         }
 
 
+def _generate_optimal_batches(
+    v: int,
+    k: int,
+    seed: int = 12345,
+    time_limit: float = 10.0,
+    passes: int = 12,
+    greedy_trials: int = 2,
+    forbid_above: int = 2,
+    group_rounds: int = 12,
+    group_time: float = 10.0,
+    group_cands: int = 100,
+) -> Optional[List[List[int]]]:
+    """
+    Generate near-optimal batches using LJCR covering designs + local search.
+    
+    Uses the same algorithm as the library's optimize_cover_pure.py, called
+    directly as a module (no subprocess needed).
+    
+    Returns:
+        List of batches (0-based), or None if LJCR data unavailable.
+    """
+    from pathlib import Path
+    try:
+        from . import optimize_cover_pure as ocp
+    except ImportError:
+        return None
+
+    # Locate the LJCR cache bundled with the server
+    cache_dir = Path(__file__).parent / "ljcr_cache"
+
+    # Try to load seed blocks from cache; fetch from LJCR if missing
+    try:
+        blocks = ocp.get_seed_blocks(
+            v, k, cache_dir,
+            offline_first=True,
+            offline_only=False,   # allow live fetch if cache misses
+        )
+    except Exception as e:
+        print(f"[optimal] Could not obtain seed blocks for v={v} k={k}: {e}")
+        return None
+
+    rng = random.Random(seed)
+    random.seed(seed)
+
+    # Repair under-coverage (rare for LJCR seeds)
+    counts, _ = ocp.coverage_from_blocks(v, blocks)
+    if min(counts) < 1:
+        blocks = ocp.repair_to_coverage(v, k, blocks, rng=rng)
+
+    # Prune redundant blocks
+    counts, bpairs = ocp.coverage_from_blocks(v, blocks)
+    order = list(range(len(blocks)))
+    rng.shuffle(order)
+    for idx in order:
+        pp = bpairs[idx]
+        if any(counts[p] == 1 for p in pp):
+            continue
+        for p in pp:
+            counts[p] -= 1
+        blocks[idx] = None
+    blocks = [b for b in blocks if b is not None]
+
+    # Local search + group DFS rebalancing
+    opt = ocp.CoverOptimizer(v, blocks, seed=seed)
+    forbid = None if forbid_above < 0 else forbid_above
+    opt.local_search(passes=passes, forbid_above=forbid, greedy_trials=greedy_trials)
+
+    improved = True
+    r = group_rounds
+    while r > 0 and improved:
+        r -= 1
+        lnow = opt.lambda_max()
+        if lnow <= 2:
+            break
+        improved = opt.reduce_lmax_group(
+            target=lnow - 1,
+            time_limit=group_time,
+            max_pairs_considered=20,
+            candidates_per_block=group_cands,
+        )
+
+    result = [list(b) for b in opt.blocks]
+    print(f"[optimal] Generated {len(result)} batches for v={v} k={k} "
+          f"(lambda_max={opt.lambda_max()}, Schonheim>={ocp.schonheim_lb(v, k)})")
+    return result
+
+
 def generate_batches(
     n_items: int,
     batch_size: int,
@@ -369,35 +456,47 @@ def generate_batches(
     """
     Convenience function to generate batches.
     
+    Uses a hybrid strategy matching the desktop library:
+    1. Try LJCR-optimal covering designs (via bundled optimize_cover_pure)
+    2. Fall back to the library if installed (for flex mode)
+    3. Fall back to local greedy algorithm
+    
     Args:
         n_items: Total number of stimuli
         batch_size: Number of stimuli per batch
         seed: Random seed for reproducibility
         restarts: Number of algorithm restarts
         flex: Use variable-size batches (library flex mode)
-        algorithm: 'server' to use the built-in greedy, otherwise forwarded to the library
+        algorithm: Algorithm hint ('hybrid', 'server', 'optimal', 'greedy')
         
     Returns:
         List of batches
     """
-    # Prefer library implementation when requested (to match desktop behavior).
-    if flex or (algorithm and algorithm != "server"):
+    seed_value = 42 if seed is None else seed
+
+    # For flex mode, delegate to the library (flex requires optimize_cover_flex.py)
+    if flex:
         try:
             import multiarrangement as ma
-
             algo = "hybrid" if algorithm == "server" else str(algorithm)
-            seed_value = 42 if seed is None else seed
             batches = ma.create_batches(
-                n_items,
-                batch_size,
-                seed=seed_value,
-                algorithm=algo,
-                flex=bool(flex),
+                n_items, batch_size, seed=seed_value,
+                algorithm=algo, flex=True,
             )
             if batches:
                 return batches
         except Exception as e:
-            print(f"Warning: library batch generation failed ({e}); falling back to server greedy.")
+            print(f"Warning: library flex batch generation failed ({e}); falling back to server greedy.")
 
+    # Try optimal covering design first (same algorithm as the library's hybrid path)
+    if algorithm != "greedy":
+        try:
+            batches = _generate_optimal_batches(n_items, batch_size, seed=seed_value)
+            if batches:
+                return batches
+        except Exception as e:
+            print(f"Warning: optimal batch generation failed ({e}); falling back to greedy.")
+
+    # Greedy fallback
     generator = BatchGenerator(n_items, batch_size, seed)
     return generator.generate_batches(restarts)

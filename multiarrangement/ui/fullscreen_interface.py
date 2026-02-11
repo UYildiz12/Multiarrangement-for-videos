@@ -89,12 +89,28 @@ class FullscreenInterface(BaseInterface):
                     # Toggle fullscreen (though we start in fullscreen)
                     pass
                 elif event.key == pygame.K_z:
-                    self.magnify_active = True
-            elif event.type == pygame.KEYUP:
-                if event.key == pygame.K_z:
-                    self.magnify_active = False
-                    
+                    # Zoom in at mouse position
+                    try:
+                        pos = pygame.mouse.get_pos()
+                    except Exception:
+                        pos = None
+                    self.zoom_in(pos)
+                elif event.key == pygame.K_x:
+                    # Zoom out at mouse position (down to default)
+                    try:
+                        pos = pygame.mouse.get_pos()
+                    except Exception:
+                        pos = None
+                    self.zoom_out(pos)
+            elif event.type == pygame.MOUSEWHEEL:
+                self.handle_magnify_wheel(event)
+                
             elif event.type == pygame.MOUSEBUTTONDOWN:
+                # Legacy wheel support (buttons 4/5)
+                if getattr(event, 'button', None) == 4:
+                    self.handle_magnify_wheel(type('obj', (), {'y': 1}))
+                elif getattr(event, 'button', None) == 5:
+                    self.handle_magnify_wheel(type('obj', (), {'y': -1}))
                 if event.button == 1:  # Left click
                     pos = event.pos if hasattr(event, 'pos') else pygame.mouse.get_pos()
                     
@@ -116,6 +132,8 @@ class FullscreenInterface(BaseInterface):
                     self.handle_drag_end()
                     
             elif event.type == pygame.MOUSEMOTION:
+                if self.magnify_active:
+                    self.set_magnify_center(event.pos if hasattr(event, 'pos') else None)
                 if self.dragging:
                     pos = event.pos if hasattr(event, 'pos') else pygame.mouse.get_pos()
                     self.handle_drag_motion(pos)

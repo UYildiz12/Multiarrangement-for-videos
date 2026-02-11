@@ -2,10 +2,10 @@
 Study management endpoints.
 """
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.schemas import (
     StudyCreate,
@@ -14,6 +14,7 @@ from app.schemas import (
     StimulusResponse,
     StimulusBatchCreate,
 )
+from app.routers.experimenter import get_optional_owner, get_required_owner
 
 router = APIRouter(prefix="/studies", tags=["studies"])
 
@@ -23,14 +24,31 @@ _stimuli_db: dict = {}
 _study_counter = 0
 
 
+@router.get("", response_model=List[StudyResponse])
+async def list_studies(owner_id: Optional[UUID] = Depends(get_optional_owner)):
+    """List studies filtered by experimenter key. Returns empty if no key."""
+    if owner_id is None:
+        return []
+    stimuli_db = _stimuli_db
+    out = []
+    for study in _studies_db.values():
+        if study.get("owner_id") != owner_id:
+            continue
+        data = {**study, "n_stimuli": len(stimuli_db.get(study["id"], []))}
+        out.append(StudyResponse(**data))
+    return out
+
+
 @router.post("", response_model=StudyResponse, status_code=status.HTTP_201_CREATED)
-async def create_study(study: StudyCreate) -> StudyResponse:
-    """Create a new study."""
+async def create_study(
+    study: StudyCreate,
+    owner_id: UUID = Depends(get_required_owner),
+) -> StudyResponse:
+    """Create a new study. Requires experimenter key."""
     import uuid
     from datetime import datetime
     
     study_id = uuid.uuid4()
-    owner_id = uuid.uuid4()  # TODO: Get from auth
     
     study_data = {
         "id": study_id,
@@ -66,8 +84,12 @@ async def get_study(study_id: UUID) -> StudyResponse:
 
 
 @router.patch("/{study_id}", response_model=StudyResponse)
-async def update_study(study_id: UUID, update: StudyUpdate) -> StudyResponse:
-    """Update study configuration."""
+async def update_study(
+    study_id: UUID,
+    update: StudyUpdate,
+    owner_id: UUID = Depends(get_required_owner),
+) -> StudyResponse:
+    """Update study configuration. Requires experimenter key."""
     if study_id not in _studies_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -75,6 +97,11 @@ async def update_study(study_id: UUID, update: StudyUpdate) -> StudyResponse:
         )
     
     study_data = _studies_db[study_id]
+    if study_data.get("owner_id") != owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not your study"
+        )
     
     if update.name is not None:
         study_data["name"] = update.name
@@ -92,12 +119,22 @@ async def update_study(study_id: UUID, update: StudyUpdate) -> StudyResponse:
 
 
 @router.delete("/{study_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_study(study_id: UUID):
-    """Delete a study and all associated data."""
+async def delete_study(
+    study_id: UUID,
+    owner_id: UUID = Depends(get_required_owner),
+):
+    """Delete a study and all associated data. Requires experimenter key."""
     if study_id not in _studies_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Study not found"
+        )
+    
+    study_data = _studies_db[study_id]
+    if study_data.get("owner_id") != owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not your study"
         )
     
     del _studies_db[study_id]
@@ -118,12 +155,23 @@ async def list_stimuli(study_id: UUID) -> List[StimulusResponse]:
 
 
 @router.post("/{study_id}/stimuli", response_model=List[StimulusResponse])
-async def register_stimuli(study_id: UUID, payload: StimulusBatchCreate) -> List[StimulusResponse]:
-    """Register stimuli for a study (in-memory for now)."""
+async def register_stimuli(
+    study_id: UUID,
+    payload: StimulusBatchCreate,
+    owner_id: UUID = Depends(get_required_owner),
+) -> List[StimulusResponse]:
+    """Register stimuli for a study. Requires experimenter key."""
     if study_id not in _studies_db:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Study not found"
+        )
+    
+    study_data = _studies_db[study_id]
+    if study_data.get("owner_id") != owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not your study"
         )
 
     import uuid

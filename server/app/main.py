@@ -7,7 +7,7 @@ FastAPI application for the web-based multiarrangement experiment platform.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import studies_router, sessions_router, results_router, invites_router, admin_router, chains_router, chains_public_router
+from app.routers import studies_router, sessions_router, results_router, invites_router, admin_router, chains_router, chains_public_router, experimenter_router
 from app.schemas import HealthResponse
 
 app = FastAPI(
@@ -33,6 +33,7 @@ app.include_router(invites_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
 app.include_router(chains_router, prefix="/api/v1")
 app.include_router(chains_public_router, prefix="/api/v1")
+app.include_router(experimenter_router, prefix="/api/v1")
 
 
 @app.get("/health", response_model=HealthResponse)

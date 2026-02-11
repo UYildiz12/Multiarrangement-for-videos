@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 
 interface Stimulus {
     id: string;
@@ -34,25 +34,15 @@ export default function PairwiseArena({
     const [watchedA, setWatchedA] = useState(stimulusA.mediaType === "image");
     const [watchedB, setWatchedB] = useState(stimulusB.mediaType === "image");
 
-    useEffect(() => {
-        setRating(null);
-        setWatchedA(stimulusA.mediaType === "image");
-        setWatchedB(stimulusB.mediaType === "image");
-    }, [stimulusA.id, stimulusB.id, stimulusA.mediaType, stimulusB.mediaType]);
-
     const canSubmit = rating !== null && watchedA && watchedB;
 
     const handlePlayA = useCallback(() => {
-        if (stimulusA.mediaType !== "image") {
-            onMediaPlay(stimulusA.id, stimulusA.mediaUrl, stimulusA.mediaType);
-        }
+        onMediaPlay(stimulusA.id, stimulusA.mediaUrl, stimulusA.mediaType);
         setWatchedA(true);
     }, [stimulusA, onMediaPlay]);
 
     const handlePlayB = useCallback(() => {
-        if (stimulusB.mediaType !== "image") {
-            onMediaPlay(stimulusB.id, stimulusB.mediaUrl, stimulusB.mediaType);
-        }
+        onMediaPlay(stimulusB.id, stimulusB.mediaUrl, stimulusB.mediaType);
         setWatchedB(true);
     }, [stimulusB, onMediaPlay]);
 
@@ -66,7 +56,7 @@ export default function PairwiseArena({
         }
     }, [rating, onSubmit]);
 
-    // Rating labels: 1 = very different to 7 = identical (similarity scale)
+    // Rating labels: 1 = very different to 7 = very similar (similarity scale)
     const ratingLabels = language === "tr"
         ? [
             "Çok farklı",
@@ -75,7 +65,7 @@ export default function PairwiseArena({
             "Nötr",
             "Biraz benzer",
             "Benzer",
-            "Aynı / Çok benzer",
+            "Çok benzer",
         ]
         : [
             "Very Different",
@@ -84,7 +74,7 @@ export default function PairwiseArena({
             "Neutral",
             "Somewhat Similar",
             "Similar",
-            "Identical / Very Similar",
+            "Very Similar",
         ];
 
     return (
@@ -174,8 +164,10 @@ export default function PairwiseArena({
                         }}
                     >
                         {watchedA
-                            ? (language === "tr" ? "✓ A izlendi" : "✓ Watched A")
-                            : (language === "tr" ? "▶ A oynat" : "▶ Play A")}
+                            ? (language === "tr" ? "✓ A görüldü" : "✓ Viewed A")
+                            : (stimulusA.mediaType === "image"
+                                ? (language === "tr" ? "🔍 A büyüt" : "🔍 View A")
+                                : (language === "tr" ? "▶ A oynat" : "▶ Play A"))}
                     </button>
                 </div>
 
@@ -251,8 +243,10 @@ export default function PairwiseArena({
                         }}
                     >
                         {watchedB
-                            ? (language === "tr" ? "✓ B izlendi" : "✓ Watched B")
-                            : (language === "tr" ? "▶ B oynat" : "▶ Play B")}
+                            ? (language === "tr" ? "✓ B görüldü" : "✓ Viewed B")
+                            : (stimulusB.mediaType === "image"
+                                ? (language === "tr" ? "🔍 B büyüt" : "🔍 View B")
+                                : (language === "tr" ? "▶ B oynat" : "▶ Play B"))}
                     </button>
                 </div>
             </div>

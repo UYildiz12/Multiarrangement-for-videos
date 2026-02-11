@@ -82,6 +82,8 @@ export default function DragArena({
       isDragging: false,
     }));
     setItems(newItems);
+    setDraggedId(null);
+    setActivePointerId(null);
   }, [stimuli, trialIndex, getInitialPositions]);
 
   // Check if item center is inside the arena circle
@@ -109,6 +111,7 @@ export default function DragArena({
 
   const handlePointerDown = (e: React.PointerEvent, id: string) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (draggedId !== null || activePointerId !== null) return;
     e.preventDefault();
     const item = items.find((i) => i.id === id);
     if (!item) return;
@@ -132,12 +135,11 @@ export default function DragArena({
     setDraggedId(id);
 
     setItems((prev) =>
-      prev.map((i) => (i.id === id ? { ...i, isDragging: true } : i))
+      prev.map((i) => ({ ...i, isDragging: i.id === id }))
     );
   };
 
   const handleDoubleClick = (item: DraggableItem) => {
-    if (item.mediaType === "image") return;
     if (onMediaPlay && item.mediaUrl) {
       onMediaPlay(item.id, item.mediaUrl, item.mediaType);
     }
@@ -163,7 +165,8 @@ export default function DragArena({
     [draggedId, activePointerId]
   );
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e?: PointerEvent) => {
+    if (activePointerId !== null && e && e.pointerId !== activePointerId) return;
     if (draggedId) {
       setItems((prev) =>
         prev.map((i) =>
@@ -173,7 +176,7 @@ export default function DragArena({
       setDraggedId(null);
     }
     setActivePointerId(null);
-  }, [draggedId]);
+  }, [draggedId, activePointerId]);
 
   useEffect(() => {
     window.addEventListener("pointermove", handlePointerMove);

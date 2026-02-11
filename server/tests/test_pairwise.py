@@ -53,7 +53,9 @@ def test_pairwise_workflow(pairwise_study):
         
         assert next_data["trial_index"] == i
         assert len(next_data["subset_indices"]) == 2  # Always a pair
-        assert next_data["is_final"] == (i == expected_pairs - 1)
+        # is_final is always False while there are still pairs to display;
+        # the final signal comes from the NEXT call after the last submit
+        assert next_data["is_final"] is False
 
         # 3. Submit Rating (1-7 scale)
         # Rating 7 = Very Similar => Dissimilarity 0

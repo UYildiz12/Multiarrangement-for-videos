@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import ChainBuilder from "../components/ChainBuilder";
 
 export default function ChainsPage() {
     return (
         <div
             style={{
-                minHeight: "100vh",
+                minHeight: "calc(100vh - 56px)",
                 background: "#000",
                 color: "#fff",
                 padding: 40,
@@ -14,14 +15,18 @@ export default function ChainsPage() {
             }}
         >
             <div style={{ maxWidth: 1200, margin: "0 auto" }}>
+                {/* Breadcrumb */}
+                <div style={{ marginBottom: 8, fontSize: 13, color: "#555" }}>
+                    <Link href="/" style={{ color: "#666", textDecoration: "none" }}>Dashboard</Link>
+                    <span style={{ margin: "0 8px" }}>/</span>
+                    <span style={{ color: "#fff" }}>Chains</span>
+                </div>
+
                 <div style={{ marginBottom: 32 }}>
                     <h1 style={{
-                        fontSize: 32,
+                        fontSize: 28,
                         fontWeight: 700,
                         margin: 0,
-                        background: "linear-gradient(135deg, #fff 0%, #888 100%)",
-                        WebkitBackgroundClip: "text",
-                        WebkitTextFillColor: "transparent",
                     }}>
                         Experiment Chains
                     </h1>
@@ -43,7 +48,7 @@ export default function ChainsPage() {
                         How Chains Work
                     </h3>
                     <ol style={{ margin: 0, paddingLeft: 20, color: "#888", fontSize: 13, lineHeight: 1.8 }}>
-                        <li>Create individual studies in the <a href="/setup" style={{ color: "#00ff88" }}>Setup page</a></li>
+                        <li>Create individual studies in the <Link href="/setup" style={{ color: "#00ff88" }}>Setup page</Link></li>
                         <li>Create a chain and add studies by their IDs</li>
                         <li>Generate an invite link for the chain</li>
                         <li>When participants open the link, they complete studies in sequence</li>

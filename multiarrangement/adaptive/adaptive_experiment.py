@@ -24,6 +24,7 @@ from .lift_weakest import (
     estimate_rdm_weighted_average,
     select_next_subset_lift_weakest,
     refine_rdm_inverse_mds,
+    compute_evidence_matrix,
 )
 
 
@@ -125,7 +126,8 @@ class AdaptiveMultiarrangementExperiment:
 
         # Estimations
         self.D_est = np.zeros((self.n, self.n), dtype=float)
-        self.W = np.zeros((self.n, self.n), dtype=float)
+        self.W_raw = np.zeros((self.n, self.n), dtype=float)
+        self.W_sched = np.zeros((self.n, self.n), dtype=float)
 
         self.video_processor = VideoProcessor()
         # Policy state: seen, recent, durations
@@ -200,7 +202,7 @@ class AdaptiveMultiarrangementExperiment:
         self.trials.append(TrialArrangement(subset=list(self.current_subset_indices), positions=positions_by_idx))
 
         # Re-estimate D and W using all trials so far
-        self.D_est, self.W = estimate_rdm_weighted_average(
+        self.D_est, self.W_raw = estimate_rdm_weighted_average(
             self.n,
             self.trials,
             alpha=float(self.config.evidence_alpha),
@@ -208,6 +210,16 @@ class AdaptiveMultiarrangementExperiment:
             robust_winsor_high=float(self.config.robust_winsor_high),
             robust_huber_c=float(self.config.robust_huber_c),
             weight_mode=str(self.config.evidence_weight_mode),
+        )
+        self.W_sched = compute_evidence_matrix(
+            self.n,
+            self.trials,
+            D_reference=self.D_est,
+            weight_mode='max',
+            alpha=float(self.config.evidence_alpha),
+            robust_method=self.config.robust_method,
+            robust_winsor_high=float(self.config.robust_winsor_high),
+            robust_huber_c=float(self.config.robust_huber_c),
         )
         # Optional inverse-MDS refinement
         if self.config.use_inverse_mds:
@@ -244,13 +256,13 @@ class AdaptiveMultiarrangementExperiment:
             if self.config.stop_on_utility:
                 # u(W) = 1 - exp(-d W)
                 d = float(self.config.utility_exponent)
-                u_vals = 1.0 - np.exp(-d * self.W[iu])
+                u_vals = 1.0 - np.exp(-d * self.W_sched[iu])
                 min_u = float(np.min(u_vals))
                 if min_u >= self.config.evidence_threshold:
                     self.experiment_completed = True
                     return False
             else:
-                min_w = float(np.min(self.W[iu]))
+                min_w = float(np.min(self.W_sched[iu]))
                 if min_w >= self.config.evidence_threshold:
                     self.experiment_completed = True
                     return False
@@ -260,7 +272,7 @@ class AdaptiveMultiarrangementExperiment:
         avoid_pair = self.last_anchor_pair if self.config.avoid_anchor_reuse else None
         next_subset = select_next_subset_lift_weakest(
             self.D_est,
-            self.W,
+            self.W_sched,
             utility_exponent=self.config.utility_exponent,
             time_cost_exponent=self.config.time_cost_exponent,
             arena_max=self.config.arena_max,
@@ -332,8 +344,9 @@ class AdaptiveMultiarrangementExperiment:
         df = pd.DataFrame(self.D_est, index=self.video_names, columns=self.video_names)
         df.to_excel(output_dir / f"{base}_results.xlsx")
         np.save(output_dir / f"{base}_rdm.npy", self.D_est.astype(float))
-        # Save evidence matrix
-        np.save(output_dir / f"{base}_evidence.npy", self.W.astype(float))
+        # Save evidence matrices (raw per weight_mode + normalized scheduling evidence)
+        np.save(output_dir / f"{base}_evidence.npy", self.W_raw.astype(float))
+        np.save(output_dir / f"{base}_evidence_normalized.npy", self.W_sched.astype(float))
         # Save metadata (subsets per trial)
         meta = {
             "participant_id": self.participant_id,
@@ -341,6 +354,7 @@ class AdaptiveMultiarrangementExperiment:
             # Ensure JSON-serializable Python ints for trial indices
             "trials": [[int(i) for i in t.subset] for t in self.trials],
             "evidence_threshold": float(self.config.evidence_threshold),
+            "evidence_weight_mode": str(self.config.evidence_weight_mode),
             "utility_exponent": float(self.config.utility_exponent),
             "rng_seed": int(self.rng_seed) if self.rng_seed is not None else None,
         }

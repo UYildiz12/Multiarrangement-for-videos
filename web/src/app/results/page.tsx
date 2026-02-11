@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import * as XLSX from "xlsx";
 import RdmHeatmap from "../components/RdmHeatmap";
 import { apiFetch } from "../lib/api";
@@ -62,10 +63,10 @@ function ResultsContent() {
     const sessionId = searchParams.get("session");
 
     const [results, setResults] = useState<ResultsResponse | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading] = useState(Boolean(sessionId));
     const [error, setError] = useState<string | null>(null);
     const [paradigm, setParadigm] = useState<Paradigm | null>(null);
-    const [language, setLanguage] = useState<"en" | "tr">(getStoredLanguage());
+    const [language] = useState<"en" | "tr">(getStoredLanguage());
 
     const timeInfo = useCallback(() => {
         if (!sessionId) return { seconds: null, startIso: null, endIso: null };
@@ -105,12 +106,7 @@ function ResultsContent() {
     }, [language]);
 
     useEffect(() => {
-        if (!sessionId) {
-            setError(copy().noSessionId);
-            setLoading(false);
-            return;
-        }
-
+        if (!sessionId) return;
         apiFetch<ResultsResponse>(`/api/v1/sessions/${sessionId}/results`)
             .then((data) => setResults(data))
             .catch((err) => setError(err instanceof Error ? err.message : copy().loadResultsError))
@@ -191,7 +187,9 @@ function ResultsContent() {
         return <LoadingFallback />;
     }
 
-    if (error) {
+    const displayError = error ?? (!sessionId ? copy().noSessionId : null);
+
+    if (displayError) {
         return (
             <div
                 style={{
@@ -204,7 +202,7 @@ function ResultsContent() {
                     fontFamily: "'Inter', -apple-system, sans-serif",
                 }}
             >
-                {copy().errorLabel}: {error}
+                {copy().errorLabel}: {displayError}
             </div>
         );
     }
@@ -289,13 +287,18 @@ function ResultsContent() {
                     <a
                         href="/admin"
                         style={{
-                            color: "#00ff00",
+                            color: "#00ff88",
                             fontSize: 13,
                             marginTop: 16,
+                            textDecoration: "none",
                         }}
                     >
                         {copy().backToAdmin}
                     </a>
+                    <div style={{ display: "flex", gap: 12, marginTop: 8, justifyContent: "center" }}>
+                        <Link href="/" style={{ color: "#666", fontSize: 12, textDecoration: "none" }}>Dashboard</Link>
+                        <Link href="/setup" style={{ color: "#666", fontSize: 12, textDecoration: "none" }}>New Experiment</Link>
+                    </div>
                 </>
             )}
         </div>

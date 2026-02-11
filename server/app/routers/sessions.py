@@ -157,7 +157,7 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
         "started_at": datetime.utcnow(),
         "completed_at": None,
         # Adaptive state (for LTW paradigm)
-        "D": np.ones((n_stimuli, n_stimuli)) - np.eye(n_stimuli) if n_stimuli > 0 else None,
+        "D": np.zeros((n_stimuli, n_stimuli)) if n_stimuli > 0 else None,
         "W_raw": np.zeros((n_stimuli, n_stimuli)) if n_stimuli > 0 else None,
         "W_sched": np.zeros((n_stimuli, n_stimuli)) if n_stimuli > 0 else None,
         "trial_arrangements": [],
@@ -291,7 +291,7 @@ async def get_next_trial(session_id: UUID) -> NextTrialResponse:
             )
         
         # Check stopping criterion
-        threshold = study["config"].get("evidence_threshold", 0.35)
+        threshold = study["config"].get("evidence_threshold", 0.5)
         stop_on_utility = bool(study["config"].get("stop_on_utility", False))
         if stop_on_utility:
             d = float(study["config"].get("utility_exponent", 10.0))
@@ -312,12 +312,14 @@ async def get_next_trial(session_id: UUID) -> NextTrialResponse:
             )
         
         # Select next subset
-        min_size = study["config"].get("min_subset_size", 4)
-        max_size = study["config"].get("max_subset_size", 6)
+        min_size = study["config"].get("min_subset_size", 3)
+        max_size = study["config"].get("max_subset_size", None)
         cfg = study["config"]
         
         cold_start_trials = int(cfg.get("cold_start_require_unseen_trials", 0))
         require_unseen = cold_start_trials > 0 and int(session.get("current_trial_index", 0)) < cold_start_trials
+
+        effective_max = int(max_size) if max_size is not None else n_stimuli
 
         subset = select_next_subset_lift_weakest(
             D, W,
@@ -325,7 +327,7 @@ async def get_next_trial(session_id: UUID) -> NextTrialResponse:
             time_cost_exponent=float(cfg.get("time_cost_exponent", 1.5)),
             arena_max=float(cfg.get("arena_max", 1.0)),
             min_size=int(min_size),
-            max_size=int(max_size),
+            max_size=effective_max,
             seen=session.get("seen"),
             recent=session.get("recent"),
             last_subset=session.get("last_subset"),
@@ -347,7 +349,19 @@ async def get_next_trial(session_id: UUID) -> NextTrialResponse:
             trials_so_far=int(session.get("current_trial_index", 0)),
             require_unseen=require_unseen,
         )
-        
+
+        # Safety fallback: if selector returned empty/tiny subset (matches library)
+        if not subset or len(subset) < int(min_size):
+            k = max(int(min_size), min(6, n_stimuli))
+            subset = list(range(min(n_stimuli, k)))
+
+        # Avoid repeating the exact same subset (matches library)
+        last_sub = session.get("last_subset")
+        if last_sub and set(subset) == set(last_sub) and len(subset) < n_stimuli:
+            remaining = [i for i in range(n_stimuli) if i not in subset]
+            if remaining:
+                subset = subset + [remaining[0]]
+
         return NextTrialResponse(
             trial_index=trial_index,
             subset_indices=subset,
@@ -507,9 +521,12 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             for idx in sel:
                 if 0 <= idx < len(session["inclusion_counts"]):
                     session["inclusion_counts"][idx] += 1
-        session["last_subset"] = list(sel)
-        if len(sel) >= 2:
-            a, b = int(sel[0]), int(sel[1])
+        # Use subset_indices (the ordered trial subset) for last_subset and anchor,
+        # matching the library which derives these from the selected subset list order.
+        subset_for_tracking = trial.subset_indices
+        session["last_subset"] = list(subset_for_tracking)
+        if len(subset_for_tracking) >= 2:
+            a, b = int(subset_for_tracking[0]), int(subset_for_tracking[1])
             session["last_anchor_pair"] = (min(a, b), max(a, b))
 
     # Re-estimate RDM/evidence
@@ -550,7 +567,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         else:
             evidence_weight_mode = cfg.get("evidence_weight_mode", "k2012")
             evidence_alpha = float(cfg.get("evidence_alpha", 2.0))
-            use_inverse_mds = bool(cfg.get("use_inverse_mds", False))
+            use_inverse_mds = bool(cfg.get("use_inverse_mds", True))
             inverse_mds_max_iter = int(cfg.get("inverse_mds_max_iter", 15))
             inverse_mds_step_c = float(cfg.get("inverse_mds_step_c", 0.3))
             inverse_mds_tol = float(cfg.get("inverse_mds_tol", 1e-4))

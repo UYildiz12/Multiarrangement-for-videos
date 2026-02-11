@@ -72,16 +72,12 @@ function ParticipateContent() {
     const router = useRouter();
     const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
     const [error, setError] = useState<string | null>(null);
+    const inviteToken = searchParams.get("invite");
+    const chainToken = searchParams.get("chain");
+    const missingToken = !inviteToken && !chainToken;
 
     useEffect(() => {
-        const inviteToken = searchParams.get("invite");
-        const chainToken = searchParams.get("chain");
-
-        if (!inviteToken && !chainToken) {
-            setError("Missing invite or chain token.");
-            setStatus("error");
-            return;
-        }
+        if (missingToken) return;
 
         let cancelled = false;
 
@@ -109,12 +105,19 @@ function ParticipateContent() {
                                     : undefined),
                     }));
 
-                    // Store chain info for experiment page
+                    // Store chain info for experiment page (both sessionStorage and localStorage for persistence)
                     sessionStorage.setItem("chainToken", chainToken);
                     sessionStorage.setItem("chainSessionId", chainSession.chain_session_id);
                     sessionStorage.setItem("chainName", chainSession.chain_name);
                     sessionStorage.setItem("chainTotalStudies", String(chainSession.total_studies));
                     sessionStorage.setItem("chainCurrentPosition", String(chainSession.current_position));
+                    // Also store in localStorage as backup for browser restart
+                    localStorage.setItem("chainToken", chainToken);
+                    localStorage.setItem("chainSessionId", chainSession.chain_session_id);
+                    localStorage.setItem("chainName", chainSession.chain_name);
+                    localStorage.setItem("chainTotalStudies", String(chainSession.total_studies));
+                    localStorage.setItem("chainCurrentPosition", String(chainSession.current_position));
+                    localStorage.setItem("chainCurrentStudySessionId", chainSession.session_id);
 
                     sessionStorage.setItem("experimentStimuli", JSON.stringify(stimuliForClient));
                     sessionStorage.setItem("experimentSessionId", chainSession.session_id);
@@ -173,6 +176,12 @@ function ParticipateContent() {
                     sessionStorage.removeItem("chainName");
                     sessionStorage.removeItem("chainTotalStudies");
                     sessionStorage.removeItem("chainCurrentPosition");
+                    localStorage.removeItem("chainToken");
+                    localStorage.removeItem("chainSessionId");
+                    localStorage.removeItem("chainName");
+                    localStorage.removeItem("chainTotalStudies");
+                    localStorage.removeItem("chainCurrentPosition");
+                    localStorage.removeItem("chainCurrentStudySessionId");
 
                     sessionStorage.setItem("experimentStimuli", JSON.stringify(stimuliForClient));
                     sessionStorage.setItem("experimentSessionId", session.session_id);
@@ -217,7 +226,7 @@ function ParticipateContent() {
         return () => {
             cancelled = true;
         };
-    }, [searchParams, router]);
+    }, [inviteToken, chainToken, missingToken, router]);
 
     return (
         <div
@@ -233,6 +242,7 @@ function ParticipateContent() {
                 padding: 20,
             }}
         >
+            {missingToken && <div style={{ color: "#ff6666" }}>Missing invite or chain token.</div>}
             {status === "loading" && <div>Starting your session...</div>}
             {status === "error" && <div style={{ color: "#ff6666" }}>{error}</div>}
         </div>

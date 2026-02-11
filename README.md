@@ -214,6 +214,10 @@ results.savefig("results/rdm_adaptive.png", title="Adaptive LTW RDM")
 
 ```
 
+Adaptive stopping always evaluates the **max-normalized** evidence matrix (values in \[0, 1\]), so the same `evidence_threshold`
+can be reused regardless of `evidence_weight_mode`. For reproducibility the raw, mode-specific evidence matrix is saved to
+`*_evidence.npy`, while the normalized scheduler matrix is saved to `*_evidence_normalized.npy`.
+
 ### Run the examples
 
 We include four examples for both paradigms (video/audio). They save heatmaps to `./results`.
@@ -278,7 +282,7 @@ UI details:
 ## Outputs
 
 - Set‑cover (library `multiarrangement` path): `participant_distances_<timestamp>.xlsx/csv` and a metadata JSON with labels, schedule (batches), per‑trial logs (subset indices + 2D positions), coverage diagnostics, and `rng_seed`.
-- Adaptive LTW: `adaptive_results_results.xlsx`, `adaptive_results_rdm.npy`, `adaptive_results_evidence.npy`, `adaptive_results_meta.json`.
+- Adaptive LTW: `adaptive_results_results.xlsx`, `adaptive_results_rdm.npy`, `adaptive_results_evidence.npy`, `adaptive_results_evidence_normalized.npy`, `adaptive_results_meta.json`.
 
 ## Covering Designs
 

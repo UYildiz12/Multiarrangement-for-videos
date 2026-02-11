@@ -2,12 +2,11 @@
 Invite and public participation endpoints.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 from uuid import UUID
-import os
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.schemas import (
     InviteCreate,
@@ -16,38 +15,30 @@ from app.schemas import (
 )
 from app.routers.studies import get_studies_db, get_stimuli_db
 from app.routers.sessions import create_session
+from app.routers.experimenter import get_required_owner
 
 router = APIRouter(tags=["invites"])
 
 _invites_db: Dict[str, dict] = {}
 
 
-def _require_admin(x_admin_secret: Optional[str] = Header(default=None, alias="x-admin-secret")):
-    secret = os.getenv("ADMIN_SECRET")
-    if not secret:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="ADMIN_SECRET not configured"
-        )
-    if x_admin_secret != secret:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid admin secret"
-        )
-    return True
-
-
 @router.post(
     "/admin/studies/{study_id}/invites",
     response_model=List[InviteResponse],
-    dependencies=[Depends(_require_admin)],
     status_code=status.HTTP_201_CREATED,
 )
-async def create_invites(study_id: UUID, payload: InviteCreate) -> List[InviteResponse]:
-    """Create one or more participant invites for a study."""
+async def create_invites(
+    study_id: UUID,
+    payload: InviteCreate,
+    owner_id: UUID = Depends(get_required_owner),
+) -> List[InviteResponse]:
+    """Create one or more participant invites for a study. Requires ownership."""
     studies_db = get_studies_db()
     if study_id not in studies_db:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    study = studies_db[study_id]
+    if study.get("owner_id") != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your study")
 
     count = max(1, int(payload.count or 1))
     invites = []

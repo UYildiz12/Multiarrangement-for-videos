@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useMemo, Suspense } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
 import DragArena from "../components/DragArena";
@@ -154,6 +154,7 @@ function ExperimentContent() {
     const [totalTrials, setTotalTrials] = useState(0);
     const [isFinal, setIsFinal] = useState(false);
     const [loadingTrial, setLoadingTrial] = useState(false);
+    const [loadingSession, setLoadingSession] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [paradigm, setParadigm] = useState<Paradigm>("setcover");
     const [instructions, setInstructions] = useState<string[]>([]);
@@ -169,8 +170,10 @@ function ExperimentContent() {
     const [currentMedia, setCurrentMedia] = useState<{ url: string; type: Stimulus["mediaType"] } | null>(null);
     const [results, setResults] = useState<ResultsResponse | null>(null);
     const [loadingResults, setLoadingResults] = useState(false);
+    const [hydrating, setHydrating] = useState(false);
 
     // Chain state
+    const hydrationDoneRef = useRef(false);
     const [chainToken, setChainToken] = useState<string | null>(null);
     const [chainName, setChainName] = useState<string | null>(null);
     const [chainTotalStudies, setChainTotalStudies] = useState<number>(0);
@@ -214,20 +217,46 @@ function ExperimentContent() {
     useEffect(() => {
         const fromQuery = searchParams.get("session");
         const stored = sessionStorage.getItem("experimentSessionId");
-        setSessionId(fromQuery || stored);
+        const resolvedSessionId = fromQuery || stored;
+        if (fromQuery && stored && fromQuery !== stored) {
+            // New session in query params: clear stale per-session cache.
+            sessionStorage.removeItem("experimentStimuli");
+            sessionStorage.removeItem("experimentStudyId");
+            sessionStorage.removeItem("experimentInstructions");
+            sessionStorage.setItem("experimentSessionId", fromQuery);
+            hydrationDoneRef.current = false;
+        }
+        setSessionId(resolvedSessionId);
         const storedStudyId = sessionStorage.getItem("experimentStudyId");
-        if (storedStudyId) setStudyId(storedStudyId);
+        if (storedStudyId && resolvedSessionId === sessionStorage.getItem("experimentSessionId")) {
+            setStudyId(storedStudyId);
+        }
 
-        // Load chain info if present
-        const storedChainToken = sessionStorage.getItem("chainToken");
-        const storedChainName = sessionStorage.getItem("chainName");
-        const storedChainTotal = sessionStorage.getItem("chainTotalStudies");
-        const storedChainPosition = sessionStorage.getItem("chainCurrentPosition");
+        // Load chain info if present (check sessionStorage first, then localStorage as backup)
+        let storedChainToken = sessionStorage.getItem("chainToken");
+        let storedChainName = sessionStorage.getItem("chainName");
+        let storedChainTotal = sessionStorage.getItem("chainTotalStudies");
+        let storedChainPosition = sessionStorage.getItem("chainCurrentPosition");
+
+        // Only use localStorage backup when it belongs to this exact study session.
+        const localChainSessionId = localStorage.getItem("chainCurrentStudySessionId");
+        if (!storedChainToken && resolvedSessionId && localChainSessionId === resolvedSessionId) {
+            storedChainToken = localStorage.getItem("chainToken");
+            storedChainName = localStorage.getItem("chainName");
+            storedChainTotal = localStorage.getItem("chainTotalStudies");
+            storedChainPosition = localStorage.getItem("chainCurrentPosition");
+        }
+
         if (storedChainToken) {
             setChainToken(storedChainToken);
             setChainName(storedChainName);
             setChainTotalStudies(parseInt(storedChainTotal || "0", 10));
             setChainCurrentPosition(parseInt(storedChainPosition || "0", 10));
+        } else {
+            setChainToken(null);
+            setChainName(null);
+            setChainTotalStudies(0);
+            setChainCurrentPosition(0);
         }
     }, [searchParams]);
 
@@ -251,6 +280,16 @@ function ExperimentContent() {
     }, [sessionId]);
 
     useEffect(() => {
+        if (!sessionId) return;
+        const storedSessionId = sessionStorage.getItem("experimentSessionId");
+        const canUseCache = storedSessionId === sessionId;
+        if (!canUseCache) {
+            setStimuli([]);
+            setInstructions([]);
+            setShowInstructions(false);
+            return;
+        }
+
         const storedStimuli = sessionStorage.getItem("experimentStimuli");
         if (storedStimuli) {
             try {
@@ -259,6 +298,8 @@ function ExperimentContent() {
             } catch {
                 setStimuli([]);
             }
+        } else {
+            setStimuli([]);
         }
         const storedInstructions = sessionStorage.getItem("experimentInstructions");
         if (storedInstructions) {
@@ -272,6 +313,9 @@ function ExperimentContent() {
                 setInstructions([]);
                 setShowInstructions(false);
             }
+        } else {
+            setInstructions([]);
+            setShowInstructions(false);
         }
         const storedConfig = sessionStorage.getItem("experimentConfig");
         if (storedConfig) {
@@ -285,7 +329,7 @@ function ExperimentContent() {
                 // ignore
             }
         }
-    }, []);
+    }, [sessionId]);
 
     useEffect(() => {
         if (paradigm !== "pairwise" || stimuli.length === 0) return;
@@ -334,12 +378,21 @@ function ExperimentContent() {
 
 
     useEffect(() => {
-        if (!sessionId || stimuli.length > 0) return;
+        if (!sessionId) return;
         let cancelled = false;
         const loadFromServer = async () => {
+            setLoadingSession(true);
+            setError(null);
+            setStimuli([]);
+            setSubsetIndices([]);
+            setTrialIndex(0);
+            setIsFinal(false);
+            setResults(null);
             try {
                 const session = await apiFetch<SessionResponse>(`/api/v1/sessions/${sessionId}`);
                 setStudyId(session.study_id);
+                sessionStorage.setItem("experimentSessionId", sessionId);
+                sessionStorage.setItem("experimentStudyId", session.study_id);
                 const serverStimuli = await apiFetch<ServerStimulus[]>(`/api/v1/studies/${session.study_id}/stimuli`);
                 const mapped = serverStimuli.map((s) => ({
                     id: s.id || `stim-${s.ordinal}`,
@@ -356,15 +409,17 @@ function ExperimentContent() {
                     sessionStorage.setItem("experimentStimuli", JSON.stringify(mapped));
                 }
             } catch (err) {
-                const msg = err instanceof Error ? err.message : copy.loadStimuliError;
+                const msg = err instanceof Error ? err.message : "Failed to load stimuli";
                 if (!cancelled) setError(msg);
+            } finally {
+                if (!cancelled) setLoadingSession(false);
             }
         };
         loadFromServer();
         return () => {
             cancelled = true;
         };
-    }, [sessionId, stimuli.length, copy]);
+    }, [sessionId]);
 
     useEffect(() => {
         if (!sessionId || stimuli.length === 0) return;
@@ -400,8 +455,9 @@ function ExperimentContent() {
     }, [sessionId, stimuli]);
 
     useEffect(() => {
-        if (stimuli.length === 0) return;
+        if (stimuli.length === 0 || hydrationDoneRef.current) return;
         let cancelled = false;
+        setHydrating(true);
         const hydrate = async () => {
             const updated = await Promise.all(
                 stimuli.map(async (s) => {
@@ -436,6 +492,8 @@ function ExperimentContent() {
             );
 
             if (cancelled) return;
+            hydrationDoneRef.current = true;
+            setHydrating(false);
             const changed = updated.some((u, i) => u.mediaUrl !== stimuli[i]?.mediaUrl || u.thumbnail !== stimuli[i]?.thumbnail);
             if (changed) {
                 setStimuli(updated);
@@ -636,7 +694,7 @@ function ExperimentContent() {
         XLSX.writeFile(wb, `session_${sessionId}_rdm.xlsx`);
     }, [results, sessionId, timeInfo]);
 
-    if (!sessionId || stimuli.length === 0) {
+    if (!sessionId) {
         return (
             <div
                 style={{
@@ -651,6 +709,47 @@ function ExperimentContent() {
             >
                 <div style={{ textAlign: "center" }}>
                     <p style={{ marginBottom: 16 }}>{copy.noSession}</p>
+                    <a href="/setup" style={{ color: "#00ff00" }}>
+                        {copy.goToSetup}
+                    </a>
+                </div>
+            </div>
+        );
+    }
+
+    if (loadingSession || hydrating) {
+        return (
+            <div
+                style={{
+                    minHeight: "100vh",
+                    background: "#000",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#fff",
+                    fontFamily: "'Inter', -apple-system, sans-serif",
+                }}
+            >
+                {copy.loading}
+            </div>
+        );
+    }
+
+    if (stimuli.length === 0) {
+        return (
+            <div
+                style={{
+                    minHeight: "100vh",
+                    background: "#000",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "#fff",
+                    fontFamily: "'Inter', -apple-system, sans-serif",
+                }}
+            >
+                <div style={{ textAlign: "center" }}>
+                    <p style={{ marginBottom: 16 }}>{error || copy.loadStimuliError}</p>
                     <a href="/setup" style={{ color: "#00ff00" }}>
                         {copy.goToSetup}
                     </a>
@@ -757,6 +856,8 @@ function ExperimentContent() {
                                 sessionStorage.setItem("experimentSessionId", next.session_id);
                                 sessionStorage.setItem("experimentStudyId", next.study_id);
                                 sessionStorage.setItem("chainCurrentPosition", String(next.current_position));
+                                localStorage.setItem("chainCurrentPosition", String(next.current_position));
+                                localStorage.setItem("chainCurrentStudySessionId", next.session_id);
                                 sessionStorage.setItem("experimentConfig", JSON.stringify({
                                     ...(next.config || {}),
                                     paradigm: next.paradigm,
@@ -929,6 +1030,7 @@ function ExperimentContent() {
             )}
             {paradigm === "pairwise" ? (
                 <PairwiseArena
+                    key={`${trialIndex}-${currentStimuli[0]?.id ?? "a"}-${currentStimuli[1]?.id ?? "b"}`}
                     stimulusA={currentStimuli[0]}
                     stimulusB={currentStimuli[1]}
                     onSubmit={handlePairwiseSubmit}

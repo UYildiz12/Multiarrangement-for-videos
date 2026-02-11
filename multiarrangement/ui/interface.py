@@ -62,6 +62,18 @@ class BaseInterface(ABC):
         # Optional custom instructions (list of strings); None -> show defaults
         self.custom_instructions = None
 
+        # Magnifier defaults and state
+        self.magnify_active = False
+        self.magnify_scale = 1.0
+        self.magnify_scale_min = 1.0
+        self.magnify_scale_max = 6.0
+        self.magnify_key_step = 0.3
+        self.magnify_wheel_step = 0.2
+        # Size of the source region to magnify (in screen pixels)
+        self.magnify_box = (300, 300)
+        # Center of magnifier sampling region (screen coords)
+        self.magnify_center = None
+
         # Detect if this session is image-only (affects click behavior)
         try:
             files = getattr(self.experiment, 'video_files', [])
@@ -198,6 +210,93 @@ class BaseInterface(ABC):
                 ]
         for instruction in instructions:
             self.show_instruction_screen(instruction)
+
+    # ---- Magnifier helpers shared by windowed and fullscreen UIs ----
+    def _clamp_point_to_screen(self, x: int, y: int) -> Tuple[int, int]:
+        try:
+            w = self.screen.get_width()
+            h = self.screen.get_height()
+        except Exception:
+            return (x, y)
+        x = max(0, min(x, max(0, w - 1)))
+        y = max(0, min(y, max(0, h - 1)))
+        return (x, y)
+
+    def set_magnify_center(self, pos: Optional[Tuple[int, int]] = None) -> None:
+        if pos is None:
+            try:
+                pos = pygame.mouse.get_pos()
+            except Exception:
+                pos = (self.screen.get_width() // 2, self.screen.get_height() // 2)
+        self.magnify_center = self._clamp_point_to_screen(int(pos[0]), int(pos[1]))
+
+    def set_magnify_scale(self, scale: float, pos: Optional[Tuple[int, int]] = None) -> None:
+        scale = float(max(self.magnify_scale_min, min(scale, self.magnify_scale_max)))
+        self.magnify_scale = scale
+        self.magnify_active = (self.magnify_scale > self.magnify_scale_min)
+        if pos is not None:
+            self.set_magnify_center(pos)
+        # If becoming active and no center yet, initialize to mouse or screen center
+        if self.magnify_active and self.magnify_center is None:
+            self.set_magnify_center()
+
+    def zoom_in(self, pos: Optional[Tuple[int, int]] = None, step: Optional[float] = None) -> None:
+        if step is None:
+            step = self.magnify_key_step
+        self.set_magnify_scale(self.magnify_scale + float(step), pos)
+
+    def zoom_out(self, pos: Optional[Tuple[int, int]] = None, step: Optional[float] = None) -> None:
+        if step is None:
+            step = self.magnify_key_step
+        self.set_magnify_scale(self.magnify_scale - float(step), pos)
+
+    def handle_magnify_wheel(self, event) -> None:
+        # pygame.MOUSEWHEEL: event.y > 0 => scroll up
+        try:
+            pos = pygame.mouse.get_pos()
+        except Exception:
+            pos = None
+        if getattr(event, 'y', 0) > 0:
+            self.zoom_in(pos, self.magnify_wheel_step)
+        elif getattr(event, 'y', 0) < 0:
+            self.zoom_out(pos, self.magnify_wheel_step)
+
+    def draw_magnifier_overlay(self) -> None:
+        """Draw a center-locked magnifier around self.magnify_center.
+
+        The source region size is fixed by self.magnify_box; the destination
+        is scaled by self.magnify_scale and shown at the top-right corner.
+        """
+        try:
+            if not self.magnify_active:
+                return
+            if self.magnify_center is None:
+                self.set_magnify_center()
+            w_src, h_src = self.magnify_box
+            cx, cy = self.magnify_center
+            # Compute source rect centered at (cx, cy) clamped to screen bounds
+            x0 = int(cx - w_src // 2)
+            y0 = int(cy - h_src // 2)
+            # Clamp
+            scr_w = self.screen.get_width()
+            scr_h = self.screen.get_height()
+            x0 = max(0, min(x0, max(0, scr_w - w_src)))
+            y0 = max(0, min(y0, max(0, scr_h - h_src)))
+            src_rect = pygame.Rect(x0, y0, w_src, h_src)
+            sub = self.screen.subsurface(src_rect).copy()
+            # Scale to destination
+            w_dst = max(1, int(w_src * self.magnify_scale))
+            h_dst = max(1, int(h_src * self.magnify_scale))
+            zoomed = pygame.transform.smoothscale(sub, (w_dst, h_dst))
+            # Blit to top-right with a small border
+            margin = 12
+            dst_x = scr_w - w_dst - margin
+            dst_y = margin
+            pygame.draw.rect(self.screen, self.WHITE, (dst_x - 2, dst_y - 2, w_dst + 4, h_dst + 4), 2)
+            self.screen.blit(zoomed, (dst_x, dst_y))
+        except Exception:
+            # Fail silently if subsurface/scale fails
+            pass
             
     def confirm_mixed_prompt_ui(self, n_vid: int, n_img: int, n_aud: int) -> bool:
         """Show a confirmation overlay for mixed media; return True to proceed."""
@@ -683,12 +782,28 @@ class MultiarrangementInterface(BaseInterface):
                 if event.key == pygame.K_ESCAPE:
                     self.running = False
                 elif event.key == pygame.K_z:
-                    self.magnify_active = True
-            elif event.type == pygame.KEYUP:
-                if event.key == pygame.K_z:
-                    self.magnify_active = False
-                    
+                    # Zoom in at mouse position
+                    try:
+                        pos = pygame.mouse.get_pos()
+                    except Exception:
+                        pos = None
+                    self.zoom_in(pos)
+                elif event.key == pygame.K_x:
+                    # Zoom out at mouse position (clamped to default)
+                    try:
+                        pos = pygame.mouse.get_pos()
+                    except Exception:
+                        pos = None
+                    self.zoom_out(pos)
+            elif event.type == pygame.MOUSEWHEEL:
+                self.handle_magnify_wheel(event)
+            
             elif event.type == pygame.MOUSEBUTTONDOWN:
+                # Legacy wheel support (buttons 4/5)
+                if event.button == 4:  # scroll up
+                    self.handle_magnify_wheel(type('obj', (), {'y': 1}))
+                elif event.button == 5:  # scroll down
+                    self.handle_magnify_wheel(type('obj', (), {'y': -1}))
                 if event.button == 1:  # Left click
                     pos = event.pos if hasattr(event, 'pos') else pygame.mouse.get_pos()
                     
@@ -710,6 +825,9 @@ class MultiarrangementInterface(BaseInterface):
                     self.handle_drag_end()
                     
             elif event.type == pygame.MOUSEMOTION:
+                if self.magnify_active:
+                    # Track mouse to keep magnifier centered on cursor
+                    self.set_magnify_center(event.pos if hasattr(event, 'pos') else None)
                 if self.dragging:
                     pos = event.pos if hasattr(event, 'pos') else pygame.mouse.get_pos()
                     self.handle_drag_motion(pos)
@@ -719,25 +837,5 @@ class MultiarrangementInterface(BaseInterface):
             self.arrange_videos_in_circle(self.arena_center, self.arena_radius)
 
     def draw_magnifier_overlay(self) -> None:
-        """Draw a simple center-locked magnifier showing the arena area enlarged."""
-        try:
-            w_src, h_src = self.magnify_box
-            cx, cy = self.arena_center
-            x0 = max(0, cx - w_src // 2)
-            y0 = max(0, cy - h_src // 2)
-            x0 = min(x0, max(0, self.screen.get_width() - w_src))
-            y0 = min(y0, max(0, self.screen.get_height() - h_src))
-            src_rect = pygame.Rect(x0, y0, w_src, h_src)
-            sub = self.screen.subsurface(src_rect).copy()
-            w_dst = int(w_src * self.magnify_scale)
-            h_dst = int(h_src * self.magnify_scale)
-            zoomed = pygame.transform.smoothscale(sub, (w_dst, h_dst))
-            # Blit to top-right corner with border
-            margin = 12
-            dst_x = self.screen.get_width() - w_dst - margin
-            dst_y = margin
-            pygame.draw.rect(self.screen, self.WHITE, (dst_x - 2, dst_y - 2, w_dst + 4, h_dst + 4), 2)
-            self.screen.blit(zoomed, (dst_x, dst_y))
-        except Exception:
-            # Fail silently if subsurface/scale fails
-            pass
+        # Delegate to the shared BaseInterface implementation (uses cursor-centered zoom)
+        return super().draw_magnifier_overlay()

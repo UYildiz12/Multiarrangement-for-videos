@@ -19,15 +19,16 @@ export default function RdmHeatmap({
     scaleMode = "auto",
     language = "en",
 }: RdmHeatmapProps) {
-    const n = rdm.length;
-    if (n === 0) return null;
-
-    const labelWidth = 30;
     const [hoveredCell, setHoveredCell] = useState<{
         i: number;
         j: number;
         scaled01: number;
     } | null>(null);
+
+    const n = rdm.length;
+    if (n === 0) return null;
+
+    const labelWidth = 30;
 
     // Dynamic sizing based on stimulus count
     // Few stimuli: larger cells, many stimuli: smaller cells

@@ -4,10 +4,10 @@ Chain management endpoints for linking multiple experiments.
 
 import secrets
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.schemas import (
     ChainCreate,
@@ -24,6 +24,7 @@ from app.schemas import (
 )
 from app.routers.studies import get_studies_db, get_stimuli_db
 from app.routers.sessions import create_session
+from app.routers.experimenter import get_optional_owner, get_required_owner
 
 router = APIRouter(prefix="/chains", tags=["chains"])
 
@@ -32,6 +33,22 @@ _chains_db: Dict[UUID, dict] = {}
 _chain_studies_db: Dict[UUID, List[dict]] = {}
 _chain_invites_db: Dict[str, dict] = {}  # token -> invite data
 _chain_sessions_db: Dict[UUID, dict] = {}
+
+
+def _require_chain_owner(chain_id: UUID, owner_id: UUID) -> dict:
+    """Ensure the caller owns the chain and return chain data."""
+    if chain_id not in _chains_db:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chain not found"
+        )
+    chain = _chains_db[chain_id]
+    if chain.get("owner_id") != owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not your chain"
+        )
+    return chain
 
 
 def _get_chain_with_studies(chain_id: UUID) -> dict:
@@ -68,12 +85,14 @@ def _get_chain_with_studies(chain_id: UUID) -> dict:
 
 
 @router.post("", response_model=ChainResponse, status_code=status.HTTP_201_CREATED)
-async def create_chain(chain: ChainCreate) -> ChainResponse:
-    """Create a new experiment chain."""
+async def create_chain(
+    chain: ChainCreate,
+    owner_id: UUID = Depends(get_required_owner),
+) -> ChainResponse:
+    """Create a new experiment chain. Requires experimenter key."""
     import uuid
     
     chain_id = uuid.uuid4()
-    owner_id = uuid.uuid4()  # TODO: Get from auth
     
     chain_data = {
         "id": chain_id,
@@ -90,28 +109,37 @@ async def create_chain(chain: ChainCreate) -> ChainResponse:
 
 
 @router.get("", response_model=List[ChainResponse])
-async def list_chains() -> List[ChainResponse]:
-    """List all chains."""
+async def list_chains(
+    owner_id: Optional[UUID] = Depends(get_optional_owner),
+) -> List[ChainResponse]:
+    """List chains filtered by experimenter key. Returns empty if no key."""
+    if owner_id is None:
+        return []
     return [
         ChainResponse(**_get_chain_with_studies(chain_id))
-        for chain_id in _chains_db
+        for chain_id, chain_data in _chains_db.items()
+        if chain_data.get("owner_id") == owner_id
     ]
 
 
 @router.get("/{chain_id}", response_model=ChainResponse)
-async def get_chain(chain_id: UUID) -> ChainResponse:
+async def get_chain(
+    chain_id: UUID,
+    owner_id: Optional[UUID] = Depends(get_optional_owner),
+) -> ChainResponse:
     """Get chain details with studies."""
+    if owner_id is not None:
+        _require_chain_owner(chain_id, owner_id)
     return ChainResponse(**_get_chain_with_studies(chain_id))
 
 
 @router.delete("/{chain_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_chain(chain_id: UUID):
+async def delete_chain(
+    chain_id: UUID,
+    owner_id: UUID = Depends(get_required_owner),
+):
     """Delete a chain and all associated data."""
-    if chain_id not in _chains_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chain not found"
-        )
+    _require_chain_owner(chain_id, owner_id)
     
     del _chains_db[chain_id]
     if chain_id in _chain_studies_db:
@@ -127,15 +155,15 @@ async def delete_chain(chain_id: UUID):
 
 
 @router.post("/{chain_id}/studies", response_model=ChainStudyResponse, status_code=status.HTTP_201_CREATED)
-async def add_study_to_chain(chain_id: UUID, payload: ChainStudyCreate) -> ChainStudyResponse:
+async def add_study_to_chain(
+    chain_id: UUID,
+    payload: ChainStudyCreate,
+    owner_id: UUID = Depends(get_required_owner),
+) -> ChainStudyResponse:
     """Add a study to a chain."""
     import uuid
     
-    if chain_id not in _chains_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chain not found"
-        )
+    _require_chain_owner(chain_id, owner_id)
     
     studies_db = get_studies_db()
     if payload.study_id not in studies_db:
@@ -188,13 +216,13 @@ async def add_study_to_chain(chain_id: UUID, payload: ChainStudyCreate) -> Chain
 
 
 @router.delete("/{chain_id}/studies/{study_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_study_from_chain(chain_id: UUID, study_id: UUID):
+async def remove_study_from_chain(
+    chain_id: UUID,
+    study_id: UUID,
+    owner_id: UUID = Depends(get_required_owner),
+):
     """Remove a study from a chain."""
-    if chain_id not in _chains_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chain not found"
-        )
+    _require_chain_owner(chain_id, owner_id)
     
     chain_studies = _chain_studies_db.get(chain_id, [])
     removed_position = None
@@ -220,13 +248,14 @@ async def remove_study_from_chain(chain_id: UUID, study_id: UUID):
 
 
 @router.patch("/{chain_id}/studies/{study_id}", response_model=ChainStudyResponse)
-async def reorder_study_in_chain(chain_id: UUID, study_id: UUID, new_position: int) -> ChainStudyResponse:
+async def reorder_study_in_chain(
+    chain_id: UUID,
+    study_id: UUID,
+    new_position: int,
+    owner_id: UUID = Depends(get_required_owner),
+) -> ChainStudyResponse:
     """Change the position of a study in the chain."""
-    if chain_id not in _chains_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chain not found"
-        )
+    _require_chain_owner(chain_id, owner_id)
     
     chain_studies = _chain_studies_db.get(chain_id, [])
     target_study = None
@@ -273,13 +302,13 @@ async def reorder_study_in_chain(chain_id: UUID, study_id: UUID, new_position: i
 
 
 @router.post("/{chain_id}/invites", response_model=List[ChainInviteResponse])
-async def create_chain_invites(chain_id: UUID, payload: ChainInviteCreate) -> List[ChainInviteResponse]:
+async def create_chain_invites(
+    chain_id: UUID,
+    payload: ChainInviteCreate,
+    owner_id: UUID = Depends(get_required_owner),
+) -> List[ChainInviteResponse]:
     """Generate invite links for a chain."""
-    if chain_id not in _chains_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chain not found"
-        )
+    _require_chain_owner(chain_id, owner_id)
     
     chain_studies = _chain_studies_db.get(chain_id, [])
     if not chain_studies:
@@ -439,6 +468,32 @@ async def start_chain_session(token: str) -> ChainSessionStartResponse:
                 ],
                 config=study.get("config", {}),
             )
+        else:
+            # Session data was lost (e.g., server restart) - recreate at current position
+            if current_position < len(chain_studies):
+                chain_study = chain_studies[current_position]
+                study_id = chain_study["study_id"]
+                participant_id = chain_session.get("participant_id", f"chain_{uuid.uuid4().hex[:8]}")
+                
+                # Create session for current study
+                session_response = create_session(study_id, participant_id)
+                
+                # Update chain session with new session ID
+                chain_session["current_session_id"] = session_response.session_id
+                
+                return ChainSessionStartResponse(
+                    chain_session_id=existing_chain_session_id,
+                    chain_id=chain_id,
+                    chain_name=chain["name"],
+                    total_studies=len(chain_studies),
+                    current_position=current_position,
+                    session_id=session_response.session_id,
+                    study_id=study_id,
+                    paradigm=session_response.paradigm,
+                    n_stimuli=session_response.n_stimuli,
+                    stimuli=session_response.stimuli,
+                    config=session_response.config,
+                )
     
     # Create new chain session
     first_chain_study = chain_studies[0]
@@ -600,15 +655,15 @@ def get_chain_sessions_db():
 
 # Admin endpoint to delete chain participant session
 @router.delete("/{chain_id}/sessions/{chain_session_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_chain_session(chain_id: UUID, chain_session_id: UUID):
+async def delete_chain_session(
+    chain_id: UUID,
+    chain_session_id: UUID,
+    owner_id: UUID = Depends(get_required_owner),
+):
     """Delete a chain participant session and associated data."""
     from app.routers.sessions import get_sessions_db, get_trials_db
     
-    if chain_id not in _chains_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chain not found"
-        )
+    _require_chain_owner(chain_id, owner_id)
     
     if chain_session_id not in _chain_sessions_db:
         raise HTTPException(
@@ -625,13 +680,15 @@ async def delete_chain_session(chain_id: UUID, chain_session_id: UUID):
     
     participant_id = chain_session.get("participant_id")
     
-    # Delete associated study sessions for this participant
+    # Delete associated study sessions for this participant (scoped to chain's studies)
     sessions_db = get_sessions_db()
     trials_db = get_trials_db()
     
+    chain_study_ids = {cs["study_id"] for cs in _chain_studies_db.get(chain_id, [])}
     sessions_to_delete = [
         sid for sid, session in sessions_db.items()
         if session.get("participant_id") == participant_id
+        and session.get("study_id") in chain_study_ids
     ]
     
     for sid in sessions_to_delete:
@@ -645,17 +702,14 @@ async def delete_chain_session(chain_id: UUID, chain_session_id: UUID):
 
 # Admin endpoint to get chain participant sessions
 @router.get("/{chain_id}/sessions")
-async def get_chain_sessions(chain_id: UUID):
+async def get_chain_sessions(
+    chain_id: UUID,
+    owner_id: UUID = Depends(get_required_owner),
+):
     """Get all sessions for a chain (for admin results viewing)."""
     from app.routers.sessions import get_sessions_db, get_trials_db
     
-    if chain_id not in _chains_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Chain not found"
-        )
-    
-    chain = _chains_db[chain_id]
+    chain = _require_chain_owner(chain_id, owner_id)
     chain_studies = sorted(
         _chain_studies_db.get(chain_id, []),
         key=lambda x: x["position"]

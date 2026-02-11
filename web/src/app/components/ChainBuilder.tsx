@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { apiFetch } from "../lib/api";
+import { useKey } from "../lib/KeyContext";
 
 interface Study {
     id: string;
@@ -33,6 +34,17 @@ interface ChainBuilderProps {
 }
 
 export default function ChainBuilder({ onChainCreated, onChainSelected, adminSecret }: ChainBuilderProps) {
+    const { adminKey } = useKey();
+    const expKey = adminSecret || adminKey;
+    const keyHeaders = useMemo<Record<string, string>>(() => {
+        const headers: Record<string, string> = {};
+        const key = expKey.trim();
+        if (key) {
+            headers["x-experimenter-key"] = key;
+        }
+        return headers;
+    }, [expKey]);
+
     const [chains, setChains] = useState<Chain[]>([]);
     const [studies, setStudies] = useState<Study[]>([]);
     const [loading, setLoading] = useState(true);
@@ -52,22 +64,41 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
     const [inviteLink, setInviteLink] = useState<string | null>(null);
     const [inviteParticipantId, setInviteParticipantId] = useState("");
 
-    // Load chains and studies
+    const describeAuthError = useCallback((err: unknown, fallback: string) => {
+        const msg = err instanceof Error ? err.message : fallback;
+        if (!msg.includes("API error 401")) {
+            return msg;
+        }
+        if (expKey.trim()) {
+            return msg;
+        }
+        return "Experimenter key required to log your experiments and share them online. We strongly recommend always immediately backing up your data.";
+    }, [expKey]);
+
+    // Load chains and studies (skip when no key — server returns empty anyway)
     useEffect(() => {
+        if (!expKey.trim()) {
+            setChains([]);
+            setStudies([]);
+            setLoading(false);
+            return;
+        }
         let cancelled = false;
         const loadData = async () => {
             setLoading(true);
+            setError(null);
             try {
-                const [chainsData] = await Promise.all([
-                    apiFetch<Chain[]>("/api/v1/chains"),
+                const [chainsData, studiesData] = await Promise.all([
+                    apiFetch<Chain[]>("/api/v1/chains", { headers: keyHeaders }),
+                    apiFetch<Study[]>("/api/v1/studies", { headers: keyHeaders }),
                 ]);
                 if (!cancelled) {
                     setChains(chainsData);
+                    setStudies(studiesData);
                 }
             } catch (err) {
                 if (!cancelled) {
-                    const msg = err instanceof Error ? err.message : "Failed to load data";
-                    setError(msg);
+                    setError(describeAuthError(err, "Failed to load data"));
                 }
             } finally {
                 if (!cancelled) setLoading(false);
@@ -75,7 +106,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
         };
         loadData();
         return () => { cancelled = true; };
-    }, []);
+    }, [keyHeaders, describeAuthError]);
 
     const handleCreateChain = useCallback(async () => {
         if (!newChainName.trim()) return;
@@ -84,6 +115,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
         try {
             const chain = await apiFetch<Chain>("/api/v1/chains", {
                 method: "POST",
+                headers: keyHeaders,
                 body: JSON.stringify({
                     name: newChainName,
                     description: newChainDescription || null,
@@ -95,21 +127,21 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
             setSelectedChain(chain);
             onChainCreated?.(chain);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to create chain";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to create chain"));
         } finally {
             setCreating(false);
         }
-    }, [newChainName, newChainDescription, onChainCreated]);
+    }, [newChainName, newChainDescription, onChainCreated, keyHeaders]);
 
-    const handleAddStudy = useCallback(async () => {
-        if (!selectedChain || !selectedStudyId) return;
+    const addStudyById = useCallback(async (studyId: string) => {
+        if (!selectedChain) return;
         try {
             const chainStudy = await apiFetch<ChainStudy>(
                 `/api/v1/chains/${selectedChain.id}/studies`,
                 {
                     method: "POST",
-                    body: JSON.stringify({ study_id: selectedStudyId }),
+                    headers: keyHeaders,
+                    body: JSON.stringify({ study_id: studyId }),
                 }
             );
             setSelectedChain((prev) => prev && ({
@@ -123,17 +155,21 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
             ));
             setSelectedStudyId("");
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to add study";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to add study"));
         }
-    }, [selectedChain, selectedStudyId]);
+    }, [selectedChain, keyHeaders, describeAuthError]);
+
+    const handleAddStudy = useCallback(async () => {
+        if (!selectedStudyId) return;
+        await addStudyById(selectedStudyId);
+    }, [selectedStudyId, addStudyById]);
 
     const handleRemoveStudy = useCallback(async (studyId: string) => {
         if (!selectedChain) return;
         try {
             await apiFetch(
                 `/api/v1/chains/${selectedChain.id}/studies/${studyId}`,
-                { method: "DELETE" }
+                { method: "DELETE", headers: keyHeaders }
             );
             setSelectedChain((prev) => prev && ({
                 ...prev,
@@ -145,10 +181,9 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
                     : c
             ));
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to remove study";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to remove study"));
         }
-    }, [selectedChain]);
+    }, [selectedChain, keyHeaders, describeAuthError]);
 
     const handleGenerateInvite = useCallback(async () => {
         if (!selectedChain) return;
@@ -160,6 +195,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
                 `/api/v1/chains/${selectedChain.id}/invites`,
                 {
                     method: "POST",
+                    headers: keyHeaders,
                     body: JSON.stringify({
                         participant_id: inviteParticipantId || null,
                         count: 1,
@@ -172,12 +208,11 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
                 setInviteLink(`${origin}/participate?chain=${token}`);
             }
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to generate invite";
-            setError(msg);
+            setError(describeAuthError(err, "Failed to generate invite"));
         } finally {
             setGeneratingInvite(false);
         }
-    }, [selectedChain, inviteParticipantId]);
+    }, [selectedChain, inviteParticipantId, keyHeaders, describeAuthError]);
 
     const inputStyle = {
         padding: "10px 14px",
@@ -425,28 +460,77 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
                             <h3 style={{ margin: "0 0 12px", fontSize: 14, color: "#888", textTransform: "uppercase", letterSpacing: 1 }}>
                                 Add Study
                             </h3>
-                            <div style={{ display: "flex", gap: 8 }}>
-                                <input
-                                    type="text"
-                                    placeholder="Enter Study ID (UUID)"
-                                    value={selectedStudyId}
-                                    onChange={(e) => setSelectedStudyId(e.target.value)}
-                                    style={{ ...inputStyle, flex: 1 }}
-                                />
-                                <button
-                                    onClick={handleAddStudy}
-                                    disabled={!selectedStudyId}
-                                    style={{
-                                        ...buttonStyle,
-                                        opacity: !selectedStudyId ? 0.5 : 1,
-                                    }}
-                                >
-                                    Add
-                                </button>
-                            </div>
-                            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#555" }}>
-                                Create studies in the Setup page first, then add them here by ID.
-                            </p>
+                            {(() => {
+                                const alreadyAdded = new Set(selectedChain.studies.map(s => s.study_id));
+                                const available = studies.filter(s => !alreadyAdded.has(s.id));
+                                if (studies.length === 0) {
+                                    return (
+                                        <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                                            No studies found. <a href="/setup" style={{ color: "#00ff88", textDecoration: "underline" }}>Create one</a> first.
+                                        </p>
+                                    );
+                                }
+                                if (available.length === 0) {
+                                    return (
+                                        <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                                            All your studies have been added. <a href="/setup" style={{ color: "#00ff88", textDecoration: "underline" }}>Create another</a> to add more.
+                                        </p>
+                                    );
+                                }
+                                return (
+                                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                                        {available.map((study) => (
+                                            <div
+                                                key={study.id}
+                                                style={{
+                                                    display: "flex",
+                                                    alignItems: "center",
+                                                    justifyContent: "space-between",
+                                                    padding: "8px 12px",
+                                                    background: selectedStudyId === study.id ? "rgba(0,255,136,0.08)" : "#1a1a1a",
+                                                    border: selectedStudyId === study.id ? "1px solid #00ff88" : "1px solid #333",
+                                                    borderRadius: 6,
+                                                    cursor: "pointer",
+                                                    transition: "all 0.15s",
+                                                }}
+                                                onClick={() => {
+                                                    setSelectedStudyId(study.id);
+                                                }}
+                                            >
+                                                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+                                                    <span style={{ fontSize: 13, color: "#fff", fontWeight: 500 }}>
+                                                        {study.name}
+                                                    </span>
+                                                    <span style={{ fontSize: 11, color: "#666" }}>
+                                                        {study.paradigm} · {study.n_stimuli} stimuli
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setSelectedStudyId(study.id);
+                                                        void addStudyById(study.id);
+                                                    }}
+                                                    style={{
+                                                        padding: "4px 12px",
+                                                        borderRadius: 4,
+                                                        border: "1px solid #00ff88",
+                                                        background: "transparent",
+                                                        color: "#00ff88",
+                                                        cursor: "pointer",
+                                                        fontSize: 12,
+                                                        fontWeight: 600,
+                                                        flexShrink: 0,
+                                                        marginLeft: 8,
+                                                    }}
+                                                >
+                                                    + Add
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                );
+                            })()}
                         </div>
 
                         {/* Generate Invite */}

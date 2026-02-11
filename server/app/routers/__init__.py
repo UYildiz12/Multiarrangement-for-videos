@@ -8,6 +8,7 @@ from .results import router as results_router
 from .invites import router as invites_router
 from .admin import router as admin_router
 from .chains import router as chains_router, public_router as chains_public_router
+from .experimenter import router as experimenter_router
 
 __all__ = [
     "studies_router",
@@ -17,4 +18,5 @@ __all__ = [
     "admin_router",
     "chains_router",
     "chains_public_router",
+    "experimenter_router",
 ]

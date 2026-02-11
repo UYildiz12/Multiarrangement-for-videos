@@ -2,22 +2,27 @@
 Results export endpoints.
 """
 
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from app.schemas import ResultsResponse, ExportFormat
 from app.routers.sessions import get_sessions_db, get_trials_db
 from app.routers.studies import get_studies_db, get_stimuli_db
+from app.routers.experimenter import get_required_owner, get_optional_owner
 
 router = APIRouter(tags=["results"])
 
 
 @router.get("/sessions/{session_id}/results", response_model=ResultsResponse)
-async def get_session_results(session_id: UUID) -> ResultsResponse:
-    """Get computed RDM and evidence for a session."""
+async def get_session_results(session_id: UUID, owner_id: Optional[UUID] = Depends(get_optional_owner)) -> ResultsResponse:
+    """Get computed RDM and evidence for a session.
+
+    When an experimenter key is provided, ownership is enforced.
+    Without a key, results are returned for the participant who just completed.
+    """
     sessions_db = get_sessions_db()
     stimuli_db = get_stimuli_db()
     
@@ -28,6 +33,17 @@ async def get_session_results(session_id: UUID) -> ResultsResponse:
         )
     
     session = sessions_db[session_id]
+    
+    # If an experimenter key was provided, verify ownership
+    if owner_id is not None:
+        studies_db = get_studies_db()
+        study = studies_db.get(session["study_id"])
+        if study is None or study.get("owner_id") != owner_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not your study"
+            )
+    
     stimuli = stimuli_db.get(session["study_id"], [])
     trials = get_trials_db().get(session_id, [])
     
@@ -62,9 +78,10 @@ async def get_session_results(session_id: UUID) -> ResultsResponse:
 @router.get("/studies/{study_id}/export")
 async def export_study_results(
     study_id: UUID,
-    format: ExportFormat = Query(default=ExportFormat.JSON)
+    format: ExportFormat = Query(default=ExportFormat.JSON),
+    owner_id: UUID = Depends(get_required_owner),
 ):
-    """Export all results from a study."""
+    """Export all results from a study. Requires experimenter key."""
     import json
     
     studies_db = get_studies_db()
@@ -79,6 +96,11 @@ async def export_study_results(
         )
     
     study = studies_db[study_id]
+    if study.get("owner_id") != owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not your study"
+        )
     stimuli = stimuli_db.get(study_id, [])
     
     # Collect all sessions for this study

@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { apiFetch } from "../lib/api";
+import { useKey } from "../lib/KeyContext";
 import { cacheMedia } from "../lib/mediaCache";
 import { getSupabaseClient, SUPABASE_BUCKET } from "../lib/supabaseClient";
 
@@ -120,6 +122,7 @@ const defaultConfig: ExperimentConfig = {
 
 export default function SetupPage() {
     const router = useRouter();
+    const { adminKey, setAdminKey, isLocalBypass, authReady } = useKey();
     const [config, setConfig] = useState<ExperimentConfig>(defaultConfig);
     const [videoSource, setVideoSource] = useState<"preset" | "upload">("preset");
     const [classicVideos, setClassicVideos] = useState<VideoFile[]>([]);
@@ -128,7 +131,6 @@ export default function SetupPage() {
     const [processingUploads, setProcessingUploads] = useState(false);
     const [starting, setStarting] = useState(false);
     const [startError, setStartError] = useState<string | null>(null);
-    const [adminSecret, setAdminSecret] = useState("");
     const [publishing, setPublishing] = useState(false);
     const [publishError, setPublishError] = useState<string | null>(null);
     const [publishedStudyId, setPublishedStudyId] = useState<string | null>(null);
@@ -139,6 +141,13 @@ export default function SetupPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [uploadMode, setUploadMode] = useState<"local" | "supabase">("local");
     const supabaseAvailable = Boolean(getSupabaseClient());
+
+    // Chain integration state
+    const [chains, setChains] = useState<{ id: string; name: string }[]>([]);
+    const [selectedChainId, setSelectedChainId] = useState<string>("");
+    const [addingToChain, setAddingToChain] = useState(false);
+    const [addedToChain, setAddedToChain] = useState<string | null>(null);
+    const [chainError, setChainError] = useState<string | null>(null);
 
     useEffect(() => {
         let cancelled = false;
@@ -178,11 +187,6 @@ export default function SetupPage() {
         return () => {
             cancelled = true;
         };
-    }, []);
-
-    useEffect(() => {
-        const saved = sessionStorage.getItem("adminSecret");
-        if (saved) setAdminSecret(saved);
     }, []);
 
     // Preset selection handlers
@@ -318,6 +322,20 @@ export default function SetupPage() {
         ? classicVideos.filter((v) => v.selected).length
         : config.videos.length;
     const minItemsRequired = config.paradigm === "pairwise" ? 2 : 3;
+    const keyHeaders: Record<string, string> = adminKey.trim()
+        ? { "x-experimenter-key": adminKey.trim() }
+        : {};
+
+    const describeAuthError = (err: unknown, fallback: string) => {
+        const msg = err instanceof Error ? err.message : fallback;
+        if (!msg.includes("API error 401")) {
+            return msg;
+        }
+        if (adminKey.trim()) {
+            return msg;
+        }
+        return "Experimenter key required. Enter one on Dashboard, or set LOCAL_DEV_BYPASS_AUTH=1 on the backend.";
+    };
 
     const addIfNumber = (target: Record<string, unknown>, key: string, value: number | null | undefined) => {
         if (value === null || value === undefined || Number.isNaN(value)) return;
@@ -401,6 +419,7 @@ export default function SetupPage() {
 
             const study = await apiFetch<{ id: string }>("/api/v1/studies", {
                 method: "POST",
+                headers: keyHeaders,
                 body: JSON.stringify({
                     name: "Multiarrangement Web Study",
                     description: "Web session",
@@ -423,6 +442,7 @@ export default function SetupPage() {
             };
             await apiFetch(`/api/v1/studies/${study.id}/stimuli`, {
                 method: "POST",
+                headers: keyHeaders,
                 body: JSON.stringify(stimuliPayload),
             });
 
@@ -458,8 +478,7 @@ export default function SetupPage() {
 
             router.push(`/experiment?session=${session.session_id}`);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to start experiment";
-            setStartError(msg);
+            setStartError(describeAuthError(err, "Failed to start experiment"));
         } finally {
             setStarting(false);
         }
@@ -537,6 +556,7 @@ export default function SetupPage() {
 
             const study = await apiFetch<{ id: string }>("/api/v1/studies", {
                 method: "POST",
+                headers: keyHeaders,
                 body: JSON.stringify({
                     name: "Multiarrangement Web Study",
                     description: "Published study",
@@ -559,13 +579,13 @@ export default function SetupPage() {
             };
             await apiFetch(`/api/v1/studies/${study.id}/stimuli`, {
                 method: "POST",
+                headers: keyHeaders,
                 body: JSON.stringify(stimuliPayload),
             });
 
             setPublishedStudyId(study.id);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to publish study";
-            setPublishError(msg);
+            setPublishError(describeAuthError(err, "Failed to publish study"));
         } finally {
             setPublishing(false);
         }
@@ -576,10 +596,6 @@ export default function SetupPage() {
             setInviteError("Publish the study first.");
             return;
         }
-        if (!adminSecret.trim()) {
-            setInviteError("Admin secret is required.");
-            return;
-        }
         if (!inviteParticipantId.trim()) {
             setInviteError("Participant ID is required for a unique link.");
             return;
@@ -587,12 +603,11 @@ export default function SetupPage() {
         setInviteError(null);
         setCreatingInvite(true);
         try {
-            sessionStorage.setItem("adminSecret", adminSecret);
             const invites = await apiFetch<{ token: string }[]>(
                 `/api/v1/admin/studies/${publishedStudyId}/invites`,
                 {
                     method: "POST",
-                    headers: { "x-admin-secret": adminSecret },
+                    headers: keyHeaders,
                     body: JSON.stringify({ participant_id: inviteParticipantId, count: 1 }),
                 }
             );
@@ -602,10 +617,42 @@ export default function SetupPage() {
             const link = `${origin}/participate?invite=${token}`;
             setInviteLink(link);
         } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to create invite";
-            setInviteError(msg);
+            setInviteError(describeAuthError(err, "Failed to create invite"));
         } finally {
             setCreatingInvite(false);
+        }
+    };
+
+    // Load chains when a study is published
+    useEffect(() => {
+        if (!publishedStudyId) return;
+        const headers: Record<string, string> = adminKey.trim()
+            ? { "x-experimenter-key": adminKey.trim() }
+            : {};
+        apiFetch<{ id: string; name: string }[]>("/api/v1/chains", { headers })
+            .then(setChains)
+            .catch(() => setChains([]));
+    }, [publishedStudyId, adminKey]);
+
+    const handleAddToChain = async () => {
+        if (!publishedStudyId || !selectedChainId) return;
+        setAddingToChain(true);
+        setChainError(null);
+        try {
+            await apiFetch(
+                `/api/v1/chains/${selectedChainId}/studies`,
+                {
+                    method: "POST",
+                    headers: keyHeaders,
+                    body: JSON.stringify({ study_id: publishedStudyId }),
+                }
+            );
+            const chainName = chains.find(c => c.id === selectedChainId)?.name || "chain";
+            setAddedToChain(chainName);
+        } catch (err) {
+            setChainError(describeAuthError(err, "Failed to add study to chain"));
+        } finally {
+            setAddingToChain(false);
         }
     };
 
@@ -645,7 +692,7 @@ export default function SetupPage() {
     return (
         <div
             style={{
-                minHeight: "100vh",
+                minHeight: "calc(100vh - 56px)",
                 background: "#000",
                 color: "#fff",
                 padding: 40,
@@ -654,8 +701,15 @@ export default function SetupPage() {
             }}
         >
             <div style={{ maxWidth: 800, margin: "0 auto" }}>
+                {/* Breadcrumb */}
+                <div style={{ marginBottom: 8, fontSize: 13, color: "#555" }}>
+                    <Link href="/" style={{ color: "#666", textDecoration: "none" }}>Dashboard</Link>
+                    <span style={{ margin: "0 8px" }}>/</span>
+                    <span style={{ color: "#fff" }}>Setup</span>
+                </div>
+
                 <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 8 }}>
-                    Multiarrangement
+                    Experiment Setup
                 </h1>
                 <p style={{ color: "#666", fontSize: 14, marginBottom: 32 }}>
                     Configure your experiment settings
@@ -1212,15 +1266,24 @@ export default function SetupPage() {
                 {/* Admin publish + invite */}
                 <div style={{ ...sectionStyle, marginTop: 24 }}>
                     <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16 }}>Share With Participants</h2>
+                    {!adminKey && (
+                        <div style={{ marginBottom: 12, padding: 10, background: "rgba(255,200,0,0.1)", border: "1px solid #554400", borderRadius: 6, fontSize: 12, color: "#ffcc00" }}>
+                            {!authReady
+                                ? "Checking auth mode..."
+                                : isLocalBypass
+                                    ? "Local keyless mode is active. Entering an experimenter key is optional."
+                                    : <>No experimenter key is set. Add one on the <Link href="/" style={{ color: "#00ff88", textDecoration: "underline" }}>Dashboard</Link> or enable LOCAL_DEV_BYPASS_AUTH=1 on the backend.</>}
+                        </div>
+                    )}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 12 }}>
                         <div>
-                            <label style={labelStyle}>Admin Secret</label>
+                            <label style={labelStyle}>Experimenter Key</label>
                             <input
                                 type="password"
-                                value={adminSecret}
-                                onChange={(e) => setAdminSecret(e.target.value)}
+                                value={adminKey}
+                                onChange={(e) => setAdminKey(e.target.value)}
                                 style={inputStyle}
-                                placeholder="Set in server ADMIN_SECRET"
+                                placeholder={isLocalBypass ? "Optional in local mode" : "Enter on Dashboard or here"}
                             />
                         </div>
                         <div>
@@ -1306,6 +1369,83 @@ export default function SetupPage() {
                             >
                                 Copy link
                             </button>
+                        </div>
+                    )}
+
+                    {/* Add to Chain */}
+                    {publishedStudyId && (
+                        <div style={{
+                            marginTop: 16,
+                            padding: 16,
+                            background: "#0a0a0a",
+                            border: "1px solid #333",
+                            borderRadius: 8,
+                        }}>
+                            <h4 style={{ margin: "0 0 8px", fontSize: 13, color: "#aaa" }}>
+                                ⛓️ Add to Chain
+                            </h4>
+                            {addedToChain ? (
+                                <div style={{ color: "#00ff88", fontSize: 13 }}>
+                                    Added to <strong>{addedToChain}</strong>!{" "}
+                                    <button
+                                        onClick={() => { setAddedToChain(null); setSelectedChainId(""); }}
+                                        style={{ background: "none", border: "none", color: "#00ff88", textDecoration: "underline", cursor: "pointer", fontSize: 13 }}
+                                    >
+                                        Add to another
+                                    </button>{" "}
+                                    or{" "}
+                                    <Link href="/chains" style={{ color: "#00ff88", textDecoration: "underline" }}>
+                                        go to Chains
+                                    </Link>
+                                </div>
+                            ) : chains.length === 0 ? (
+                                <p style={{ margin: 0, fontSize: 12, color: "#666" }}>
+                                    No chains yet.{" "}
+                                    <Link href="/chains" style={{ color: "#00ff88", textDecoration: "underline" }}>Create a chain</Link>{" "}
+                                    first, or add this study later from the Chains page.
+                                </p>
+                            ) : (
+                                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                    <select
+                                        value={selectedChainId}
+                                        onChange={(e) => setSelectedChainId(e.target.value)}
+                                        style={{
+                                            ...inputStyle,
+                                            flex: 1,
+                                            width: "auto",
+                                            cursor: "pointer",
+                                            appearance: "auto",
+                                        }}
+                                    >
+                                        <option value="">Select a chain…</option>
+                                        {chains.map((c) => (
+                                            <option key={c.id} value={c.id}>{c.name}</option>
+                                        ))}
+                                    </select>
+                                    <button
+                                        onClick={handleAddToChain}
+                                        disabled={!selectedChainId || addingToChain}
+                                        style={{
+                                            padding: "8px 16px",
+                                            borderRadius: 6,
+                                            border: "1px solid #00ff88",
+                                            background: "transparent",
+                                            color: "#00ff88",
+                                            cursor: !selectedChainId || addingToChain ? "not-allowed" : "pointer",
+                                            opacity: !selectedChainId ? 0.5 : 1,
+                                            fontSize: 13,
+                                            fontWeight: 600,
+                                            whiteSpace: "nowrap",
+                                            flexShrink: 0,
+                                        }}
+                                    >
+                                        {addingToChain ? "Adding..." : "Add"}
+                                    </button>
+                                </div>
+                            )}
+                            {chainError && (
+                                <div style={{ marginTop: 6, color: "#ff6666", fontSize: 12 }}>{chainError}</div>
+                            )}
                         </div>
                     )}
                 </div>
