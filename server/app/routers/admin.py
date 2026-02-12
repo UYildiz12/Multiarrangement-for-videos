@@ -20,6 +20,7 @@ from app.routers.experimenter import (
     owner_id_from_key,
     is_local_dev_bypass_auth_enabled,
     local_dev_owner_id,
+    is_valid_signed_key,
 )
 
 router = APIRouter(tags=["admin"])
@@ -40,6 +41,11 @@ def _resolve_owner(
     """
     # Experimenter key takes priority
     if x_experimenter_key and x_experimenter_key.strip():
+        if not is_valid_signed_key(x_experimenter_key):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid experimenter key",
+            )
         return owner_id_from_key(x_experimenter_key)
 
     # Legacy super-admin
@@ -49,6 +55,11 @@ def _resolve_owner(
 
     # Allow x-admin-secret to also be treated as experimenter key
     if x_admin_secret and x_admin_secret.strip():
+        if not is_valid_signed_key(x_admin_secret):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid experimenter key",
+            )
         return owner_id_from_key(x_admin_secret)
 
     if is_local_dev_bypass_auth_enabled():
