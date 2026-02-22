@@ -90,6 +90,7 @@ function AdminContent() {
     // Auto-load studies if authenticated
     useEffect(() => {
         if (!authReady) return;
+        if (!isAuthenticated) return;
         if (studies.length === 0 && !loadingStudies) {
             loadStudies(adminKey);
         }
@@ -117,6 +118,7 @@ function AdminContent() {
             setKeyInput(key);
             setJustGenerated(true);
             setShowKey(true);
+            setCopied(false);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to generate key");
         }

@@ -77,8 +77,8 @@ export default function DemoPage() {
             <div style={{ maxWidth: 600, width: "100%", background: "#111", padding: 40, borderRadius: 16, border: "1px solid #1a1a1a", textAlign: "center" }}>
                 <h1 style={{ fontSize: 32, fontWeight: 700, marginBottom: 12, letterSpacing: "-0.5px" }}>Multiarrangement Demo</h1>
                 <p style={{ color: "#888", fontSize: 15, marginBottom: 40, lineHeight: 1.6 }}>
-                    Welcome to the interactive demonstration. Experience both of our clustering paradigms using 16 pre-selected video stimuli. 
-                    <br/><br/>
+                    Welcome to the interactive demonstration. Experience both of our schedulers using 16 pre-selected video stimuli.
+                    <br /><br />
                     <span style={{ color: "#00ff88" }}>All data is local and you can download your results at the end.</span>
                 </p>
 
