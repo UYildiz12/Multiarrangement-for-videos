@@ -394,15 +394,29 @@ function ExperimentContent() {
                 sessionStorage.setItem("experimentSessionId", sessionId);
                 sessionStorage.setItem("experimentStudyId", session.study_id);
                 const serverStimuli = await apiFetch<ServerStimulus[]>(`/api/v1/studies/${session.study_id}/stimuli`);
-                const mapped = serverStimuli.map((s) => ({
-                    id: s.id || `stim-${s.ordinal}`,
-                    ordinal: s.ordinal,
-                    label: s.filename,
-                    mediaUrl: s.media_url || "",
-                    mediaType: s.media_type,
-                    thumbnail: s.thumbnail_url
-                        || (s.media_type === "image" ? (s.media_url || undefined) : (s.media_type === "audio" ? "/audio.png" : undefined)),
-                }));
+
+                // Merge with cached stimuli — demo sessions return empty media_url from server.
+                // Prefer cached mediaUrl/thumbnail so the frontend-provided video URLs survive.
+                const cachedRaw = sessionStorage.getItem("experimentStimuli");
+                const cachedByOrdinal: Record<number, Stimulus> = {};
+                if (cachedRaw) {
+                    try {
+                        (JSON.parse(cachedRaw) as Stimulus[]).forEach((c) => { cachedByOrdinal[c.ordinal] = c; });
+                    } catch { /* ignore */ }
+                }
+
+                const mapped = serverStimuli.map((s) => {
+                    const cached = cachedByOrdinal[s.ordinal];
+                    const mediaUrl = s.media_url || cached?.mediaUrl || "";
+                    const thumbnail = s.thumbnail_url
+                        || (s.media_type === "image" ? (s.media_url || undefined) : (s.media_type === "audio" ? "/audio.png" : undefined))
+                        || cached?.thumbnail;
+                    const label = (s.filename && !s.filename.startsWith("Stimulus "))
+                        ? s.filename
+                        : (cached?.label || s.filename);
+                    return { id: s.id || `stim-${s.ordinal}`, ordinal: s.ordinal, label, mediaUrl, mediaType: s.media_type, thumbnail };
+                });
+
                 if (!cancelled) {
                     setStimuli(mapped);
                     setParadigm(session.paradigm);
@@ -430,15 +444,28 @@ function ExperimentContent() {
                 const session = await apiFetch<SessionResponse>(`/api/v1/sessions/${sessionId}`);
                 setStudyId(session.study_id);
                 const serverStimuli = await apiFetch<ServerStimulus[]>(`/api/v1/studies/${session.study_id}/stimuli`);
-                const mapped = serverStimuli.map((s) => ({
-                    id: s.id || `stim-${s.ordinal}`,
-                    ordinal: s.ordinal,
-                    label: s.filename,
-                    mediaUrl: s.media_url || "",
-                    mediaType: s.media_type,
-                    thumbnail: s.thumbnail_url
-                        || (s.media_type === "image" ? (s.media_url || undefined) : (s.media_type === "audio" ? "/audio.png" : undefined)),
-                }));
+
+                // Same merge logic: prefer cached media URLs over empty server values.
+                const cachedRaw = sessionStorage.getItem("experimentStimuli");
+                const cachedByOrdinal: Record<number, Stimulus> = {};
+                if (cachedRaw) {
+                    try {
+                        (JSON.parse(cachedRaw) as Stimulus[]).forEach((c) => { cachedByOrdinal[c.ordinal] = c; });
+                    } catch { /* ignore */ }
+                }
+
+                const mapped = serverStimuli.map((s) => {
+                    const cached = cachedByOrdinal[s.ordinal];
+                    const mediaUrl = s.media_url || cached?.mediaUrl || "";
+                    const thumbnail = s.thumbnail_url
+                        || (s.media_type === "image" ? (s.media_url || undefined) : (s.media_type === "audio" ? "/audio.png" : undefined))
+                        || cached?.thumbnail;
+                    const label = (s.filename && !s.filename.startsWith("Stimulus "))
+                        ? s.filename
+                        : (cached?.label || s.filename);
+                    return { id: s.id || `stim-${s.ordinal}`, ordinal: s.ordinal, label, mediaUrl, mediaType: s.media_type, thumbnail };
+                });
+
                 if (!cancelled) {
                     setStimuli(mapped);
                     setParadigm(session.paradigm);
