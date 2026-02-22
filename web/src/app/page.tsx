@@ -25,7 +25,7 @@ interface Chain {
 
 export default function Home() {
     const router = useRouter();
-    const { adminKey, setAdminKey, isAuthenticated, isLocalBypass, authReady } = useKey();
+    const { adminKey, setAdminKey, isLocalBypass } = useKey();
     const [keyInput, setKeyInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -34,13 +34,6 @@ export default function Home() {
     useEffect(() => {
         if (adminKey) setKeyInput(adminKey);
     }, [adminKey]);
-
-    // If already authenticated, go straight to dashboard
-    useEffect(() => {
-        if (authReady && isAuthenticated) {
-            router.replace("/dashboard");
-        }
-    }, [authReady, isAuthenticated, router]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
