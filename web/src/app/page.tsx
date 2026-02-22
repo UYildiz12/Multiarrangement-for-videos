@@ -87,11 +87,6 @@ export default function Home() {
                             Enter your experimenter key to view your studies and chains.
                         </p>
                     )}
-                    {!authReady && (
-                        <p style={{ color: "#666", fontSize: 13, marginBottom: 24 }}>
-                            Checking auth mode...
-                        </p>
-                    )}
 
                     {/* Key entry form */}
                     <form
