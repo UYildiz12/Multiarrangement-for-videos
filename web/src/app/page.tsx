@@ -177,7 +177,7 @@ export default function Home() {
                                     transition: "opacity 0.2s ease",
                                 }}
                             >
-                                {loading ? "Loading..." : (keyInput ? "Go to Dashboard" : "Enter")}
+                                {loading ? "Loading..." : "Enter"}
                             </button>
                         </form>
 
@@ -193,24 +193,26 @@ export default function Home() {
                             <div style={{ marginTop: 16, color: "#ff6666", fontSize: 13 }}>{error}</div>
                         )}
 
-                        <div style={{ marginTop: 48, display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center" }}>
-                            <Link href="/setup" style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #222", color: "#888", textDecoration: "none", fontSize: 13 }}>
-                                Setup Experiment →
-                            </Link>
-                            <Link href="/chains" style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #222", color: "#888", textDecoration: "none", fontSize: 13 }}>
-                                Build Chains →
-                            </Link>
-                        </div>
+                        {!adminKey && (
+                            <div style={{ marginTop: 48, display: "none" }}>
+                                <Link href="/setup" style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #222", color: "#888", textDecoration: "none", fontSize: 13 }}>
+                                    Setup Experiment →
+                                </Link>
+                                <Link href="/chains" style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #222", color: "#888", textDecoration: "none", fontSize: 13 }}>
+                                    Build Chains →
+                                </Link>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <>
-                        <div style={{ marginBottom: 32 }}>
+                        <div style={{ marginBottom: 32, display: "none" }}>
                             <h1 style={{ fontSize: 28, fontWeight: 700, marginBottom: 4 }}>Dashboard</h1>
                             <p style={{ color: "#666", fontSize: 14 }}>Overview of your experiments and chains</p>
                         </div>
 
-                        {/* Stats Cards */}
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 32 }}>
+                        {/* Stats Cards Hidden */}
+                        <div style={{ display: "none", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 32 }}>
                             <div style={{ background: "linear-gradient(145deg, #111 0%, #0a0a0a 100%)", borderRadius: 12, padding: "20px 24px", border: "1px solid #1a1a1a" }}>
                                 <div style={{ fontSize: 32, fontWeight: 700, color: "#00ff88" }}>{totalStudies}</div>
                                 <div style={{ fontSize: 13, color: "#666", marginTop: 4 }}>Studies</div>
