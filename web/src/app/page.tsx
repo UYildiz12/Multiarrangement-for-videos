@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useKey } from "./lib/KeyContext";
 import Logo from "./components/Logo";
 import { EyeIcon, EyeOffIcon } from "./components/EyeIcon";
@@ -148,6 +149,50 @@ export default function Home() {
                                 <div style={{ marginTop: 16, color: "#ff6666", fontSize: 13 }}>{error}</div>
                             )}
                         </>
+                    )}
+
+                    {/* Logged-in CTA buttons */}
+                    {adminKey && (
+                        <div style={{ display: "flex", gap: 16, marginTop: 8, flexWrap: "wrap", justifyContent: "center" }}>
+                            <Link
+                                href="/setup"
+                                style={{
+                                    padding: "16px 32px",
+                                    borderRadius: 12,
+                                    border: "none",
+                                    background: "linear-gradient(135deg, #00ff88 0%, #00cc66 100%)",
+                                    color: "#000",
+                                    fontWeight: 700,
+                                    fontSize: 15,
+                                    textDecoration: "none",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    letterSpacing: "-0.2px",
+                                }}
+                            >
+                                <span style={{ fontSize: 17 }}>+</span> Create an Experiment
+                            </Link>
+                            <Link
+                                href="/dashboard"
+                                style={{
+                                    padding: "16px 32px",
+                                    borderRadius: 12,
+                                    border: "1px solid #333",
+                                    background: "#111",
+                                    color: "#fff",
+                                    fontWeight: 600,
+                                    fontSize: 15,
+                                    textDecoration: "none",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    letterSpacing: "-0.2px",
+                                }}
+                            >
+                                <span style={{ fontSize: 15 }}>◉</span> Go to Dashboard
+                            </Link>
+                        </div>
                     )}
                 </div>
             </div>
