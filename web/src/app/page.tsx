@@ -71,15 +71,8 @@ export default function Home() {
         }
     }, [setAdminKey]);
 
-    useEffect(() => {
-        if (!authReady || attemptedAutoLoad || loaded || loading) {
-            return;
-        }
-        if (!attemptedAutoLoad && !loaded && !loading) {
-            setAttemptedAutoLoad(true);
-            loadData(adminKey);
-        }
-    }, [authReady, attemptedAutoLoad, adminKey, loaded, loading, loadData]);
+    // Auto-load logic removed to prevent jumpy transitions and respect user preference
+    // for deliberate dashboard entry.
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
@@ -180,7 +173,7 @@ export default function Home() {
                                     transition: "opacity 0.2s ease",
                                 }}
                             >
-                                {loading ? "Loading..." : "Enter"}
+                                {loading ? "Loading..." : (keyInput ? "Go to Dashboard" : "Enter")}
                             </button>
                         </form>
 
