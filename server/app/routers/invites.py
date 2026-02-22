@@ -12,7 +12,15 @@ from app.schemas import (
     InviteCreate,
     InviteResponse,
     SessionStartResponse,
+    StudyCreate,
+    Paradigm,
+    Language,
+    StimulusCreate,
+    MediaType,
+    StimulusBatchCreate,
 )
+import uuid
+import datetime
 from app.routers.studies import get_studies_db, get_stimuli_db
 from app.routers.sessions import create_session
 from app.routers.experimenter import get_required_owner
@@ -82,6 +90,73 @@ async def start_from_invite(token: str) -> SessionStartResponse:
     response = create_session(study_id, participant_id)
     invite["used_session_id"] = response.session_id
     _invites_db[token] = invite
+    return response
+
+
+from pydantic import BaseModel
+
+class DemoStartRequest(BaseModel):
+    paradigm: str = "adaptive"  # "adaptive" (LtW) or "setcover"
+    n_stimuli: int = 16
+
+@router.post(
+    "/public/demo/start",
+    response_model=SessionStartResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_demo_session(req: DemoStartRequest) -> SessionStartResponse:
+    """Start a fresh throwaway session for a demo."""
+    from app.routers.studies import _studies_db, _stimuli_db
+    from app.routers.sessions import create_session
+
+    study_id = uuid.uuid4()
+    
+    # We use a dummy owner UUID
+    dummy_owner_id = uuid.uuid4()
+    
+    study_data = {
+        "id": study_id,
+        "owner_id": dummy_owner_id,
+        "name": f"Demo {req.paradigm.title()} {req.n_stimuli}",
+        "description": "Ephemeral demo study",
+        "paradigm": Paradigm.ADAPTIVE if req.paradigm == "adaptive" else Paradigm.SETCOVER,
+        "config": {
+            "evidence_threshold": 0.35,
+            "utility_exponent": 10.0,
+            "min_subset_size": 4,
+            "max_subset_size": 6,
+            "use_inverse_mds": True,
+            "batch_size": 6,
+            "setcover_weight_mode": "max",
+            "setcover_weight_alpha": 2.0,
+        },
+        "language": Language.EN,
+        "instructions": ["This is a local demo. Results will only be available to download safely at the end."],
+        "created_at": datetime.datetime.utcnow(),
+        "n_stimuli": req.n_stimuli,
+        "is_demo": True, # Custom flag just in case
+    }
+    _studies_db[study_id] = study_data
+    
+    # Create mock stimuli
+    stims = []
+    for i in range(req.n_stimuli):
+        stims.append({
+            "id": uuid.uuid4(),
+            "ordinal": i,
+            "filename": f"Stimulus {i+1}",
+            "media_type": MediaType.VIDEO,
+            "media_url": "", # We'll just let the frontend provide the videos or handle empty URLs (wait, frontend demo page will provide the preset videos). Just give it preset video names.
+            "thumbnail_url": None,
+            "duration_seconds": 3.0,
+        })
+        
+    # Since frontend will also manage videos, we'll try to sync filenames with the preset videos if possible.
+    # Actually, the presets are in `classicVideos` in frontend (e.g. from `/api/videos`). We'll just create generic stimuli here.
+    _stimuli_db[study_id] = stims
+
+    participant_id = f"demo_user_{uuid.uuid4().hex[:8]}"
+    response = create_session(study_id, participant_id)
     return response
 
 
