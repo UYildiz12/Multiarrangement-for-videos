@@ -173,11 +173,6 @@ export default function DemoPage() {
                     </button>
                 </div>
 
-                {/* Info callout */}
-                <div style={{ padding: "14px 18px", borderRadius: 10, background: "#111", border: "1px solid #1a1a1a", fontSize: 13, color: "#555", lineHeight: 1.6, marginBottom: 32 }}>
-                    <span style={{ color: "#00ff88", fontWeight: 600 }}>16 stimuli</span> · drag into the circle · double-click to play · submit when complete
-                </div>
-
                 {/* Back link */}
                 <Link href="/" style={{ color: "#444", fontSize: 13, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
                     ← Back to Home
