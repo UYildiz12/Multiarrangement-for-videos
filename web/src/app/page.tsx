@@ -130,33 +130,37 @@ export default function Home() {
                         {/* Key entry form */}
                         <form
                             onSubmit={handleSubmit}
-                            style={{ display: "flex", gap: 10, width: "100%", maxWidth: 460 }}
+                            style={{ display: "flex", gap: 10, width: "100%", maxWidth: 460, justifyContent: adminKey ? "center" : "stretch" }}
                         >
-                            <input
-                                type={showKey ? "text" : "password"}
-                                value={keyInput}
-                                onChange={(e) => setKeyInput(e.target.value)}
-                                placeholder={isLocalBypass ? "Optional experimenter key..." : "Enter your experimenter key..."}
-                                autoFocus
-                                style={{
-                                    flex: 1,
-                                    padding: "14px 18px",
-                                    borderRadius: 10,
-                                    border: "1px solid #333",
-                                    background: "#111",
-                                    color: "#fff",
-                                    fontSize: 15,
-                                    outline: "none",
-                                }}
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowKey(!showKey)}
-                                style={{ padding: "14px 12px", borderRadius: 10, border: "1px solid #333", background: "#111", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-                                title={showKey ? "Hide key" : "Show key"}
-                            >
-                                {showKey ? <EyeOffIcon size={18} color="#888" /> : <EyeIcon size={18} color="#888" />}
-                            </button>
+                            {!adminKey && (
+                                <>
+                                    <input
+                                        type={showKey ? "text" : "password"}
+                                        value={keyInput}
+                                        onChange={(e) => setKeyInput(e.target.value)}
+                                        placeholder={isLocalBypass ? "Optional experimenter key..." : "Enter your experimenter key..."}
+                                        autoFocus
+                                        style={{
+                                            flex: 1,
+                                            padding: "14px 18px",
+                                            borderRadius: 10,
+                                            border: "1px solid #333",
+                                            background: "#111",
+                                            color: "#fff",
+                                            fontSize: 15,
+                                            outline: "none",
+                                        }}
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowKey(!showKey)}
+                                        style={{ padding: "14px 12px", borderRadius: 10, border: "1px solid #333", background: "#111", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                                        title={showKey ? "Hide key" : "Show key"}
+                                    >
+                                        {showKey ? <EyeOffIcon size={18} color="#888" /> : <EyeIcon size={18} color="#888" />}
+                                    </button>
+                                </>
+                            )}
                             <button
                                 type="submit"
                                 disabled={loading}
@@ -177,11 +181,13 @@ export default function Home() {
                             </button>
                         </form>
 
-                        <p style={{ marginTop: 24, color: "#555", fontSize: 13 }}>
-                            {isLocalBypass
-                                ? "Key entry is optional in local mode."
-                                : <><span>Don&apos;t have a key? </span><Link href="/admin" style={{ color: "#00ff88", textDecoration: "none" }}>Generate one</Link><span> on the Experimenter page.</span></>}
-                        </p>
+                        {!adminKey && (
+                            <p style={{ marginTop: 24, color: "#555", fontSize: 13 }}>
+                                {isLocalBypass
+                                    ? "Key entry is optional in local mode."
+                                    : <><span>Don&apos;t have a key? </span><Link href="/admin" style={{ color: "#00ff88", textDecoration: "none" }}>Generate one</Link><span> on the Experimenter page.</span></>}
+                            </p>
+                        )}
 
                         {error && (
                             <div style={{ marginTop: 16, color: "#ff6666", fontSize: 13 }}>{error}</div>
