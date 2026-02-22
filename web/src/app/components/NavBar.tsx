@@ -1,11 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useKey } from "../lib/KeyContext";
 import Logo from "./Logo";
-import { EyeIcon, EyeOffIcon } from "./EyeIcon";
 
 const NAV_ITEMS = [
     { href: "/", label: "Dashboard", icon: "◉" },
@@ -20,30 +18,7 @@ const HIDDEN_PATHS = ["/experiment", "/participate"];
 export default function NavBar() {
     const pathname = usePathname();
     const { adminKey, isAuthenticated, isLocalBypass, clearKey } = useKey();
-    const [showKey, setShowKey] = useState(false);
-    const [copied, setCopied] = useState(false);
-    const copyTimeoutRef = useRef<number | null>(null);
     const hasKey = adminKey.trim().length > 0;
-
-    const handleCopy = () => {
-        navigator.clipboard.writeText(adminKey);
-        setCopied(true);
-        if (copyTimeoutRef.current !== null) {
-            window.clearTimeout(copyTimeoutRef.current);
-        }
-        copyTimeoutRef.current = window.setTimeout(() => {
-            setCopied(false);
-            copyTimeoutRef.current = null;
-        }, 2000);
-    };
-
-    useEffect(() => {
-        return () => {
-            if (copyTimeoutRef.current !== null) {
-                window.clearTimeout(copyTimeoutRef.current);
-            }
-        };
-    }, []);
 
     // Hide nav on participant-facing pages
     if (HIDDEN_PATHS.some((p) => pathname.startsWith(p))) {
@@ -152,41 +127,20 @@ export default function NavBar() {
                                 </span>
                             ) : (
                                 <>
-                                    <span style={{ fontSize: 12, color: "#888", fontFamily: showKey ? "monospace" : "inherit" }}>
-                                        {showKey ? adminKey.slice(0, 12) + "..." : `Key: ${adminKey.slice(0, 4)}***`}
-                                    </span>
-                                    <button
-                                        onClick={() => setShowKey(!showKey)}
+                                    <span
                                         style={{
-                                            background: "none",
-                                            border: "none",
+                                            fontSize: 12,
                                             color: "#888",
-                                            cursor: "pointer",
-                                            padding: "2px",
-                                            display: "flex",
-                                            alignItems: "center",
+                                            fontFamily: "monospace",
+                                            maxWidth: 150,
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                            whiteSpace: "nowrap",
                                         }}
-                                        title={showKey ? "Hide key" : "Show key"}
+                                        title="Experimenter key set"
                                     >
-                                        {showKey ? <EyeOffIcon size={14} color="#888" /> : <EyeIcon size={14} color="#888" />}
-                                    </button>
-                                    {showKey && (
-                                        <button
-                                            onClick={handleCopy}
-                                            style={{
-                                                padding: "3px 8px",
-                                                borderRadius: 4,
-                                                border: "1px solid #333",
-                                                background: copied ? "#00ff88" : "transparent",
-                                                color: copied ? "#000" : "#888",
-                                                fontSize: 10,
-                                                cursor: "pointer",
-                                                fontWeight: copied ? 700 : 400,
-                                            }}
-                                        >
-                                            {copied ? "✓" : "Copy"}
-                                        </button>
-                                    )}
+                                        {`Key: ${adminKey.slice(0, 4)}••••••`}
+                                    </span>
                                     <button
                                         onClick={clearKey}
                                         style={{

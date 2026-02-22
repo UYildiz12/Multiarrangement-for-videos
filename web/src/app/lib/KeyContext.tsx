@@ -110,12 +110,11 @@ export function KeyProvider({ children }: { children: ReactNode }) {
             const data = await apiFetch<{ key: string }>("/api/v1/experimenter/generate-key", {
                 method: "POST",
             });
-            setAdminKey(data.key);
             return data.key;
         } finally {
             setGenerating(false);
         }
-    }, [setAdminKey]);
+    }, []);
 
     return (
         <KeyContext.Provider
