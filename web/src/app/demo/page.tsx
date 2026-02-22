@@ -49,8 +49,10 @@ export default function DemoPage() {
                 language: "en"
             }));
             sessionStorage.setItem("experimentInstructions", JSON.stringify([
-                "This is a local demonstration. You can download your results at the end.",
-                "Have fun exploring the interface!"
+                "Please arrange the stimuli on the screen based on their perceived similarity.",
+                "Stimuli that are more similar should be placed closer together.",
+                "You can play the videos by clicking on them.",
+                "When you are finished with an arrangement, click the 'Submit' button."
             ]));
 
             router.push(`/experiment?session=${session.session_id}`);

@@ -131,7 +131,12 @@ async def start_demo_session(req: DemoStartRequest) -> SessionStartResponse:
             "setcover_weight_alpha": 2.0,
         },
         "language": Language.EN,
-        "instructions": ["This is a local demo. Results will only be available to download safely at the end."],
+        "instructions": [
+            "Please arrange the stimuli on the screen based on their perceived similarity.",
+            "Stimuli that are more similar should be placed closer together.",
+            "You can play the videos by clicking on them.",
+            "When you are finished with an arrangement, click the 'Next' button."
+        ],
         "created_at": datetime.datetime.utcnow(),
         "n_stimuli": req.n_stimuli,
         "is_demo": True, # Custom flag just in case
