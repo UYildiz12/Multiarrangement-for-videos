@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useKey } from "./lib/KeyContext";
 import Logo from "./components/Logo";
 import { EyeIcon, EyeOffIcon } from "./components/EyeIcon";
@@ -24,7 +24,8 @@ interface Chain {
 }
 
 export default function Home() {
-    const { adminKey, setAdminKey, isLocalBypass, authReady } = useKey();
+    const router = useRouter();
+    const { adminKey, setAdminKey, isAuthenticated, isLocalBypass, authReady } = useKey();
     const [keyInput, setKeyInput] = useState("");
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -34,6 +35,13 @@ export default function Home() {
         if (adminKey) setKeyInput(adminKey);
     }, [adminKey]);
 
+    // If already authenticated, go straight to dashboard
+    useEffect(() => {
+        if (authReady && isAuthenticated) {
+            router.replace("/dashboard");
+        }
+    }, [authReady, isAuthenticated, router]);
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         const trimmedKey = keyInput.trim();
@@ -41,8 +49,7 @@ export default function Home() {
         setLoading(true);
         try {
             setAdminKey(trimmedKey);
-            // On successful key set, the NavBar will show Dashboard
-            // and the user can navigate there.
+            router.push("/dashboard");
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to set key");
         } finally {
@@ -94,77 +101,63 @@ export default function Home() {
                     )}
 
                     {/* Key entry form */}
-                    {!adminKey ? (
-                        <>
-                            <form
-                                onSubmit={handleSubmit}
-                                style={{ display: "flex", gap: 10, width: "100%", maxWidth: 460 }}
-                            >
-                                <input
-                                    type={showKey ? "text" : "password"}
-                                    value={keyInput}
-                                    onChange={(e) => setKeyInput(e.target.value)}
-                                    placeholder={isLocalBypass ? "Optional experimenter key..." : "Enter your experimenter key..."}
-                                    autoFocus
-                                    style={{
-                                        padding: "14px 18px",
-                                        borderRadius: 10,
-                                        border: "1px solid #333",
-                                        background: "#111",
-                                        color: "#fff",
-                                        fontSize: 15,
-                                        outline: "none",
-                                        flex: 1,
-                                    }}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => setShowKey(!showKey)}
-                                    style={{ padding: "14px 12px", borderRadius: 10, border: "1px solid #333", background: "#111", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-                                    title={showKey ? "Hide key" : "Show key"}
-                                >
-                                    {showKey ? <EyeOffIcon size={18} color="#888" /> : <EyeIcon size={18} color="#888" />}
-                                </button>
-                                <button
-                                    type="submit"
-                                    disabled={loading}
-                                    style={{
-                                        padding: "14px 28px",
-                                        borderRadius: 10,
-                                        border: "none",
-                                        background: "linear-gradient(135deg, #00ff88 0%, #00cc66 100%)",
-                                        color: "#000",
-                                        fontWeight: 700,
-                                        fontSize: 15,
-                                        cursor: loading ? "not-allowed" : "pointer",
-                                        opacity: loading ? 0.6 : 1,
-                                        transition: "opacity 0.2s ease",
-                                    }}
-                                >
-                                    {loading ? "Loading..." : "Enter"}
-                                </button>
-                            </form>
-                            <p style={{ marginTop: 24, color: "#555", fontSize: 13 }}>
-                                {isLocalBypass
-                                    ? "Key entry is optional in local mode."
-                                    : <><span>Don&apos;t have a key? </span><Link href="/admin" style={{ color: "#00ff88", textDecoration: "none" }}>Generate one</Link><span> on the Experimenter page.</span></>}
-                            </p>
-                        </>
-                    ) : (
-                        <p style={{ color: "#6db59b", fontSize: 15, fontWeight: 500 }}>
-                            Welcome back! Use the navigation above to access your dashboard.
-                        </p>
-                    )}
+                    <form
+                        onSubmit={handleSubmit}
+                        style={{ display: "flex", gap: 10, width: "100%", maxWidth: 460 }}
+                    >
+                        <input
+                            type={showKey ? "text" : "password"}
+                            value={keyInput}
+                            onChange={(e) => setKeyInput(e.target.value)}
+                            placeholder={isLocalBypass ? "Optional experimenter key..." : "Enter your experimenter key..."}
+                            autoFocus
+                            style={{
+                                padding: "14px 18px",
+                                borderRadius: 10,
+                                border: "1px solid #333",
+                                background: "#111",
+                                color: "#fff",
+                                fontSize: 15,
+                                outline: "none",
+                                flex: 1,
+                            }}
+                        />
+                        <button
+                            type="button"
+                            onClick={() => setShowKey(!showKey)}
+                            style={{ padding: "14px 12px", borderRadius: 10, border: "1px solid #333", background: "#111", color: "#888", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                            title={showKey ? "Hide key" : "Show key"}
+                        >
+                            {showKey ? <EyeOffIcon size={18} color="#888" /> : <EyeIcon size={18} color="#888" />}
+                        </button>
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            style={{
+                                padding: "14px 28px",
+                                borderRadius: 10,
+                                border: "none",
+                                background: "linear-gradient(135deg, #00ff88 0%, #00cc66 100%)",
+                                color: "#000",
+                                fontWeight: 700,
+                                fontSize: 15,
+                                cursor: loading ? "not-allowed" : "pointer",
+                                opacity: loading ? 0.6 : 1,
+                                transition: "opacity 0.2s ease",
+                            }}
+                        >
+                            {loading ? "Loading..." : "Enter"}
+                        </button>
+                    </form>
+                    <p style={{ marginTop: 24, color: "#555", fontSize: 13 }}>
+                        {isLocalBypass
+                            ? "Key entry is optional in local mode."
+                            : <><span>Don&apos;t have a key? </span><a href="/admin" style={{ color: "#00ff88", textDecoration: "none" }}>Generate one</a><span> on the Experimenter page.</span></>}
+                    </p>
 
                     {error && (
                         <div style={{ marginTop: 16, color: "#ff6666", fontSize: 13 }}>{error}</div>
                     )}
-
-                    <div style={{ marginTop: 48, display: "flex", gap: 20, flexWrap: "wrap", justifyContent: "center" }}>
-                        <Link href="/demo" style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #222", color: "#888", textDecoration: "none", fontSize: 13 }}>
-                            View Demo →
-                        </Link>
-                    </div>
                 </div>
             </div>
         </div>

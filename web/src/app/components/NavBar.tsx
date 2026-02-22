@@ -6,7 +6,7 @@ import { useKey } from "../lib/KeyContext";
 import Logo from "./Logo";
 
 const NAV_ITEMS = [
-    { href: "/", label: "Dashboard", icon: "◉" },
+    { href: "/dashboard", label: "Dashboard", icon: "◉" },
     { href: "/setup", label: "Setup", icon: "⚙" },
     { href: "/chains", label: "Chains", icon: "⛓" },
     { href: "/admin", label: "Experimenter", icon: "☸" },
@@ -74,9 +74,7 @@ export default function NavBar() {
                 {/* Nav Links */}
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                     {NAV_ITEMS.map((item) => {
-                        const isActive = item.href === "/"
-                            ? pathname === "/"
-                            : pathname.startsWith(item.href);
+                        const isActive = pathname.startsWith(item.href);
                         return (
                             <Link
                                 key={item.href}
