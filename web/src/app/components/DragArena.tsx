@@ -109,30 +109,31 @@ export default function DragArena({
     onPositionsChange?.(positions);
   }, [items, isInsideArena, onAllInside, onPositionsChange]);
 
+  const draggedIdRef = useRef<string | null>(null);
+  const activePointerIdRef = useRef<number | null>(null);
+
   const handlePointerDown = (e: React.PointerEvent, id: string) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (draggedId !== null || activePointerId !== null) return;
-    e.preventDefault();
+    if (draggedIdRef.current !== null) return;
+
     const item = items.find((i) => i.id === id);
     if (!item) return;
 
     const rect = arenaRef.current?.getBoundingClientRect();
     if (!rect) return;
 
+    e.preventDefault();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+
+    draggedIdRef.current = id;
+    activePointerIdRef.current = e.pointerId;
+    setDraggedId(id);
     setActivePointerId(e.pointerId);
-    if (e.currentTarget && "setPointerCapture" in e.currentTarget) {
-      try {
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      } catch {
-        // ignore pointer capture failures
-      }
-    }
 
     dragOffset.current = {
       x: e.clientX - rect.left - item.position.x,
       y: e.clientY - rect.top - item.position.y,
     };
-    setDraggedId(id);
 
     setItems((prev) =>
       prev.map((i) => ({ ...i, isDragging: i.id === id }))
@@ -147,8 +148,8 @@ export default function DragArena({
 
   const handlePointerMove = useCallback(
     (e: PointerEvent) => {
-      if (!draggedId || !arenaRef.current) return;
-      if (activePointerId !== null && e.pointerId !== activePointerId) return;
+      if (!draggedIdRef.current || !arenaRef.current) return;
+      if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) return;
 
       const rect = arenaRef.current.getBoundingClientRect();
       const newX = e.clientX - rect.left - dragOffset.current.x;
@@ -156,27 +157,32 @@ export default function DragArena({
 
       setItems((prev) =>
         prev.map((item) =>
-          item.id === draggedId
+          item.id === draggedIdRef.current
             ? { ...item, position: { x: newX, y: newY } }
             : item
         )
       );
     },
-    [draggedId, activePointerId]
+    []
   );
 
   const handlePointerUp = useCallback((e?: PointerEvent) => {
-    if (activePointerId !== null && e && e.pointerId !== activePointerId) return;
-    if (draggedId) {
+    if (activePointerIdRef.current !== null && e && e.pointerId !== activePointerIdRef.current) return;
+
+    if (draggedIdRef.current) {
+      const id = draggedIdRef.current;
       setItems((prev) =>
         prev.map((i) =>
-          i.id === draggedId ? { ...i, isDragging: false } : i
+          i.id === id ? { ...i, isDragging: false } : i
         )
       );
-      setDraggedId(null);
     }
+
+    draggedIdRef.current = null;
+    activePointerIdRef.current = null;
+    setDraggedId(null);
     setActivePointerId(null);
-  }, [draggedId, activePointerId]);
+  }, []);
 
   useEffect(() => {
     window.addEventListener("pointermove", handlePointerMove);
@@ -232,6 +238,8 @@ export default function DragArena({
           position: "relative",
           background: "#000",
           touchAction: "none",
+          userSelect: "none",
+          WebkitUserSelect: "none",
         }}
       >
         {/* White circle */}
