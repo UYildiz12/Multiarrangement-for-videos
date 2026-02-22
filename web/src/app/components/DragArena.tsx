@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useCallback, useEffect } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 
 interface Position {
   x: number;
@@ -70,7 +70,13 @@ export default function DragArena({
     });
   }, [stimuli, center, arenaRadius]);
 
-  // Initialize/reset positions when trialIndex or stimuli changes
+  // Stable key representing which stimuli are shown (IDs only, not metadata like thumbnails)
+  const stimuliKey = useMemo(
+    () => stimuli.map((s) => s.id).join(","),
+    [stimuli]
+  );
+
+  // Initialize/reset positions ONLY when the set of stimulus IDs or trialIndex changes
   useEffect(() => {
     if (stimuli.length === 0) return;
 
@@ -84,7 +90,30 @@ export default function DragArena({
     setItems(newItems);
     setDraggedId(null);
     setActivePointerId(null);
-  }, [stimuli, trialIndex, getInitialPositions]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stimuliKey, trialIndex]);
+
+  // Sync metadata changes (thumbnail, mediaUrl, label) to existing items WITHOUT resetting positions
+  useEffect(() => {
+    if (stimuli.length === 0) return;
+    setItems((prev) => {
+      if (prev.length !== stimuli.length) return prev;
+      let changed = false;
+      const next = prev.map((item, i) => {
+        const s = stimuli[i];
+        if (!s || s.id !== item.id) return item;
+        if (
+          s.thumbnail === item.thumbnail &&
+          s.mediaUrl === item.mediaUrl &&
+          s.label === item.label
+        )
+          return item;
+        changed = true;
+        return { ...item, thumbnail: s.thumbnail, mediaUrl: s.mediaUrl, label: s.label };
+      });
+      return changed ? next : prev;
+    });
+  }, [stimuli]);
 
   // Check if item center is inside the arena circle
   const isInsideArena = useCallback(
