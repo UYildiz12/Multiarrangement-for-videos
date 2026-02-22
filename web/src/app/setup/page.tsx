@@ -1483,7 +1483,7 @@ const DEFAULT_INSTRUCTIONS = {
     en: {
         arrangement: [
             "Drag all items inside the circle.",
-            "Place similar items close together and dissimilar items farther apart.",
+            "Place similar items close together — token center distances reflect similarity.",
             "Double-click an item to play it (audio/video).",
             "When all items are inside, click Done to continue.",
         ],
@@ -1496,7 +1496,7 @@ const DEFAULT_INSTRUCTIONS = {
     tr: {
         arrangement: [
             "Tüm öğeleri dairenin içine sürükleyin.",
-            "Benzerleri yakın, farklıları daha uzak yerleştirin.",
+            "Benzerleri yakın yerleştirin — token merkez mesafeleri benzerliği yansıtır.",
             "Öğeyi oynatmak için çift tıklayın (ses/video).",
             "Hepsi içerideyken Bitir'e basın.",
         ],

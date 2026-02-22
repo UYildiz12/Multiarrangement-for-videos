@@ -133,7 +133,7 @@ async def start_demo_session(req: DemoStartRequest) -> SessionStartResponse:
         "language": Language.EN,
         "instructions": [
             "Please arrange the stimuli on the screen based on their perceived similarity.",
-            "Stimuli that are more similar should be placed closer together.",
+            "Place similar stimuli closer together — token center distances reflect similarity.",
             "You can play the videos by clicking on them.",
             "When you are finished with an arrangement, click the 'Next' button."
         ],

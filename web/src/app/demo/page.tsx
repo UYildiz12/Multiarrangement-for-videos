@@ -59,7 +59,7 @@ export default function DemoPage() {
             }));
             sessionStorage.setItem("experimentInstructions", JSON.stringify([
                 "Arrange the stimuli based on their perceived similarity.",
-                "Place similar stimuli closer together inside the circle.",
+                "Place similar stimuli closer together — token center distances reflect similarity.",
                 "Double-click a stimulus to play it.",
                 "All stimuli must be inside the circle before you can submit.",
             ]));
