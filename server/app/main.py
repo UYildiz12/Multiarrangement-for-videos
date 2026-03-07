@@ -10,10 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import studies_router, sessions_router, results_router, invites_router, admin_router, chains_router, chains_public_router, experimenter_router
 from app.schemas import HealthResponse
 
+APP_VERSION = "0.1.10.2"
+
 app = FastAPI(
     title="Multiarrangement Web API",
     description="API for running similarity arrangement experiments in the browser",
-    version="0.1.0",
+    version=APP_VERSION,
 )
 
 # CORS for web frontend
@@ -39,7 +41,7 @@ app.include_router(experimenter_router, prefix="/api/v1")
 @app.get("/health", response_model=HealthResponse)
 def health():
     """Health check endpoint."""
-    return HealthResponse(status="ok", version="0.1.0")
+    return HealthResponse(status="ok", version=APP_VERSION)
 
 
 @app.get("/")
@@ -47,6 +49,6 @@ def root():
     """Root endpoint with API info."""
     return {
         "name": "Multiarrangement Web API",
-        "version": "0.1.0",
+        "version": APP_VERSION,
         "docs": "/docs",
     }

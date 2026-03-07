@@ -50,6 +50,58 @@ Requirements: Python 3.8+, NumPy ≥ 1.20, pandas ≥ 1.3, pygame ≥ 2.0, openc
 
 
  
+## Reproducibility Quickstart
+
+The commands below validate the repository from a fresh clone without requiring the interactive UI.
+
+### 1. Package + library tests
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+pytest tests -q
+```
+
+Expected result for release `0.1.10.2`: all package tests pass.
+
+### 2. FastAPI backend tests
+
+```bash
+python -m pip install -r server/requirements-dev.txt
+pytest server/tests -q
+```
+
+Expected result for release `0.1.10.2`: all backend tests pass.
+
+### 3. Web build verification
+
+```bash
+cd web
+npm ci
+npm run build
+npm run lint
+```
+
+Expected result for release `0.1.10.2`: the production build succeeds and lint exits without errors.
+
+### 4. Local full-stack smoke test
+
+Start the backend:
+
+```bash
+cd server
+LOCAL_DEV_BYPASS_AUTH=1 uvicorn app.main:app --reload --port 8000
+```
+
+Start the frontend in a second terminal:
+
+```bash
+cd web
+NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000 NEXT_PUBLIC_LOCAL_DEV_BYPASS_AUTH=1 npm run dev
+```
+
+Then open `http://127.0.0.1:3000/demo` for bundled demo media or `http://127.0.0.1:3000/setup` to create a browser study against the local API.
+
 ## Python API
 
 
@@ -302,6 +354,10 @@ UI details:
   - Kriegeskorte, N., & Mur, M. (2012). Inverse MDS: optimizing the stimulus arrangements for pairwise dissimilarity measures. Frontiers in Psychology, 3, 245. https://doi.org/10.3389/fpsyg.2012.00245
 - Demo video dataset:
   - Urgen, B. A., Nizamoğlu, H., Eroğlu, A., & Orban, G. A. (2023). A large video set of natural human actions for visual and cognitive neuroscience studies and its validation with fMRI. Brain Sciences, 13(1), 61. https://doi.org/10.3390/brainsci13010061
+
+## Citation
+
+Please cite the software using the metadata in `CITATION.cff`. Release metadata for archival services is also included in `.zenodo.json`.
 
 ## License
 

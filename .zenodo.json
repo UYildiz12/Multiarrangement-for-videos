@@ -1,0 +1,19 @@
+{
+  "title": "Multiarrangement for Videos",
+  "description": "Python package and web implementation for collecting similarity judgements with set-cover and adaptive multiarrangement experiments on video, audio, and image stimuli.",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "MIT",
+  "creators": [
+    {
+      "name": "Yildiz, Umur"
+    }
+  ],
+  "keywords": [
+    "multiarrangement",
+    "representational dissimilarity matrix",
+    "similarity judgement",
+    "psychology",
+    "neuroscience"
+  ]
+}

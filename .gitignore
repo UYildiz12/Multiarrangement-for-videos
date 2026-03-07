@@ -29,6 +29,7 @@ ENV/
 .venv/
 .tmp-build-venv/
 .codex_pytools/
+.github-test-artifacts/
 
 # IDE files
 .idea/
@@ -40,6 +41,10 @@ ENV/
 .DS_Store
 Thumbs.db
 .pytest_cache/
+
+# Generated experiment outputs
+results/*
+!results/.gitkeep
 
 # Large media files (optional, uncomment if you want to exclude videos)
 # *.mp4
