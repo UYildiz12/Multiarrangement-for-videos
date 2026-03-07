@@ -8,9 +8,7 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
-from ..utils.file_utils import get_resource_path, load_batches
-from ..utils.video_processing import VideoProcessor
-from ..utils.data_processing import DataProcessor
+from ..utils.file_utils import load_batches
 
 
 class MultiarrangementExperiment:
@@ -44,10 +42,6 @@ class MultiarrangementExperiment:
         self.participant_id = participant_id
         self.output_directory = Path(output_directory)
         self.randomize_videos = randomize_videos
-        
-        # Initialize components
-        self.video_processor = VideoProcessor()
-        self.data_processor = DataProcessor()
         
         # Load video files and batches
         self._load_videos()

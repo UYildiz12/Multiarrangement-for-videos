@@ -72,7 +72,7 @@ where = ["."]
 include = ["multiarrangement*", "coverlib*"]
 
 [tool.setuptools.package-data]
-"multiarrangement.data" = ["*.txt", "*.xlsx", "*.png", "*.mp4", "*.avi", "*.mkv"]
+"multiarrangement.data" = ["*.txt", "*.xlsx", "*.png", "*.PNG", "*.mp4", "*.avi", "*.mkv"]
 "multiarrangement" = [
   "*.py",
   "15videos/*",

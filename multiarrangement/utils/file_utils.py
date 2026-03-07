@@ -5,7 +5,7 @@ File utilities for multiarrangement experiments.
 import os
 import re
 from pathlib import Path
-from typing import List, Union, Optional
+from typing import Iterable, List, Union, Optional
 import site
 
 
@@ -99,18 +99,44 @@ def resolve_packaged_file(subdir: str, filename: str) -> Path:
     Tries the same locations as ``resolve_packaged_dir``. Returns a Path that exists.
     Raises FileNotFoundError if not found.
     """
-    # Assemble candidate directories and check for the file
-    dirs = [
-        Path(__file__).parent.parent / subdir,
-        Path.cwd() / subdir,
-        *_iter_site_package_candidates(subdir=subdir),
-    ]
-    for d in dirs:
-        p = d / filename
-        if p.exists():
-            return p
-    raise FileNotFoundError(f"Could not locate '{filename}' under '{subdir}'. Searched: "
-                            f"{', '.join(str(d) for d in dirs)}")
+    return resolve_packaged_asset(filename, [subdir])
+
+
+def resolve_packaged_asset(filename: str, subdirs: Iterable[Optional[str]]) -> Path:
+    """Resolve a packaged file across one or more package subdirectories."""
+    pkg_root = Path(__file__).parent.parent
+    candidates: List[Path] = []
+    seen: set[str] = set()
+
+    for subdir in subdirs:
+        roots = [pkg_root, Path.cwd(), *_iter_site_package_candidates()]
+        for root in roots:
+            candidate_dir = root if not subdir else root / subdir
+            key = str(candidate_dir.resolve()) if candidate_dir.exists() else str(candidate_dir)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(candidate_dir)
+
+    for directory in candidates:
+        path = directory / filename
+        if path.exists():
+            return path
+
+    raise FileNotFoundError(
+        f"Could not locate '{filename}'. Searched: "
+        f"{', '.join(str(directory) for directory in candidates)}"
+    )
+
+
+def resolve_audio_icon_path() -> Path:
+    """Resolve the bundled audio icon used by package and source-tree runs."""
+    for icon_name in ("Audio.png", "test_audio_icon_new.png"):
+        try:
+            return resolve_packaged_asset(icon_name, ("", "data"))
+        except FileNotFoundError:
+            continue
+    raise FileNotFoundError("Could not locate a packaged audio icon")
 
 
 def load_batches(batch_file: Union[str, Path]) -> List[List[int]]:

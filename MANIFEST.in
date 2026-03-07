@@ -2,15 +2,12 @@
 include README.md
 include LICENSE
 include pyproject.toml
-include img1.PNG
-include Audio.png
-include test_audio_icon_new.png
 include results/.gitkeep
 
 # Include package data
 recursive-include multiarrangement/data *.txt
 recursive-include multiarrangement/data *.xlsx
-recursive-include multiarrangement/data *.png *.jpg *.jpeg *.gif
+recursive-include multiarrangement/data *.png *.PNG *.jpg *.jpeg *.gif
 recursive-include multiarrangement/data *.mp4 *.avi *.mov *.mkv *.wmv
 
 # Include demo videos from inside package

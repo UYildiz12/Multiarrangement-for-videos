@@ -5,38 +5,70 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "../lib/api";
 
+type DemoParadigm = "adaptive" | "setcover";
+type MediaType = "video" | "audio" | "image";
+
+interface AvailableVideo {
+    filename: string;
+    label?: string;
+    url: string;
+    mediaType?: MediaType;
+    thumbnail?: string;
+}
+
+interface DemoVideosResponse {
+    videos?: AvailableVideo[];
+}
+
+interface DemoSessionStimulus {
+    id?: string;
+    ordinal: number;
+    filename: string;
+    media_url?: string;
+    media_type?: MediaType;
+    thumbnail_url?: string;
+}
+
+interface DemoSessionResponse {
+    session_id: string;
+    study_id: string;
+    paradigm: DemoParadigm;
+    config: Record<string, unknown>;
+    stimuli: DemoSessionStimulus[];
+}
+
 export default function DemoPage() {
     const router = useRouter();
     const [loadingLtW, setLoadingLtW] = useState(false);
     const [loadingSetcover, setLoadingSetcover] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    const startDemo = async (paradigm: "adaptive" | "setcover") => {
+    const startDemo = async (paradigm: DemoParadigm) => {
         if (paradigm === "adaptive") setLoadingLtW(true);
         else setLoadingSetcover(true);
         setError(null);
 
         try {
             const res = await fetch("/api/videos");
-            const data = await res.json();
-            const allVideos: any[] = data.videos || [];
+            const data = (await res.json()) as DemoVideosResponse;
+            const allVideos = data.videos || [];
             const demoVideos = allVideos.slice(0, 16);
 
-            const session = await apiFetch<any>(`/api/v1/public/demo/start`, {
+            const session = await apiFetch<DemoSessionResponse>(`/api/v1/public/demo/start`, {
                 method: "POST",
                 body: JSON.stringify({ paradigm, n_stimuli: 16 }),
             });
 
             // Build a lookup from filename → preset so we can match by name
-            const presetByFilename: Record<string, any> = {};
-            const presetByOrdinal: Record<number, any> = {};
+            const presetByFilename: Record<string, AvailableVideo> = {};
+            const presetByOrdinal: Record<number, AvailableVideo> = {};
             demoVideos.forEach((v, i) => {
                 if (v.filename) presetByFilename[v.filename] = v;
                 presetByOrdinal[i] = v;
             });
 
             // Reconcile server stimuli with frontend preset URLs
-            const stimuliForClient = session.stimuli.map((s: any, i: number) => {
+            const stimuliForClient = session.stimuli.map((s, i) => {
                 // Try to match by filename first, then fall back to ordinal position
                 const preset = presetByFilename[s.filename] || presetByOrdinal[i] || {};
                 return {

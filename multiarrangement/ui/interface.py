@@ -13,6 +13,7 @@ from typing import List, Tuple, Dict, Optional, Any
 from abc import ABC, abstractmethod
 
 from ..core.experiment import MultiarrangementExperiment
+from ..utils.file_utils import resolve_audio_icon_path
 from ..utils.video_processing import VideoProcessor
 
 
@@ -415,24 +416,11 @@ class BaseInterface(ABC):
                 video_path = self.experiment.get_video_path(video)
                 suffix = Path(video_path).suffix.lower()
                 if suffix in {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}:
-                    # Use a robust search for the packaged audio icon. Prefer icons bundled
-                    # inside the installed package; fallback to repo root during dev.
+                    # Use the packaged icon so source-tree and installed runs share one path.
                     diameter = 70
                     surface = pygame.Surface((diameter, diameter), pygame.SRCALPHA)
-                    root = Path(__file__).parent.parent
-                    # Candidate locations (installed package and dev repo)
-                    candidates = [
-                        root / "Audio.png",
-                        root / "test_audio_icon_new.png",
-                        root / "data" / "Audio.png",
-                        root / "data" / "test_audio_icon_new.png",
-                        root.parent / "Audio.png",  # repo root (dev)
-                        root.parent / "test_audio_icon_new.png",  # repo root (dev)
-                    ]
-                    icon_path = next((p for p in candidates if p.exists()), None)
                     try:
-                        if icon_path is None:
-                            raise FileNotFoundError("Audio icon not found in package")
+                        icon_path = resolve_audio_icon_path()
                         icon = pygame.image.load(str(icon_path))
                         icon = pygame.transform.smoothscale(icon, (diameter, diameter))
                         surface.blit(icon, (0, 0))
@@ -459,7 +447,7 @@ class BaseInterface(ABC):
                     self.video_thumbnails[video_name] = surface
             except Exception:
                 # Cache None to indicate fallback drawing
-                self.video_thumbnails[video_name] = None
+                    self.video_thumbnails[video_name] = None
             
     def arrange_videos_in_circle(self, center: Tuple[int, int], radius: int) -> None:
         """Arrange video thumbnails in a circle around the center."""

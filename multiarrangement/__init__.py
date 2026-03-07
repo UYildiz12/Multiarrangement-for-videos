@@ -15,14 +15,35 @@ for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. Brai
 __version__ = "0.1.10.2"
 __author__ = "Multiarrangement Team"
 
-from .core.experiment import MultiarrangementExperiment
-from .ui.interface import MultiarrangementInterface
-from .utils.video_processing import VideoProcessor
-from .utils.data_processing import DataProcessor
-from .core.batch_generator import BatchGenerator
-from typing import List, Optional
-from .adaptive.adaptive_experiment import AdaptiveMultiarrangementExperiment, AdaptiveConfig
-from .results import Results
+from importlib import import_module
+from typing import TYPE_CHECKING, Any, List, Optional
+
+if TYPE_CHECKING:
+    from .adaptive.adaptive_experiment import AdaptiveConfig, AdaptiveMultiarrangementExperiment
+    from .core.batch_generator import BatchGenerator
+    from .core.experiment import MultiarrangementExperiment
+    from .results import Results
+    from .ui.interface import MultiarrangementInterface
+    from .utils.data_processing import DataProcessor
+    from .utils.video_processing import VideoProcessor
+
+
+def __getattr__(name: str) -> Any:
+    module_map = {
+        "AdaptiveConfig": "multiarrangement.adaptive.adaptive_experiment",
+        "AdaptiveMultiarrangementExperiment": "multiarrangement.adaptive.adaptive_experiment",
+        "BatchGenerator": "multiarrangement.core.batch_generator",
+        "DataProcessor": "multiarrangement.utils.data_processing",
+        "MultiarrangementExperiment": "multiarrangement.core.experiment",
+        "MultiarrangementInterface": "multiarrangement.ui.interface",
+        "Results": "multiarrangement.results",
+        "VideoProcessor": "multiarrangement.utils.video_processing",
+    }
+    module_name = module_map.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module = import_module(module_name)
+    return getattr(module, name)
 
 # Main library functions
 def create_batches(n_videos_or_file, batch_size: int = None, seed: int = 42, algorithm: str = 'hybrid', 
@@ -57,6 +78,7 @@ def create_batches(n_videos_or_file, batch_size: int = None, seed: int = 42, alg
          >>> print(f"Created {len(batches)} flexible batches")
     """
     from pathlib import Path
+    from .core.batch_generator import BatchGenerator
     from .utils.file_utils import load_batches
     
     # Check if input is a file path (string or Path object)
@@ -306,6 +328,7 @@ def multiarrangement(
          >>> result_file = ma.multiarrangement("./videos", batches, "./results")
     """
     from .experiment_runner import run_multiarrangement_experiment
+    from .results import Results
     csv_path = run_multiarrangement_experiment(
         input_dir=input_dir,
         batches=batches,
@@ -499,6 +522,11 @@ def multiarrangement_adaptive(
         >>> import multiarrangement as ma
         >>> ma.multiarrangement_adaptive("./videos", output_dir="./results")
     """
+    from .adaptive.adaptive_experiment import AdaptiveConfig, AdaptiveMultiarrangementExperiment
+    from .results import Results
+    from .ui.fullscreen_interface import FullscreenInterface
+    from .ui.interface import MultiarrangementInterface
+
     cfg = AdaptiveConfig(
         evidence_threshold=evidence_threshold,
         utility_exponent=utility_exponent,
@@ -540,7 +568,6 @@ def multiarrangement_adaptive(
         language=language,
     )
 
-    from .ui.fullscreen_interface import FullscreenInterface
     interface = FullscreenInterface(exp) if fullscreen else MultiarrangementInterface(exp)
     # Attach custom instructions if provided as a list; 'default' -> show built-ins; None -> skip
     if isinstance(instructions, list):

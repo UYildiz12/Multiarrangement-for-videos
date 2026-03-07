@@ -6,6 +6,23 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers.sessions import get_sessions_db, get_trials_db
+from app.routers.studies import get_stimuli_db, get_studies_db
+
+
+@pytest.fixture(autouse=True)
+def local_dev_bypass_auth(monkeypatch):
+    """Run API tests in local keyless mode and isolate in-memory state."""
+    monkeypatch.setenv("LOCAL_DEV_BYPASS_AUTH", "1")
+    get_studies_db().clear()
+    get_stimuli_db().clear()
+    get_sessions_db().clear()
+    get_trials_db().clear()
+    yield
+    get_studies_db().clear()
+    get_stimuli_db().clear()
+    get_sessions_db().clear()
+    get_trials_db().clear()
 
 
 @pytest.fixture

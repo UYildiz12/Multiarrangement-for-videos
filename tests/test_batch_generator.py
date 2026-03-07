@@ -1,5 +1,9 @@
 """Tests for batch generation functionality."""
 
+import subprocess
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
 from multiarrangement.core.batch_generator import BatchGenerator
 from multiarrangement.utils.file_utils import validate_batch_configuration
@@ -61,6 +65,29 @@ class TestBatchGenerator:
         validation = generator.validate_batches(incomplete_batches)
         assert not validation['coverage_complete']
         assert validation['pairs_missing'] > 0
+
+    def test_optimal_script_prefers_packaged_copy(self, monkeypatch, tmp_path):
+        """The packaged optimize script should win over a stale cwd copy."""
+        generator = BatchGenerator(n_videos=6, batch_size=3, seed=42)
+        legacy_script = tmp_path / "optimize_cover_pure.py"
+        legacy_script.write_text("raise SystemExit('legacy copy should not run')", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        package_script = Path(__import__("multiarrangement").__file__).resolve().parent / "optimize_cover_pure.py"
+        called = {}
+
+        def fake_run(cmd, **kwargs):
+            called["script"] = Path(cmd[1]).resolve()
+            output_file = Path(cmd[cmd.index("--outfile") + 1])
+            output_file.write_text("0 1 2\n0 3 4\n1 3 5\n2 4 5\n", encoding="utf-8")
+            return SimpleNamespace(returncode=0, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        batches = generator._try_optimize_cover_pure(tmp_path)
+
+        assert called["script"] == package_script.resolve()
+        assert batches
 
 
 class TestFileUtils:

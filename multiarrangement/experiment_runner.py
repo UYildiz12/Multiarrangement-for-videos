@@ -275,21 +275,12 @@ def check_all_inside_improved(rects, circle_center, circle_radius):
 def create_audio_icon(height, width):
     """Create a visual icon for audio files using the provided audio icon image."""
     import cv2
-    import os
+    from .utils.file_utils import resolve_audio_icon_path
     
-    # Try to load the audio icon image - first try the new icon, then fallback to old
-    # Probe common packaged locations
-    base = os.path.dirname(__file__)
-    # Prefer the canonical Audio.png used by the set-cover UI, then fall back
-    candidates = [
-        os.path.join(base, "Audio.png"),
-        os.path.join(base, "test_audio_icon_new.png"),
-        os.path.join(base, "data", "Audio.png"),
-        os.path.join(base, "data", "test_audio_icon_new.png"),
-        os.path.join(os.path.dirname(base), "Audio.png"),
-        os.path.join(os.path.dirname(base), "test_audio_icon_new.png"),
-    ]
-    audio_icon_path = next((p for p in candidates if os.path.exists(p)), None)
+    try:
+        audio_icon_path = str(resolve_audio_icon_path())
+    except FileNotFoundError:
+        audio_icon_path = None
     
     if audio_icon_path and os.path.exists(audio_icon_path):
         # Load the image

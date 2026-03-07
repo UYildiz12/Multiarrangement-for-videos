@@ -11,6 +11,7 @@ stripped of pygame/opencv dependencies for server-side use.
 import itertools
 import math
 import random
+from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 
@@ -379,14 +380,12 @@ def _generate_optimal_batches(
     Returns:
         List of batches (0-based), or None if LJCR data unavailable.
     """
-    from pathlib import Path
     try:
         from . import optimize_cover_pure as ocp
     except ImportError:
         return None
 
-    # Locate the LJCR cache bundled with the server
-    cache_dir = Path(__file__).parent / "ljcr_cache"
+    cache_dir = _resolve_ljcr_cache_dir()
 
     # Try to load seed blocks from cache; fetch from LJCR if missing
     try:
@@ -443,6 +442,25 @@ def _generate_optimal_batches(
     print(f"[optimal] Generated {len(result)} batches for v={v} k={k} "
           f"(lambda_max={opt.lambda_max()}, Schonheim>={ocp.schonheim_lb(v, k)})")
     return result
+
+
+def _resolve_ljcr_cache_dir() -> Path:
+    """Resolve the shared LJCR cache directory.
+
+    Prefer the packaged cache so the Python package and server reuse the same
+    covering-design data. Fall back to the legacy server-local cache path if
+    the package cache is unavailable.
+    """
+    try:
+        import multiarrangement as ma
+
+        package_cache = Path(ma.__file__).resolve().parent / "ljcr_cache"
+        if package_cache.exists():
+            return package_cache
+    except Exception:
+        pass
+
+    return Path(__file__).resolve().parent / "ljcr_cache"
 
 
 def generate_batches(

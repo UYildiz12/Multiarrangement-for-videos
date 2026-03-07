@@ -4,6 +4,3 @@ python-multipart
 numpy
 pandas
 pydantic>=2.0
-pytest
-pytest-asyncio
-httpx

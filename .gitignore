@@ -27,6 +27,8 @@ var/
 venv/
 ENV/
 .venv/
+.tmp-build-venv/
+.codex_pytools/
 
 # IDE files
 .idea/
@@ -37,6 +39,7 @@ ENV/
 # OS specific files
 .DS_Store
 Thumbs.db
+.pytest_cache/
 
 # Large media files (optional, uncomment if you want to exclude videos)
 # *.mp4

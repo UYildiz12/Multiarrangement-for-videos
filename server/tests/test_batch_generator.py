@@ -2,8 +2,12 @@
 Tests for the batch generator core algorithms.
 """
 
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
 import pytest
-from ma_core.batch_generator import BatchGenerator, generate_batches
+from ma_core.batch_generator import BatchGenerator, generate_batches, _resolve_ljcr_cache_dir
 
 
 class TestBatchGenerator:
@@ -89,6 +93,16 @@ class TestBatchGenerator:
 
 class TestGenerateBatchesFunction:
     """Tests for the convenience function."""
+
+    def test_resolve_ljcr_cache_dir_prefers_package_cache(self, monkeypatch, tmp_path):
+        """Server should reuse the packaged LJCR cache when available."""
+        package_dir = tmp_path / "fake_multiarrangement"
+        expected = package_dir / "ljcr_cache"
+        expected.mkdir(parents=True)
+        monkeypatch.setitem(sys.modules, "multiarrangement", SimpleNamespace(__file__=str(package_dir / "__init__.py")))
+
+        assert _resolve_ljcr_cache_dir() == expected
+        assert expected.exists()
 
     def test_generate_batches_basic(self):
         """Test basic batch generation."""
