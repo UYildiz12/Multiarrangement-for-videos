@@ -225,7 +225,8 @@ export default function SetupPage() {
 
         for (const file of Array.from(files)) {
             const label = file.name.replace(/\.[^/.]+$/, "");
-            if (file.type.startsWith("video/")) {
+            const mediaType = detectUploadedMediaType(file);
+            if (mediaType === "video") {
                 const durationSeconds = await getDurationFromFile(file, "video");
                 const mediaUrl = uploadMode === "supabase" && supabase
                     ? await uploadToSupabase(file, label, supabase)
@@ -267,7 +268,7 @@ export default function SetupPage() {
                         });
                     }
                 }
-            } else if (file.type.startsWith("audio/")) {
+            } else if (mediaType === "audio") {
                 const durationSeconds = await getDurationFromFile(file, "audio");
                 const mediaUrl = uploadMode === "supabase" && supabase
                     ? await uploadToSupabase(file, label, supabase)
@@ -288,7 +289,7 @@ export default function SetupPage() {
                         durationSeconds: coalesceDuration(durationSeconds, "audio"),
                     });
                 }
-            } else if (file.type.startsWith("image/")) {
+            } else if (mediaType === "image") {
                 const mediaUrl = uploadMode === "supabase" && supabase
                     ? await uploadToSupabase(file, label, supabase)
                     : URL.createObjectURL(file);
@@ -1524,6 +1525,28 @@ function buildInstructions(config: ExperimentConfig): string[] | null {
     const lang = config.instructionsMode === "tr" ? "tr" : "en";
     const key = config.paradigm === "pairwise" ? "pairwise" : "arrangement";
     return DEFAULT_INSTRUCTIONS[lang][key];
+}
+
+const VIDEO_UPLOAD_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi"]);
+const AUDIO_UPLOAD_EXTENSIONS = new Set(["mp3", "wav", "ogg", "flac", "aac", "m4a"]);
+const IMAGE_UPLOAD_EXTENSIONS = new Set(["png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp", "gif"]);
+
+function getFileExtension(name: string): string {
+    const parts = name.toLowerCase().split(".");
+    return parts.length > 1 ? parts[parts.length - 1] : "";
+}
+
+function detectUploadedMediaType(file: File): "video" | "audio" | "image" | null {
+    const mime = (file.type || "").toLowerCase();
+    if (mime.startsWith("video/")) return "video";
+    if (mime.startsWith("audio/")) return "audio";
+    if (mime.startsWith("image/")) return "image";
+
+    const ext = getFileExtension(file.name);
+    if (VIDEO_UPLOAD_EXTENSIONS.has(ext)) return "video";
+    if (AUDIO_UPLOAD_EXTENSIONS.has(ext)) return "audio";
+    if (IMAGE_UPLOAD_EXTENSIONS.has(ext)) return "image";
+    return null;
 }
 
 function coalesceDuration(value: number | null | undefined, mediaType: "video" | "audio" | "image"): number {
