@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
@@ -7,6 +8,17 @@ import { apiFetch } from "../lib/api";
 import { useKey } from "../lib/KeyContext";
 import { cacheMedia } from "../lib/mediaCache";
 import { getSupabaseClient, SUPABASE_BUCKET } from "../lib/supabaseClient";
+import {
+    IMAGE_DURATION_FALLBACK,
+    buildInstructions,
+    buildStudyScopedPath,
+    coalesceDuration,
+    dataUrlToBlob,
+    detectUploadedMediaType,
+    getFileExtension,
+    hasUnhostableCustomMedia,
+    serializeVideosForSession,
+} from "../lib/setupHelpers";
 
 type Paradigm = "setcover" | "adaptive" | "pairwise";
 type WeightMode = "max" | "rms" | "k2012";
@@ -212,10 +224,6 @@ export default function SetupPage() {
         const newVideos = [...classicVideos];
         newVideos[index] = { ...newVideos[index], selected: !newVideos[index].selected };
         setClassicVideos(newVideos);
-    };
-
-    const selectAll = () => {
-        setClassicVideos(classicVideos.map((v) => ({ ...v, selected: true })));
     };
 
     const clearSelection = () => {
@@ -1496,86 +1504,6 @@ const paradigmBtnStyle = (active: boolean) => ({
     cursor: "pointer" as const,
 });
 
-const IMAGE_DURATION_FALLBACK = 0.5;
-const AUDIO_DURATION_FALLBACK = 3.0;
-const VIDEO_DURATION_FALLBACK = 5.0;
-
-const DEFAULT_INSTRUCTIONS = {
-    en: {
-        arrangement: [
-            "Drag all items inside the circle.",
-            "Place similar items close together — token center distances reflect similarity.",
-            "Double-click an item to play it (audio/video).",
-            "When all items are inside, click Done to continue.",
-        ],
-        pairwise: [
-            "Play both items, then rate how similar they are.",
-            "Use the full 1–7 scale when possible.",
-            "1 = very different, 7 = very similar.",
-        ],
-    },
-    tr: {
-        arrangement: [
-            "Tüm öğeleri dairenin içine sürükleyin.",
-            "Benzer tokenleri merkezlerinin arasındaki mesafeyi esas alarak yerleştirin.",
-            "Öğeyi oynatmak için çift tıklayın (ses/video).",
-            "Hepsi içerideyken Bitir'e basın.",
-        ],
-        pairwise: [
-            "Her iki öğeyi oynatın, sonra benzerlik puanı verin.",
-            "Mümkün olduğunca 1–7 ölçeğinin tamamını kullanın.",
-            "1 = çok farklı, 7 = çok benzer.",
-        ],
-    },
-};
-
-function parseCustomInstructions(text: string): string[] {
-    return text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-}
-
-function buildInstructions(config: ExperimentConfig): string[] | null {
-    if (config.instructionsMode === "off") return null;
-    if (config.instructionsMode === "custom") {
-        const custom = parseCustomInstructions(config.customInstructions || "");
-        return custom.length ? custom : null;
-    }
-    const lang = config.instructionsMode === "tr" ? "tr" : "en";
-    const key = config.paradigm === "pairwise" ? "pairwise" : "arrangement";
-    return DEFAULT_INSTRUCTIONS[lang][key];
-}
-
-const VIDEO_UPLOAD_EXTENSIONS = new Set(["mp4", "webm", "mov", "mkv", "avi"]);
-const AUDIO_UPLOAD_EXTENSIONS = new Set(["mp3", "wav", "ogg", "flac", "aac", "m4a"]);
-const IMAGE_UPLOAD_EXTENSIONS = new Set(["png", "jpg", "jpeg", "bmp", "tiff", "tif", "webp", "gif"]);
-
-function getFileExtension(name: string): string {
-    const parts = name.toLowerCase().split(".");
-    return parts.length > 1 ? parts[parts.length - 1] : "";
-}
-
-function detectUploadedMediaType(file: File): "video" | "audio" | "image" | null {
-    const mime = (file.type || "").toLowerCase();
-    if (mime.startsWith("video/")) return "video";
-    if (mime.startsWith("audio/")) return "audio";
-    if (mime.startsWith("image/")) return "image";
-
-    const ext = getFileExtension(file.name);
-    if (VIDEO_UPLOAD_EXTENSIONS.has(ext)) return "video";
-    if (AUDIO_UPLOAD_EXTENSIONS.has(ext)) return "audio";
-    if (IMAGE_UPLOAD_EXTENSIONS.has(ext)) return "image";
-    return null;
-}
-
-function coalesceDuration(value: number | null | undefined, mediaType: "video" | "audio" | "image"): number {
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) return value;
-    if (mediaType === "image") return IMAGE_DURATION_FALLBACK;
-    if (mediaType === "audio") return AUDIO_DURATION_FALLBACK;
-    return VIDEO_DURATION_FALLBACK;
-}
-
 function getDurationFromUrl(url: string, mediaType: "video" | "audio"): Promise<number | null> {
     return new Promise((resolve) => {
         const el = document.createElement(mediaType === "audio" ? "audio" : "video");
@@ -1651,50 +1579,6 @@ function extractThumbnail(file: File): Promise<string> {
         video.onerror = () => { reject(new Error("Load error")); URL.revokeObjectURL(video.src); };
         video.src = URL.createObjectURL(file);
     });
-}
-
-function dataUrlToBlob(dataUrl: string): Blob {
-    const [meta, data] = dataUrl.split(",");
-    const match = /data:(.*);base64/.exec(meta);
-    const mime = match ? match[1] : "image/jpeg";
-    const binary = atob(data);
-    const len = binary.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i += 1) {
-        bytes[i] = binary.charCodeAt(i);
-    }
-    return new Blob([bytes], { type: mime });
-}
-
-function safeName(name: string): string {
-    return name.replace(/[^a-zA-Z0-9_-]+/g, "_");
-}
-
-function hasUnhostableCustomMedia(videos: VideoFile[]): boolean {
-    return videos.some((video) => {
-        const hasHostedPath = Boolean(video.mediaStoragePath);
-        const canUploadNow = Boolean(video.sourceFile);
-        const isLocalBlob = video.url.startsWith("blob:");
-        return isLocalBlob && !hasHostedPath && !canUploadNow;
-    });
-}
-
-function createUploadToken(): string {
-    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-        return crypto.randomUUID().replace(/-/g, "");
-    }
-    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function buildStudyScopedPath(
-    ownerId: string,
-    studyId: string,
-    section: "media" | "thumbs",
-    index: number,
-    label: string,
-    ext: string
-): string {
-    return `owners/${ownerId}/studies/${studyId}/${section}/${String(index).padStart(3, "0")}_${safeName(label)}_${createUploadToken()}.${ext}`;
 }
 
 function publicUrlForPath(path: string, supabase: ReturnType<typeof getSupabaseClient>) {
@@ -1773,17 +1657,4 @@ async function materializeStudyVideos(videos: VideoFile[], study: HostedStudyIde
     }
 
     return uploaded;
-}
-
-function serializeVideosForSession(videos: VideoFile[]): Array<Omit<VideoFile, "sourceFile" | "thumbnailDataUrl">> {
-    return videos.map((video) => ({
-        name: video.name,
-        url: video.url,
-        thumbnail: video.thumbnail,
-        selected: video.selected,
-        mediaType: video.mediaType,
-        durationSeconds: video.durationSeconds,
-        mediaStoragePath: video.mediaStoragePath,
-        thumbnailStoragePath: video.thumbnailStoragePath,
-    }));
 }

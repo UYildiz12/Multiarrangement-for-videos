@@ -7,23 +7,6 @@ import { useKey } from "./lib/KeyContext";
 import Logo from "./components/Logo";
 import { EyeIcon, EyeOffIcon } from "./components/EyeIcon";
 
-interface StudySummary {
-    id: string;
-    name: string;
-    description?: string | null;
-    paradigm: string;
-    language: string;
-    created_at: string;
-    n_stimuli: number;
-}
-
-interface Chain {
-    id: string;
-    name: string;
-    description: string | null;
-    studies: { id: string; study_name: string; paradigm: string; position: number }[];
-}
-
 export default function Home() {
     const router = useRouter();
     const { adminKey, setAdminKey, isLocalBypass } = useKey();

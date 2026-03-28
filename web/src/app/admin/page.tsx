@@ -202,23 +202,6 @@ function AdminContent() {
         }
     };
 
-    const downloadResults = async (sessionId: string) => {
-        try {
-            const data = await apiFetch(`/api/v1/sessions/${sessionId}/results`, {
-                headers: buildKeyHeaders(),
-            });
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = `session_${sessionId}_results.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch (err) {
-            setError(describeAuthError(err, "Failed to download results"));
-        }
-    };
-
     const deleteSession = async (sessionId: string) => {
         if (!confirm(`Delete session ${sessionId}? This cannot be undone.`)) return;
         try {

@@ -92,12 +92,14 @@ class MultiarrangementExperiment:
                     
     def _initialize_data_structures(self) -> None:
         """Initialize data structures for collecting results."""
-        # Create RDM dataframe
+        # Build a writable float matrix up front so pandas/NumPy interop stays stable.
+        rdm_array = np.full((len(self.video_names), len(self.video_names)), np.nan, dtype=float)
+        np.fill_diagonal(rdm_array, 0.0)
         self.rdm_df = pd.DataFrame(
-            columns=self.video_names, 
-            index=self.video_names
+            rdm_array,
+            columns=self.video_names,
+            index=self.video_names,
         )
-        np.fill_diagonal(self.rdm_df.values, 0)
         
         # Track experiment state
         self.current_batch_index = 0

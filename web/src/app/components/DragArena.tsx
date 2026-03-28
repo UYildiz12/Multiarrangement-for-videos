@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { useRef, useState, useCallback, useEffect, useMemo } from "react";
 
@@ -52,7 +53,6 @@ export default function DragArena({
   const arenaRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<DraggableItem[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [activePointerId, setActivePointerId] = useState<number | null>(null);
   const dragOffset = useRef<Position>({ x: 0, y: 0 });
 
   const arenaRadius = size / 2 - ARENA_PADDING;
@@ -89,7 +89,6 @@ export default function DragArena({
     }));
     setItems(newItems);
     setDraggedId(null);
-    setActivePointerId(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stimuliKey, trialIndex]);
 
@@ -157,7 +156,6 @@ export default function DragArena({
     draggedIdRef.current = id;
     activePointerIdRef.current = e.pointerId;
     setDraggedId(id);
-    setActivePointerId(e.pointerId);
 
     dragOffset.current = {
       x: e.clientX - rect.left - item.position.x,
@@ -210,7 +208,6 @@ export default function DragArena({
     draggedIdRef.current = null;
     activePointerIdRef.current = null;
     setDraggedId(null);
-    setActivePointerId(null);
   }, []);
 
   useEffect(() => {

@@ -14,8 +14,6 @@ interface RdmHeatmapProps {
 export default function RdmHeatmap({
     rdm,
     labels,
-    size = 400,
-    paradigm,
     scaleMode = "auto",
     language = "en",
 }: RdmHeatmapProps) {

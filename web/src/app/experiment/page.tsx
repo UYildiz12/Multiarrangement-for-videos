@@ -8,6 +8,7 @@ import PairwiseArena from "../components/PairwiseArena";
 import RdmHeatmap from "../components/RdmHeatmap";
 import MediaModal from "../components/MediaModal";
 import { apiFetch } from "../lib/api";
+import { deriveTrialAdvanceState } from "../lib/experimentHelpers";
 import { getCachedMedia } from "../lib/mediaCache";
 
 interface ResultsResponse {
@@ -34,6 +35,16 @@ interface NextTrialResponse {
     trial_index: number;
     subset_indices: number[];
     is_final: boolean;
+}
+
+interface TrialSubmitResponse {
+    id: string;
+    trial_index: number;
+    subset_indices: number[];
+    duration_seconds?: number | null;
+    started_at: string;
+    completed_at?: string | null;
+    next_trial?: NextTrialResponse | null;
 }
 
 type Paradigm = "setcover" | "adaptive" | "pairwise";
@@ -532,35 +543,35 @@ function ExperimentContent() {
         };
     }, [stimuli]);
 
+    const applyNextTrial = useCallback((next: NextTrialResponse) => {
+        const now = Date.now();
+        const nextState = deriveTrialAdvanceState(next, now, sessionStartAt);
+        setTrialIndex(nextState.trialIndex);
+        setIsFinal(nextState.isFinal);
+        setSubsetIndices(nextState.subsetIndices);
+        setTrialStartedAt(nextState.trialStartedAt);
+        if (nextState.sessionStartAt !== sessionStartAt) {
+            setSessionStartAt(nextState.sessionStartAt);
+        }
+        setPlayedItems(new Set());
+        setPositions({});
+        setAllInside(false);
+    }, [sessionStartAt]);
+
     const loadNextTrial = useCallback(async () => {
         if (!sessionId) return;
         setLoadingTrial(true);
         setError(null);
         try {
             const next = await apiFetch<NextTrialResponse>(`/api/v1/sessions/${sessionId}/next`);
-            setTrialIndex(next.trial_index);
-            if (next.is_final) {
-                setIsFinal(true);
-                setSubsetIndices([]);
-            } else {
-                setIsFinal(false);
-                setSubsetIndices(next.subset_indices);
-                const now = Date.now();
-                setTrialStartedAt(now);
-                if (sessionStartAt === null) {
-                    setSessionStartAt(now);
-                }
-                setPlayedItems(new Set());
-                setPositions({});
-                setAllInside(false);
-            }
+            applyNextTrial(next);
         } catch (err) {
             const msg = err instanceof Error ? err.message : copy.loadTrialError;
             setError(msg);
         } finally {
             setLoadingTrial(false);
         }
-    }, [sessionId, copy, sessionStartAt]);
+    }, [sessionId, copy, applyNextTrial]);
 
     useEffect(() => {
         if (sessionId && stimuli.length > 0) {
@@ -604,7 +615,7 @@ function ExperimentContent() {
         const durationSeconds = trialStartedAt ? (Date.now() - trialStartedAt) / 1000 : 0;
 
         try {
-            await apiFetch(`/api/v1/sessions/${sessionId}/trials`, {
+            const response = await apiFetch<TrialSubmitResponse>(`/api/v1/sessions/${sessionId}/trials`, {
                 method: "POST",
                 body: JSON.stringify({
                     trial_index: trialIndex,
@@ -613,19 +624,23 @@ function ExperimentContent() {
                     duration_seconds: durationSeconds,
                 }),
             });
-            await loadNextTrial();
+            if (response.next_trial) {
+                applyNextTrial(response.next_trial);
+            } else {
+                await loadNextTrial();
+            }
         } catch (err) {
             const msg = err instanceof Error ? err.message : copy.submitTrialError;
             setError(msg);
         }
-    }, [sessionId, subsetIndices, positions, trialStartedAt, trialIndex, loadNextTrial, copy]);
+    }, [sessionId, subsetIndices, positions, trialStartedAt, trialIndex, loadNextTrial, applyNextTrial, copy]);
 
     const handlePairwiseSubmit = useCallback(async (rating: number) => {
         if (!sessionId || subsetIndices.length !== 2) return;
         const durationSeconds = trialStartedAt ? (Date.now() - trialStartedAt) / 1000 : 0;
 
         try {
-            await apiFetch(`/api/v1/sessions/${sessionId}/trials`, {
+            const response = await apiFetch<TrialSubmitResponse>(`/api/v1/sessions/${sessionId}/trials`, {
                 method: "POST",
                 body: JSON.stringify({
                     trial_index: trialIndex,
@@ -634,12 +649,16 @@ function ExperimentContent() {
                     duration_seconds: durationSeconds,
                 }),
             });
-            await loadNextTrial();
+            if (response.next_trial) {
+                applyNextTrial(response.next_trial);
+            } else {
+                await loadNextTrial();
+            }
         } catch (err) {
             const msg = err instanceof Error ? err.message : copy.submitTrialError;
             setError(msg);
         }
-    }, [sessionId, subsetIndices, trialStartedAt, trialIndex, loadNextTrial, copy]);
+    }, [sessionId, subsetIndices, trialStartedAt, trialIndex, loadNextTrial, applyNextTrial, copy]);
 
     // Fetch results when experiment is complete
     useEffect(() => {

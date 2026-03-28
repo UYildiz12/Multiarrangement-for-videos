@@ -23,7 +23,13 @@ npm ci
 
 ## Environment variables
 
-Create `web/.env.local` when running against a local or hosted backend:
+Copy `.env.example` to `.env.local` when running against a local or hosted backend:
+
+```bash
+cp .env.example .env.local
+```
+
+Required for local development:
 
 ```bash
 NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
@@ -58,11 +64,12 @@ Useful routes:
 
 ```bash
 cd web
+npm run test
 npm run build
 npm run lint
 ```
 
-Expected result for release `0.1.10.2`: the production build succeeds and lint exits with no errors.
+Expected result for release `0.1.10.2`: unit tests pass, the production build succeeds, and lint exits with no errors.
 
 ## Deployment
 

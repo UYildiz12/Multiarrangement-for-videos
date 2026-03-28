@@ -69,6 +69,16 @@ def test_pairwise_workflow(pairwise_study):
             "duration_seconds": 2.0
         })
         assert submit_resp.status_code == 200
+        submit_data = submit_resp.json()
+        assert submit_data["trial_index"] == i
+        if i < expected_pairs - 1:
+            assert submit_data["next_trial"]["trial_index"] == i + 1
+            assert submit_data["next_trial"]["is_final"] is False
+            assert len(submit_data["next_trial"]["subset_indices"]) == 2
+        else:
+            assert submit_data["next_trial"]["trial_index"] == expected_pairs
+            assert submit_data["next_trial"]["is_final"] is True
+            assert submit_data["next_trial"]["subset_indices"] == []
     
     # 4. Verify completion
     next_resp = client.get(f"/api/v1/sessions/{session_id}/next")

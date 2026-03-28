@@ -221,6 +221,7 @@ class TrialResponse(BaseModel):
     duration_seconds: Optional[float]
     started_at: datetime
     completed_at: Optional[datetime]
+    next_trial: Optional[NextTrialResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -200,6 +200,102 @@ def _time_limit_reached(session: dict[str, Any], study: dict[str, Any]) -> bool:
     return datetime.now(timezone.utc) >= (started_at + timedelta(minutes=minutes))
 
 
+def _build_next_trial_response(
+    session: dict[str, Any],
+    study: dict[str, Any],
+    n_stimuli: int,
+) -> tuple[NextTrialResponse, bool]:
+    trial_index = int(session["current_trial_index"])
+    session_changed = False
+
+    if _time_limit_reached(session, study):
+        session["status"] = SessionStatus.COMPLETED
+        session["completed_at"] = datetime.now(timezone.utc)
+        session_changed = True
+        return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True), session_changed
+
+    if study["paradigm"] == Paradigm.SETCOVER:
+        batches = session.get("batches", [])
+        if trial_index >= len(batches):
+            return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True), session_changed
+        return NextTrialResponse(
+            trial_index=trial_index,
+            subset_indices=[int(idx) for idx in batches[trial_index]],
+            is_final=False,
+        ), session_changed
+
+    if study["paradigm"] == Paradigm.PAIRWISE:
+        pairs = session.get("pairs", [])
+        if trial_index >= len(pairs):
+            return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True), session_changed
+        return NextTrialResponse(
+            trial_index=trial_index,
+            subset_indices=[int(idx) for idx in pairs[trial_index]],
+            is_final=False,
+        ), session_changed
+
+    D = session.get("D")
+    W = session.get("W_sched")
+    if D is None or W is None or n_stimuli < 2:
+        return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True), session_changed
+
+    if trial_index == 0 and not session.get("trial_arrangements"):
+        return NextTrialResponse(
+            trial_index=trial_index,
+            subset_indices=list(range(n_stimuli)),
+            is_final=False,
+        ), session_changed
+
+    threshold = study["config"].get("evidence_threshold", 0.5)
+    stop_on_utility = bool(study["config"].get("stop_on_utility", False))
+    if stop_on_utility:
+        utility_exponent = float(study["config"].get("utility_exponent", 10.0))
+        upper = np.triu_indices(n_stimuli, 1)
+        if upper[0].size > 0:
+            utility_values = 1.0 - np.exp(-utility_exponent * W[upper])
+            if float(np.min(utility_values)) >= float(threshold):
+                return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True), session_changed
+    elif check_stopping_criterion(W, threshold):
+        return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True), session_changed
+
+    config = study["config"]
+    cold_start_trials = int(config.get("cold_start_require_unseen_trials", 0))
+    require_unseen = cold_start_trials > 0 and trial_index < cold_start_trials
+    subset = select_next_subset_lift_weakest(
+        D,
+        W,
+        min_size=int(config.get("min_subset_size", 3)),
+        max_size=config.get("max_subset_size"),
+        utility_exponent=float(config.get("utility_exponent", 10.0)),
+        time_cost_exponent=float(config.get("time_cost_exponent", 1.5)),
+        durations=session.get("durations"),
+        long_clip_mask=session.get("long_clip_mask"),
+        recent=session.get("recent"),
+        seen=session.get("seen"),
+        last_subset=session.get("last_subset"),
+        avoid_anchor_pair=session.get("last_anchor_pair"),
+        inclusion_counts=session.get("inclusion_counts"),
+        require_unseen=require_unseen,
+        max_jaccard=config.get("max_jaccard"),
+        overlap_penalty=float(config.get("overlap_penalty", 0.0)),
+        recency_penalty=float(config.get("recency_penalty", 0.0)),
+        unseen_boost=float(config.get("unseen_boost", 0.0)),
+        stress_weight=float(config.get("stress_weight", 0.0)),
+        duration_cost_weight=float(config.get("duration_cost_weight", 0.0)),
+        target_time_seconds=config.get("target_time_seconds"),
+        target_time_tolerance=float(config.get("target_time_tolerance", 0.05)),
+        duration_cost_cap_per_item=config.get("duration_cost_cap_per_item"),
+        min_long_clip_inclusion_rate=float(config.get("min_long_clip_inclusion_rate", 0.0)),
+        long_clip_boost=float(config.get("long_clip_boost", 0.0)),
+        trials_so_far=trial_index,
+    )
+    return NextTrialResponse(
+        trial_index=trial_index,
+        subset_indices=[int(idx) for idx in subset],
+        is_final=False,
+    ), session_changed
+
+
 def _build_session_start_response(
     session: dict[str, Any],
     study: dict[str, Any],
@@ -369,96 +465,11 @@ async def get_next_trial(session_id: UUID) -> NextTrialResponse:
     if study is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
 
-    stimuli = list_stimuli_for_study(session["study_id"])
-    n_stimuli = len(stimuli)
-    trial_index = int(session["current_trial_index"])
-
-    if _time_limit_reached(session, study):
-        session["status"] = SessionStatus.COMPLETED
-        session["completed_at"] = datetime.now(timezone.utc)
+    n_stimuli = len(list_stimuli_for_study(session["study_id"]))
+    next_trial, session_changed = _build_next_trial_response(session, study, n_stimuli)
+    if session_changed:
         _save_session(session)
-        return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True)
-
-    if study["paradigm"] == Paradigm.SETCOVER:
-        batches = session.get("batches", [])
-        if trial_index >= len(batches):
-            return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True)
-        return NextTrialResponse(
-            trial_index=trial_index,
-            subset_indices=[int(idx) for idx in batches[trial_index]],
-            is_final=False,
-        )
-
-    if study["paradigm"] == Paradigm.PAIRWISE:
-        pairs = session.get("pairs", [])
-        if trial_index >= len(pairs):
-            return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True)
-        return NextTrialResponse(
-            trial_index=trial_index,
-            subset_indices=[int(idx) for idx in pairs[trial_index]],
-            is_final=False,
-        )
-
-    D = session.get("D")
-    W = session.get("W_sched")
-    if D is None or W is None or n_stimuli < 2:
-        return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True)
-
-    if trial_index == 0 and not session.get("trial_arrangements"):
-        return NextTrialResponse(
-            trial_index=trial_index,
-            subset_indices=list(range(n_stimuli)),
-            is_final=False,
-        )
-
-    threshold = study["config"].get("evidence_threshold", 0.5)
-    stop_on_utility = bool(study["config"].get("stop_on_utility", False))
-    if stop_on_utility:
-        utility_exponent = float(study["config"].get("utility_exponent", 10.0))
-        upper = np.triu_indices(n_stimuli, 1)
-        if upper[0].size > 0:
-            utility_values = 1.0 - np.exp(-utility_exponent * W[upper])
-            if float(np.min(utility_values)) >= float(threshold):
-                return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True)
-    elif check_stopping_criterion(W, threshold):
-        return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True)
-
-    config = study["config"]
-    cold_start_trials = int(config.get("cold_start_require_unseen_trials", 0))
-    require_unseen = cold_start_trials > 0 and trial_index < cold_start_trials
-    subset = select_next_subset_lift_weakest(
-        D,
-        W,
-        min_size=int(config.get("min_subset_size", 3)),
-        max_size=config.get("max_subset_size"),
-        utility_exponent=float(config.get("utility_exponent", 10.0)),
-        time_cost_exponent=float(config.get("time_cost_exponent", 1.5)),
-        durations=session.get("durations"),
-        long_clip_mask=session.get("long_clip_mask"),
-        recent=session.get("recent"),
-        seen=session.get("seen"),
-        last_subset=session.get("last_subset"),
-        avoid_anchor_pair=session.get("last_anchor_pair"),
-        inclusion_counts=session.get("inclusion_counts"),
-        require_unseen=require_unseen,
-        max_jaccard=config.get("max_jaccard"),
-        overlap_penalty=float(config.get("overlap_penalty", 0.0)),
-        recency_penalty=float(config.get("recency_penalty", 0.0)),
-        unseen_boost=float(config.get("unseen_boost", 0.0)),
-        stress_weight=float(config.get("stress_weight", 0.0)),
-        duration_cost_weight=float(config.get("duration_cost_weight", 0.0)),
-        target_time_seconds=config.get("target_time_seconds"),
-        target_time_tolerance=float(config.get("target_time_tolerance", 0.05)),
-        duration_cost_cap_per_item=config.get("duration_cost_cap_per_item"),
-        min_long_clip_inclusion_rate=float(config.get("min_long_clip_inclusion_rate", 0.0)),
-        long_clip_boost=float(config.get("long_clip_boost", 0.0)),
-        trials_so_far=trial_index,
-    )
-    return NextTrialResponse(
-        trial_index=trial_index,
-        subset_indices=[int(idx) for idx in subset],
-        is_final=False,
-    )
+    return next_trial
 
 
 @router.post("/sessions/{session_id}/trials", response_model=TrialResponse)
@@ -528,6 +539,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             session["W_sched"] = None
 
         session["current_trial_index"] = trial.trial_index + 1
+        next_trial, _ = _build_next_trial_response(session, study, n_stimuli)
         with connect() as conn:
             _insert_trial(trial_row, conn)
             _save_session(session, conn)
@@ -538,6 +550,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             duration_seconds=trial.duration_seconds,
             started_at=now,
             completed_at=now,
+            next_trial=next_trial,
         )
 
     if trial.positions is None:
@@ -656,6 +669,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             session["W_raw"] = W_raw
             session["W_sched"] = W_sched
 
+    next_trial, _ = _build_next_trial_response(session, study, n_stimuli)
     with connect() as conn:
         _insert_trial(trial_row, conn)
         _save_session(session, conn)
@@ -667,6 +681,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         duration_seconds=trial.duration_seconds,
         started_at=now,
         completed_at=now,
+        next_trial=next_trial,
     )
 
 

@@ -178,6 +178,10 @@ def test_setcover_session_continues_after_reload_and_exports_results():
         },
     )
     assert submit_resp.status_code == 200
+    submit_payload = submit_resp.json()
+    assert submit_payload["next_trial"]["trial_index"] == 1
+    assert submit_payload["next_trial"]["is_final"] is False
+    assert len(submit_payload["next_trial"]["subset_indices"]) == 3
 
     reloaded_client = _reload_client()
 
@@ -239,6 +243,10 @@ def test_pairwise_session_continues_after_reload():
         },
     )
     assert submit_resp.status_code == 200
+    submit_payload = submit_resp.json()
+    assert submit_payload["next_trial"]["trial_index"] == 1
+    assert submit_payload["next_trial"]["is_final"] is False
+    assert len(submit_payload["next_trial"]["subset_indices"]) == 2
 
     reloaded_client = _reload_client()
     session_status = reloaded_client.get(f"/api/v1/sessions/{session_id}")
@@ -295,6 +303,10 @@ def test_adaptive_session_continues_after_reload():
         },
     )
     assert submit_resp.status_code == 200
+    submit_payload = submit_resp.json()
+    assert submit_payload["next_trial"]["trial_index"] == 1
+    assert submit_payload["next_trial"]["is_final"] is False
+    assert len(submit_payload["next_trial"]["subset_indices"]) >= 3
 
     reloaded_client = _reload_client()
     session_status = reloaded_client.get(f"/api/v1/sessions/{session_id}")

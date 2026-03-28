@@ -106,7 +106,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
         };
         loadData();
         return () => { cancelled = true; };
-    }, [keyHeaders, describeAuthError]);
+    }, [expKey, keyHeaders, describeAuthError]);
 
     const handleCreateChain = useCallback(async () => {
         if (!newChainName.trim()) return;
@@ -131,7 +131,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
         } finally {
             setCreating(false);
         }
-    }, [newChainName, newChainDescription, onChainCreated, keyHeaders]);
+    }, [newChainName, newChainDescription, onChainCreated, keyHeaders, describeAuthError]);
 
     const addStudyById = useCallback(async (studyId: string) => {
         if (!selectedChain) return;
@@ -158,11 +158,6 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
             setError(describeAuthError(err, "Failed to add study"));
         }
     }, [selectedChain, keyHeaders, describeAuthError]);
-
-    const handleAddStudy = useCallback(async () => {
-        if (!selectedStudyId) return;
-        await addStudyById(selectedStudyId);
-    }, [selectedStudyId, addStudyById]);
 
     const handleRemoveStudy = useCallback(async (studyId: string) => {
         if (!selectedChain) return;

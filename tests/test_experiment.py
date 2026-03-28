@@ -49,6 +49,8 @@ class TestMultiarrangementExperiment:
         assert len(experiment.video_files) == 5
         assert len(experiment.batches) == 3
         assert experiment.current_batch_index == 0
+        assert experiment.rdm_df.values.dtype.kind == "f"
+        assert all(experiment.rdm_df.iloc[i, i] == 0 for i in range(len(experiment.video_files)))
         
     def test_initialization_missing_video_dir(self):
         """Test initialization with missing video directory."""
@@ -123,6 +125,31 @@ class TestMultiarrangementExperiment:
         rdm = experiment.rdm_df
         assert not rdm.loc["video_000", "video_001"] == 0  # Should have distance
         assert rdm.loc["video_000", "video_000"] == 0  # Diagonal should be 0
+
+    def test_record_arrangement_averages_repeat_measurements(self):
+        """Repeated pair measurements should be averaged symmetrically."""
+        experiment = MultiarrangementExperiment(
+            video_directory=str(self.video_dir),
+            batch_file=str(self.batch_file),
+            participant_id="test_participant"
+        )
+
+        first = {
+            "video_000": (0, 0),
+            "video_001": (3, 4),
+            "video_002": (0, 4),
+        }
+        second = {
+            "video_000": (0, 0),
+            "video_001": (0, 8),
+            "video_002": (6, 8),
+        }
+
+        experiment.record_arrangement(first)
+        experiment.record_arrangement(second)
+
+        assert experiment.rdm_df.loc["video_000", "video_001"] == pytest.approx(6.5)
+        assert experiment.rdm_df.loc["video_001", "video_000"] == pytest.approx(6.5)
         
     def test_get_progress(self):
         """Test getting experiment progress."""

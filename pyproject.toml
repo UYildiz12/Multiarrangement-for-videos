@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "multiarrangement"
 version = "0.1.10.2"
-description = "Video & audio similarity arrangement toolkit (set-cover and adaptive LTW)"
-authors = [{ name = "Umur Yıldız" }]
+description = "Video and audio similarity arrangement toolkit (set-cover and adaptive LTW)"
+authors = [{ name = "Umur Yildiz" }]
 requires-python = ">=3.8"
 readme = "README.md"
 license = "MIT"
@@ -21,7 +21,6 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-
   "Operating System :: OS Independent",
 ]
 dependencies = [

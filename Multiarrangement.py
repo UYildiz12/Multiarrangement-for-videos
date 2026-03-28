@@ -15,7 +15,12 @@ def main():
     
     # Configuration (can be modified for different setups)
     input_dir = os.path.join(os.path.dirname(__file__), "58videos")
-    batch_file = os.path.join(os.path.dirname(__file__), 'batches_58videos_batchsize8.txt')
+    batch_file = os.path.join(
+        os.path.dirname(__file__),
+        "multiarrangement",
+        "data",
+        "batches_58videos_batchsize8.txt",
+    )
     output_dir = os.path.join(os.path.dirname(__file__), "results")
     
     print("Starting Multiarrangement Experiment (Legacy Script)")
