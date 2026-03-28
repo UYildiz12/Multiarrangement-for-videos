@@ -58,7 +58,10 @@ class MultiarrangementExperiment:
         audio_extensions = {'.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a'}
         image_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif', '.webp'}
         exts = video_extensions | audio_extensions | image_extensions
-        self.video_files = [f.name for f in self.video_directory.iterdir() if f.suffix.lower() in exts]
+        self.video_files = sorted(
+            (f.name for f in self.video_directory.iterdir() if f.suffix.lower() in exts),
+            key=str.lower,
+        )
         
         if not self.video_files:
             raise ValueError(f"No supported media files found in {self.video_directory}")
@@ -69,10 +72,6 @@ class MultiarrangementExperiment:
             for video_file in self.video_files
         ]
         
-        if self.randomize_videos:
-            # Create a shuffled mapping but keep it consistent for the session
-            random.shuffle(self.video_files)
-            
     def _load_batches(self) -> None:
         """Load batch configuration from file."""
         if not self.batch_file.exists():
@@ -111,7 +110,11 @@ class MultiarrangementExperiment:
             return []
             
         batch_indices = self.batches[self.current_batch_index]
-        return [self.video_files[i] for i in batch_indices]
+        batch_videos = [self.video_files[i] for i in batch_indices]
+        if self.randomize_videos:
+            batch_videos = batch_videos.copy()
+            random.shuffle(batch_videos)
+        return batch_videos
         
     def get_video_path(self, video_filename: str) -> Path:
         """Get the full path to a video file."""
