@@ -1,41 +1,107 @@
 """
-Study management endpoints.
+Study management endpoints backed by durable storage.
 """
 
+from __future__ import annotations
+
 from typing import List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import delete, select, update
 
+from app.routers.experimenter import get_optional_owner, get_required_owner
 from app.schemas import (
+    Language,
+    MediaType,
+    Paradigm,
+    StimulusBatchCreate,
+    StimulusResponse,
     StudyCreate,
     StudyResponse,
     StudyUpdate,
-    StimulusResponse,
-    StimulusBatchCreate,
 )
-from app.routers.experimenter import get_optional_owner, get_required_owner
+from app.storage import (
+    connect,
+    fetch_all,
+    fetch_one,
+    ordered_select,
+    stimuli_table,
+    studies_table,
+    utcnow_iso,
+)
 
 router = APIRouter(prefix="/studies", tags=["studies"])
 
-# In-memory storage for development (replace with Supabase later)
-_studies_db: dict = {}
-_stimuli_db: dict = {}
-_study_counter = 0
+
+def _parse_study(row: dict, n_stimuli: int | None = None) -> dict:
+    return {
+        "id": UUID(row["id"]),
+        "owner_id": UUID(row["owner_id"]),
+        "name": row["name"],
+        "description": row.get("description"),
+        "paradigm": Paradigm(row["paradigm"]),
+        "config": row.get("config_json") or {},
+        "language": Language(row.get("language") or "en"),
+        "instructions": row.get("instructions_json"),
+        "created_at": row["created_at"],
+        "n_stimuli": n_stimuli if n_stimuli is not None else 0,
+    }
+
+
+def _parse_stimulus(row: dict) -> dict:
+    return {
+        "id": UUID(row["id"]),
+        "ordinal": row["ordinal"],
+        "filename": row["filename"],
+        "media_type": MediaType(row["media_type"]),
+        "media_url": row.get("media_url"),
+        "thumbnail_url": row.get("thumbnail_url"),
+        "duration_seconds": row.get("duration_seconds"),
+    }
+
+
+def get_study(study_id: UUID | str) -> dict | None:
+    with connect(readonly=True) as conn:
+        row = fetch_one(conn, select(studies_table).where(studies_table.c.id == str(study_id)))
+        if row is None:
+            return None
+        n_stimuli = conn.execute(
+            select(stimuli_table.c.id).where(stimuli_table.c.study_id == str(study_id))
+        ).fetchall()
+        return _parse_study(row, len(n_stimuli))
+
+
+def list_stimuli_for_study(study_id: UUID | str) -> list[dict]:
+    with connect(readonly=True) as conn:
+        rows = fetch_all(
+            conn,
+            ordered_select(stimuli_table, stimuli_table.c.ordinal).where(
+                stimuli_table.c.study_id == str(study_id)
+            ),
+        )
+    return [_parse_stimulus(row) for row in rows]
 
 
 @router.get("", response_model=List[StudyResponse])
 async def list_studies(owner_id: Optional[UUID] = Depends(get_optional_owner)):
-    """List studies filtered by experimenter key. Returns empty if no key."""
     if owner_id is None:
         return []
-    stimuli_db = _stimuli_db
-    out = []
-    for study in _studies_db.values():
-        if study.get("owner_id") != owner_id:
-            continue
-        data = {**study, "n_stimuli": len(stimuli_db.get(study["id"], []))}
-        out.append(StudyResponse(**data))
+    with connect(readonly=True) as conn:
+        study_rows = fetch_all(
+            conn,
+            ordered_select(studies_table, studies_table.c.created_at).where(
+                studies_table.c.owner_id == str(owner_id)
+            ),
+        )
+        out = []
+        for row in study_rows:
+            n_stimuli = len(
+                conn.execute(
+                    select(stimuli_table.c.id).where(stimuli_table.c.study_id == row["id"])
+                ).fetchall()
+            )
+            out.append(StudyResponse(**_parse_study(row, n_stimuli)))
     return out
 
 
@@ -44,78 +110,67 @@ async def create_study(
     study: StudyCreate,
     owner_id: UUID = Depends(get_required_owner),
 ) -> StudyResponse:
-    """Create a new study. Requires experimenter key."""
-    import uuid
-    from datetime import datetime
-    
-    study_id = uuid.uuid4()
-    
-    study_data = {
+    study_id = str(uuid4())
+    payload = {
         "id": study_id,
-        "owner_id": owner_id,
+        "owner_id": str(owner_id),
         "name": study.name,
         "description": study.description,
-        "paradigm": study.paradigm,
-        "config": study.config,
-        "language": study.language,
-        "instructions": study.instructions,
-        "created_at": datetime.utcnow(),
-        "n_stimuli": 0,
+        "paradigm": study.paradigm.value,
+        "config_json": study.config,
+        "language": study.language.value,
+        "instructions_json": study.instructions,
+        "created_at": utcnow_iso(),
     }
-    
-    _studies_db[study_id] = study_data
-    _stimuli_db[study_id] = []
-    
-    return StudyResponse(**study_data)
+    with connect() as conn:
+        conn.execute(studies_table.insert().values(**payload))
+    return StudyResponse(**_parse_study(payload, 0))
 
 
 @router.get("/{study_id}", response_model=StudyResponse)
-async def get_study(study_id: UUID) -> StudyResponse:
-    """Get study details."""
-    if study_id not in _studies_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Study not found"
-        )
-    
-    study_data = _studies_db[study_id]
-    study_data["n_stimuli"] = len(_stimuli_db.get(study_id, []))
-    return StudyResponse(**study_data)
+async def get_study_endpoint(study_id: UUID) -> StudyResponse:
+    study = get_study(study_id)
+    if study is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    return StudyResponse(**study)
 
 
 @router.patch("/{study_id}", response_model=StudyResponse)
 async def update_study(
     study_id: UUID,
-    update: StudyUpdate,
+    update_payload: StudyUpdate,
     owner_id: UUID = Depends(get_required_owner),
 ) -> StudyResponse:
-    """Update study configuration. Requires experimenter key."""
-    if study_id not in _studies_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Study not found"
-        )
-    
-    study_data = _studies_db[study_id]
-    if study_data.get("owner_id") != owner_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not your study"
-        )
-    
-    if update.name is not None:
-        study_data["name"] = update.name
-    if update.description is not None:
-        study_data["description"] = update.description
-    if update.config is not None:
-        study_data["config"] = update.config
-    if update.language is not None:
-        study_data["language"] = update.language
-    if update.instructions is not None:
-        study_data["instructions"] = update.instructions
-    
-    study_data["n_stimuli"] = len(_stimuli_db.get(study_id, []))
-    return StudyResponse(**study_data)
+    existing = get_study(study_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    if existing["owner_id"] != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your study")
+
+    changes = {}
+    if update_payload.name is not None:
+        changes["name"] = update_payload.name
+    if update_payload.description is not None:
+        changes["description"] = update_payload.description
+    if update_payload.config is not None:
+        changes["config_json"] = update_payload.config
+    if update_payload.language is not None:
+        changes["language"] = update_payload.language.value
+    if update_payload.instructions is not None:
+        changes["instructions_json"] = update_payload.instructions
+
+    with connect() as conn:
+        if changes:
+            conn.execute(
+                update(studies_table)
+                .where(studies_table.c.id == str(study_id))
+                .values(**changes)
+            )
+
+    refreshed = get_study(study_id)
+    if refreshed is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    return StudyResponse(**refreshed)
 
 
 @router.delete("/{study_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -123,35 +178,21 @@ async def delete_study(
     study_id: UUID,
     owner_id: UUID = Depends(get_required_owner),
 ):
-    """Delete a study and all associated data. Requires experimenter key."""
-    if study_id not in _studies_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Study not found"
-        )
-    
-    study_data = _studies_db[study_id]
-    if study_data.get("owner_id") != owner_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not your study"
-        )
-    
-    del _studies_db[study_id]
-    if study_id in _stimuli_db:
-        del _stimuli_db[study_id]
+    existing = get_study(study_id)
+    if existing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    if existing["owner_id"] != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your study")
+
+    with connect() as conn:
+        conn.execute(delete(studies_table).where(studies_table.c.id == str(study_id)))
 
 
 @router.get("/{study_id}/stimuli", response_model=List[StimulusResponse])
 async def list_stimuli(study_id: UUID) -> List[StimulusResponse]:
-    """List all stimuli in a study."""
-    if study_id not in _studies_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Study not found"
-        )
-    
-    return [StimulusResponse(**s) for s in _stimuli_db.get(study_id, [])]
+    if get_study(study_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    return [StimulusResponse(**row) for row in list_stimuli_for_study(study_id)]
 
 
 @router.post("/{study_id}/stimuli", response_model=List[StimulusResponse])
@@ -160,51 +201,53 @@ async def register_stimuli(
     payload: StimulusBatchCreate,
     owner_id: UUID = Depends(get_required_owner),
 ) -> List[StimulusResponse]:
-    """Register stimuli for a study. Requires experimenter key."""
-    if study_id not in _studies_db:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Study not found"
-        )
-    
-    study_data = _studies_db[study_id]
-    if study_data.get("owner_id") != owner_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not your study"
-        )
+    study = get_study(study_id)
+    if study is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    if study["owner_id"] != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your study")
 
-    import uuid
-
-    existing = _stimuli_db.get(study_id, [])
-    existing_ordinals = {s["ordinal"] for s in existing}
-
+    existing = list_stimuli_for_study(study_id)
+    existing_ordinals = {stim["ordinal"] for stim in existing}
+    new_rows = []
     for stim in payload.stimuli:
         if stim.ordinal in existing_ordinals:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Duplicate ordinal {stim.ordinal}"
+                detail=f"Duplicate ordinal {stim.ordinal}",
             )
-        stim_data = {
-            "id": uuid.uuid4(),
-            "ordinal": stim.ordinal,
-            "filename": stim.filename,
-            "media_type": stim.media_type,
-            "media_url": stim.media_url,
-            "thumbnail_url": stim.thumbnail_url,
-            "duration_seconds": stim.duration_seconds,
-        }
-        existing.append(stim_data)
+        new_rows.append(
+            {
+                "id": str(uuid4()),
+                "study_id": str(study_id),
+                "ordinal": stim.ordinal,
+                "filename": stim.filename,
+                "media_type": stim.media_type.value,
+                "media_url": stim.media_url,
+                "thumbnail_url": stim.thumbnail_url,
+                "duration_seconds": stim.duration_seconds,
+            }
+        )
+        existing_ordinals.add(stim.ordinal)
 
-    # Keep stimuli ordered by ordinal for consistent indexing
-    existing.sort(key=lambda s: s["ordinal"])
-    _stimuli_db[study_id] = existing
-    return [StimulusResponse(**s) for s in existing]
+    with connect() as conn:
+        if new_rows:
+            conn.execute(stimuli_table.insert(), new_rows)
+
+    all_rows = list_stimuli_for_study(study_id)
+    return [StimulusResponse(**row) for row in all_rows]
 
 
-# Export storage for other routers
-def get_studies_db():
-    return _studies_db
+def get_studies_db() -> dict:
+    with connect(readonly=True) as conn:
+        rows = fetch_all(conn, select(studies_table))
+    return {UUID(row["id"]): _parse_study(row) for row in rows}
 
-def get_stimuli_db():
-    return _stimuli_db
+
+def get_stimuli_db() -> dict:
+    with connect(readonly=True) as conn:
+        rows = fetch_all(conn, ordered_select(stimuli_table, stimuli_table.c.study_id, stimuli_table.c.ordinal))
+    grouped: dict[UUID, list[dict]] = {}
+    for row in rows:
+        grouped.setdefault(UUID(row["study_id"]), []).append(_parse_stimulus(row))
+    return grouped

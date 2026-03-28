@@ -45,6 +45,9 @@ Thumbs.db
 # Generated experiment outputs
 results/*
 !results/.gitkeep
+*.sqlite3
+.npm_cache/
+D.npm_cache/
 
 # Large media files (optional, uncomment if you want to exclude videos)
 # *.mp4

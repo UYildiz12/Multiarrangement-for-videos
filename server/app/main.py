@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers import studies_router, sessions_router, results_router, invites_router, admin_router, chains_router, chains_public_router, experimenter_router
 from app.schemas import HealthResponse
+from app.storage import init_db
 
 APP_VERSION = "0.1.10.2"
 
@@ -17,6 +18,8 @@ app = FastAPI(
     description="API for running similarity arrangement experiments in the browser",
     version=APP_VERSION,
 )
+
+init_db()
 
 # CORS for web frontend
 app.add_middleware(

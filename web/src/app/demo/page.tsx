@@ -124,7 +124,7 @@ export default function DemoPage() {
                 <div style={{ marginBottom: 40 }}>
                     <h1 style={{ fontSize: 32, fontWeight: 700, marginBottom: 8, letterSpacing: "-0.5px", margin: 0 }}>Demo</h1>
                     <p style={{ color: "#666", fontSize: 15, marginTop: 8, lineHeight: 1.6, margin: "8px 0 0" }}>
-                        Try the experiment with 16 pre-loaded video stimuli. Results stay local and can be downloaded when you&apos;re done.
+                        Try the hosted demo with 16 bundled video stimuli. It is meant for immediate inspection of the task flow rather than for publishing a reusable study link.
                     </p>
                 </div>
 

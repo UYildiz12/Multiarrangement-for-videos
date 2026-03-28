@@ -1,129 +1,64 @@
--- Multiarrangement Web Migration
--- Initial Schema Migration
+-- Multiarrangement hosted schema
+-- Durable metadata/state for studies, stimuli, sessions, trials, and regular invites.
 
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
--- Users table (extends Supabase auth.users)
-CREATE TABLE public.users (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    email TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'researcher' CHECK (role IN ('admin', 'researcher')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Studies table
-CREATE TABLE public.studies (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    owner_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS public.studies (
+    id UUID PRIMARY KEY,
+    owner_id UUID NOT NULL,
     name TEXT NOT NULL,
     description TEXT,
-    paradigm TEXT NOT NULL CHECK (paradigm IN ('setcover', 'adaptive')),
-    config JSONB NOT NULL DEFAULT '{}',
+    paradigm TEXT NOT NULL CHECK (paradigm IN ('setcover', 'adaptive', 'pairwise')),
+    config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     language TEXT NOT NULL DEFAULT 'en' CHECK (language IN ('en', 'tr')),
-    instructions TEXT[],
+    instructions_json JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Stimuli table
-CREATE TABLE public.stimuli (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE IF NOT EXISTS public.stimuli (
+    id UUID PRIMARY KEY,
     study_id UUID NOT NULL REFERENCES public.studies(id) ON DELETE CASCADE,
     ordinal INTEGER NOT NULL,
     filename TEXT NOT NULL,
     media_type TEXT NOT NULL CHECK (media_type IN ('video', 'audio', 'image')),
-    storage_path TEXT NOT NULL,
-    duration_seconds REAL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    media_url TEXT,
+    thumbnail_url TEXT,
+    duration_seconds DOUBLE PRECISION,
     UNIQUE (study_id, ordinal)
 );
 
--- Sessions table
-CREATE TABLE public.sessions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE IF NOT EXISTS public.sessions (
+    id UUID PRIMARY KEY,
     study_id UUID NOT NULL REFERENCES public.studies(id) ON DELETE CASCADE,
     participant_id TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed', 'abandoned')),
-    batches JSONB,
+    status TEXT NOT NULL CHECK (status IN ('in_progress', 'completed', 'abandoned')),
     current_trial_index INTEGER NOT NULL DEFAULT 0,
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    completed_at TIMESTAMPTZ
+    completed_at TIMESTAMPTZ,
+    state_json JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
--- Trials table
-CREATE TABLE public.trials (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+CREATE TABLE IF NOT EXISTS public.trials (
+    id UUID PRIMARY KEY,
     session_id UUID NOT NULL REFERENCES public.sessions(id) ON DELETE CASCADE,
     trial_index INTEGER NOT NULL,
-    subset_indices INTEGER[] NOT NULL,
-    duration_seconds REAL,
+    subset_indices_json JSONB NOT NULL,
+    positions_json JSONB,
+    rating INTEGER CHECK (rating IS NULL OR rating BETWEEN 1 AND 7),
+    duration_seconds DOUBLE PRECISION NOT NULL,
     started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
     UNIQUE (session_id, trial_index)
 );
 
--- Trial positions table
-CREATE TABLE public.trial_positions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    trial_id UUID NOT NULL REFERENCES public.trials(id) ON DELETE CASCADE,
-    stimulus_id UUID NOT NULL REFERENCES public.stimuli(id) ON DELETE CASCADE,
-    ordinal INTEGER NOT NULL,
-    x REAL NOT NULL,
-    y REAL NOT NULL,
-    UNIQUE (trial_id, stimulus_id)
+CREATE TABLE IF NOT EXISTS public.invites (
+    token TEXT PRIMARY KEY,
+    study_id UUID NOT NULL REFERENCES public.studies(id) ON DELETE CASCADE,
+    participant_id TEXT,
+    used_session_id UUID REFERENCES public.sessions(id) ON DELETE SET NULL
 );
 
--- Indexes for common queries
-CREATE INDEX idx_studies_owner ON public.studies(owner_id);
-CREATE INDEX idx_stimuli_study ON public.stimuli(study_id);
-CREATE INDEX idx_sessions_study ON public.sessions(study_id);
-CREATE INDEX idx_trials_session ON public.trials(session_id);
-CREATE INDEX idx_trial_positions_trial ON public.trial_positions(trial_id);
-
--- Row Level Security policies
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.studies ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.stimuli ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.trials ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.trial_positions ENABLE ROW LEVEL SECURITY;
-
--- Users can read their own data
-CREATE POLICY "Users can view own data" ON public.users
-    FOR SELECT USING (auth.uid() = id);
-
--- Study owners can manage their studies
-CREATE POLICY "Owners can manage studies" ON public.studies
-    FOR ALL USING (auth.uid() = owner_id);
-
--- Stimuli follow study access
-CREATE POLICY "Study access for stimuli" ON public.stimuli
-    FOR ALL USING (
-        EXISTS (SELECT 1 FROM public.studies WHERE studies.id = stimuli.study_id AND studies.owner_id = auth.uid())
-    );
-
--- Sessions are public for participants but managed by owners
-CREATE POLICY "Public session read" ON public.sessions
-    FOR SELECT USING (true);
-
-CREATE POLICY "Owners manage sessions" ON public.sessions
-    FOR ALL USING (
-        EXISTS (SELECT 1 FROM public.studies WHERE studies.id = sessions.study_id AND studies.owner_id = auth.uid())
-    );
-
--- Trials follow session access
-CREATE POLICY "Public trial read" ON public.trials
-    FOR SELECT USING (true);
-
-CREATE POLICY "Session owners manage trials" ON public.trials
-    FOR INSERT WITH CHECK (true);
-
-CREATE POLICY "Trial update by session" ON public.trials
-    FOR UPDATE USING (true);
-
--- Trial positions follow trial access
-CREATE POLICY "Public position read" ON public.trial_positions
-    FOR SELECT USING (true);
-
-CREATE POLICY "Position insert" ON public.trial_positions
-    FOR INSERT WITH CHECK (true);
+CREATE INDEX IF NOT EXISTS idx_studies_owner_id ON public.studies(owner_id);
+CREATE INDEX IF NOT EXISTS idx_stimuli_study_id ON public.stimuli(study_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_study_id ON public.sessions(study_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_study_participant ON public.sessions(study_id, participant_id);
+CREATE INDEX IF NOT EXISTS idx_trials_session_id ON public.trials(session_id);
+CREATE INDEX IF NOT EXISTS idx_invites_study_id ON public.invites(study_id);

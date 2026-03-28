@@ -1,33 +1,46 @@
 """
-Invite and public participation endpoints.
+Invite and public participation endpoints backed by durable storage.
 """
 
-from typing import Dict, List
-from uuid import UUID
+from __future__ import annotations
+
 import secrets
+from typing import List
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from sqlalchemy import select, update
 
+from app.routers.experimenter import get_required_owner
+from app.routers.sessions import create_session, get_session_start_payload
+from app.routers.studies import get_study, list_stimuli_for_study
 from app.schemas import (
     InviteCreate,
     InviteResponse,
-    SessionStartResponse,
-    StudyCreate,
-    Paradigm,
     Language,
-    StimulusCreate,
     MediaType,
-    StimulusBatchCreate,
+    Paradigm,
+    SessionStartResponse,
 )
-import uuid
-import datetime
-from app.routers.studies import get_studies_db, get_stimuli_db
-from app.routers.sessions import create_session
-from app.routers.experimenter import get_required_owner
+from app.storage import (
+    connect,
+    fetch_all,
+    fetch_one,
+    invites_table,
+    stimuli_table,
+    studies_table,
+    utcnow_iso,
+)
 
 router = APIRouter(tags=["invites"])
 
-_invites_db: Dict[str, dict] = {}
+_DEMO_OWNER_ID = UUID("00000000-0000-0000-0000-000000000042")
+
+
+def get_invite(token: str) -> dict | None:
+    with connect(readonly=True) as conn:
+        return fetch_one(conn, select(invites_table).where(invites_table.c.token == token))
 
 
 @router.post(
@@ -40,27 +53,37 @@ async def create_invites(
     payload: InviteCreate,
     owner_id: UUID = Depends(get_required_owner),
 ) -> List[InviteResponse]:
-    """Create one or more participant invites for a study. Requires ownership."""
-    studies_db = get_studies_db()
-    if study_id not in studies_db:
+    study = get_study(study_id)
+    if study is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
-    study = studies_db[study_id]
-    if study.get("owner_id") != owner_id:
+    if study["owner_id"] != owner_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your study")
 
     count = max(1, int(payload.count or 1))
-    invites = []
+    invite_rows = []
+    responses = []
     for _ in range(count):
         token = secrets.token_urlsafe(16)
-        invite = {
+        invite_row = {
             "token": token,
-            "study_id": study_id,
+            "study_id": str(study_id),
             "participant_id": payload.participant_id,
             "used_session_id": None,
         }
-        _invites_db[token] = invite
-        invites.append(InviteResponse(**invite))
-    return invites
+        invite_rows.append(invite_row)
+        responses.append(
+            InviteResponse(
+                token=token,
+                study_id=study_id,
+                participant_id=payload.participant_id,
+                used_session_id=None,
+            )
+        )
+
+    with connect() as conn:
+        conn.execute(invites_table.insert(), invite_rows)
+
+    return responses
 
 
 @router.post(
@@ -69,58 +92,49 @@ async def create_invites(
     status_code=status.HTTP_201_CREATED,
 )
 async def start_from_invite(token: str) -> SessionStartResponse:
-    """Start a participant session from a one-time invite token."""
-    invite = _invites_db.get(token)
+    invite = get_invite(token)
     if not invite:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invite not found")
 
-    if invite.get("used_session_id") is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invite already used")
+    existing_session_id = invite.get("used_session_id")
+    if existing_session_id:
+        return get_session_start_payload(existing_session_id)
 
-    study_id = invite["study_id"]
-    studies_db = get_studies_db()
-    stimuli_db = get_stimuli_db()
-
-    if study_id not in studies_db:
+    study_id = UUID(invite["study_id"])
+    study = get_study(study_id)
+    if study is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
-    if len(stimuli_db.get(study_id, [])) < 2:
+
+    stimuli = list_stimuli_for_study(study_id)
+    if len(stimuli) < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Study has no stimuli")
 
     participant_id = invite.get("participant_id") or token
     response = create_session(study_id, participant_id)
-    invite["used_session_id"] = response.session_id
-    _invites_db[token] = invite
+    with connect() as conn:
+        conn.execute(
+            update(invites_table)
+            .where(invites_table.c.token == token)
+            .values(used_session_id=str(response.session_id))
+        )
     return response
 
 
-from pydantic import BaseModel
-
 class DemoStartRequest(BaseModel):
-    paradigm: str = "adaptive"  # "adaptive" (LtW) or "setcover"
+    paradigm: str = "adaptive"
     n_stimuli: int = 16
 
-@router.post(
-    "/public/demo/start",
-    response_model=SessionStartResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-async def start_demo_session(req: DemoStartRequest) -> SessionStartResponse:
-    """Start a fresh throwaway session for a demo."""
-    from app.routers.studies import _studies_db, _stimuli_db
-    from app.routers.sessions import create_session
 
-    study_id = uuid.uuid4()
-    
-    # We use a dummy owner UUID
-    dummy_owner_id = uuid.uuid4()
-    
-    study_data = {
-        "id": study_id,
-        "owner_id": dummy_owner_id,
-        "name": f"Demo {req.paradigm.title()} {req.n_stimuli}",
-        "description": "Ephemeral demo study",
-        "paradigm": Paradigm.ADAPTIVE if req.paradigm == "adaptive" else Paradigm.SETCOVER,
-        "config": {
+def _create_demo_study(paradigm: str, n_stimuli: int) -> UUID:
+    study_id = uuid4()
+    paradigm_value = Paradigm.ADAPTIVE if paradigm == "adaptive" else Paradigm.SETCOVER
+    study_row = {
+        "id": str(study_id),
+        "owner_id": str(_DEMO_OWNER_ID),
+        "name": f"Demo {paradigm_value.value} {n_stimuli}",
+        "description": "Bundled hosted demo study",
+        "paradigm": paradigm_value.value,
+        "config_json": {
             "evidence_threshold": 0.35,
             "utility_exponent": 10.0,
             "min_subset_size": 4,
@@ -130,40 +144,51 @@ async def start_demo_session(req: DemoStartRequest) -> SessionStartResponse:
             "setcover_weight_mode": "max",
             "setcover_weight_alpha": 2.0,
         },
-        "language": Language.EN,
-        "instructions": [
-            "Please arrange the stimuli on the screen based on their perceived similarity.",
-            "Place similar stimuli closer together — token center distances reflect similarity.",
-            "You can play the videos by clicking on them.",
-            "When you are finished with an arrangement, click the 'Next' button."
+        "language": Language.EN.value,
+        "instructions_json": [
+            "Arrange the stimuli based on their perceived similarity.",
+            "Place similar stimuli closer together so token distances reflect dissimilarity.",
+            "Double-click a stimulus to play it.",
+            "All stimuli must be inside the circle before you submit.",
         ],
-        "created_at": datetime.datetime.utcnow(),
-        "n_stimuli": req.n_stimuli,
-        "is_demo": True, # Custom flag just in case
+        "created_at": utcnow_iso(),
     }
-    _studies_db[study_id] = study_data
-    
-    # Create mock stimuli
-    stims = []
-    for i in range(req.n_stimuli):
-        stims.append({
-            "id": uuid.uuid4(),
-            "ordinal": i,
-            "filename": f"Stimulus {i+1}",
-            "media_type": MediaType.VIDEO,
-            "media_url": "", # We'll just let the frontend provide the videos or handle empty URLs (wait, frontend demo page will provide the preset videos). Just give it preset video names.
+    stimulus_rows = [
+        {
+            "id": str(uuid4()),
+            "study_id": str(study_id),
+            "ordinal": ordinal,
+            "filename": f"Stimulus {ordinal + 1}",
+            "media_type": MediaType.VIDEO.value,
+            "media_url": None,
             "thumbnail_url": None,
             "duration_seconds": 3.0,
-        })
-        
-    # Since frontend will also manage videos, we'll try to sync filenames with the preset videos if possible.
-    # Actually, the presets are in `classicVideos` in frontend (e.g. from `/api/videos`). We'll just create generic stimuli here.
-    _stimuli_db[study_id] = stims
+        }
+        for ordinal in range(n_stimuli)
+    ]
+    with connect() as conn:
+        conn.execute(studies_table.insert().values(**study_row))
+        if stimulus_rows:
+            conn.execute(stimuli_table.insert(), stimulus_rows)
+    return study_id
 
-    participant_id = f"demo_user_{uuid.uuid4().hex[:8]}"
-    response = create_session(study_id, participant_id)
-    return response
+
+@router.post(
+    "/public/demo/start",
+    response_model=SessionStartResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def start_demo_session(req: DemoStartRequest) -> SessionStartResponse:
+    if req.paradigm not in {"adaptive", "setcover"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported demo paradigm")
+    if req.n_stimuli < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Demo requires at least two stimuli")
+    study_id = _create_demo_study(req.paradigm, req.n_stimuli)
+    participant_id = f"demo_user_{uuid4().hex[:8]}"
+    return create_session(study_id, participant_id)
 
 
 def get_invites_db():
-    return _invites_db
+    with connect(readonly=True) as conn:
+        rows = fetch_all(conn, select(invites_table))
+    return {row["token"]: row for row in rows}

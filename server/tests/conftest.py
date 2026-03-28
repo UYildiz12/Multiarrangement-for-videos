@@ -2,27 +2,29 @@
 Test configuration and fixtures for the Multiarrangement server.
 """
 
+import os
+import tempfile
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
+_BOOTSTRAP_DB = Path(tempfile.gettempdir()) / "multiarrangement_server_bootstrap.sqlite3"
+os.environ.setdefault("DATABASE_URL", f"sqlite:///{_BOOTSTRAP_DB.as_posix()}")
+
 from app.main import app
-from app.routers.sessions import get_sessions_db, get_trials_db
-from app.routers.studies import get_stimuli_db, get_studies_db
+from app.storage import reset_db
 
 
 @pytest.fixture(autouse=True)
-def local_dev_bypass_auth(monkeypatch):
-    """Run API tests in local keyless mode and isolate in-memory state."""
+def local_dev_bypass_auth(monkeypatch, tmp_path):
+    """Run API tests in local keyless mode with an isolated SQLite database."""
     monkeypatch.setenv("LOCAL_DEV_BYPASS_AUTH", "1")
-    get_studies_db().clear()
-    get_stimuli_db().clear()
-    get_sessions_db().clear()
-    get_trials_db().clear()
+    db_path = tmp_path / "test_hosted.sqlite3"
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
+    reset_db()
     yield
-    get_studies_db().clear()
-    get_stimuli_db().clear()
-    get_sessions_db().clear()
-    get_trials_db().clear()
+    reset_db()
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ This directory contains the FastAPI backend that powers the browser-based Multia
 - fuse trial data into RDM and evidence outputs
 - expose experimenter and admin endpoints for the web UI
 
-The local development path uses in-memory stores, so you can run the API and test suite without Supabase.
+The local development path uses SQLite by default, so studies, invites, sessions, and results survive backend restarts even without Supabase.
 
 ## Requirements
 
@@ -36,6 +36,8 @@ LOCAL_DEV_BYPASS_AUTH=1 uvicorn app.main:app --reload --port 8000
 Useful environment variables:
 
 - `LOCAL_DEV_BYPASS_AUTH=1`: disables experimenter-key checks for localhost development
+- `DATABASE_URL`: overrides the default local SQLite database or points the API at a hosted Postgres database
+- `SUPABASE_DB_URL`: preferred Postgres connection string for the hosted deployment path
 - `EXPERIMENTER_KEY_SECRET`: signing secret for issued experimenter keys
 - `ADMIN_SECRET`: optional legacy super-admin override
 
@@ -50,10 +52,10 @@ Once the server is running:
 pytest tests -q
 ```
 
-The API tests run in isolated local-dev mode and reset the in-memory stores between tests.
+The API tests run against isolated SQLite databases and cover resume/restart behavior for hosted studies, invites, chains, and results.
 
 ## Deployment notes
 
 - `Procfile` and `railway.toml` support the Railway deployment used for the web API
 - `supabase/migrations/` contains the schema files for the hosted storage/database path
-- Supabase is optional for local testing, but useful when you want hosted media for the web setup flow
+- Supabase Storage remains optional for hosted media uploads; Postgres is used for durable hosted state
