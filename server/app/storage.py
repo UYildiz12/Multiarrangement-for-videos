@@ -158,8 +158,16 @@ def _default_sqlite_url() -> str:
     return f"sqlite:///{db_path.as_posix()}"
 
 
+def _normalize_database_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://"):]
+    if url.startswith("postgresql://") and "+" not in url.split("://", 1)[0]:
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
 def get_database_url() -> str:
-    return (
+    return _normalize_database_url(
         os.getenv("SUPABASE_DB_URL")
         or os.getenv("DATABASE_URL")
         or _default_sqlite_url()
@@ -253,4 +261,3 @@ def utcnow_iso() -> str:
 
 def ordered_select(table: Table, *order_cols):
     return select(table).order_by(*order_cols)
-
