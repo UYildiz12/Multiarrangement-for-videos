@@ -29,7 +29,9 @@ from sqlalchemy import (
     create_engine,
     delete,
     event,
+    inspect,
     select,
+    text,
 )
 from sqlalchemy.engine import Connection, Engine, RowMapping
 
@@ -60,6 +62,8 @@ stimuli_table = Table(
     Column("media_type", String(16), nullable=False),
     Column("media_url", String, nullable=True),
     Column("thumbnail_url", String, nullable=True),
+    Column("media_storage_path", String, nullable=True),
+    Column("thumbnail_storage_path", String, nullable=True),
     Column("duration_seconds", Float, nullable=True),
     UniqueConstraint("study_id", "ordinal", name="uq_stimuli_study_ordinal"),
 )
@@ -204,7 +208,9 @@ def get_engine() -> Engine:
 
 
 def init_db() -> None:
-    metadata.create_all(get_engine())
+    engine = get_engine()
+    metadata.create_all(engine)
+    _ensure_stimuli_storage_columns(engine)
 
 
 def reset_db() -> None:
@@ -261,3 +267,23 @@ def utcnow_iso() -> str:
 
 def ordered_select(table: Table, *order_cols):
     return select(table).order_by(*order_cols)
+
+
+def _ensure_stimuli_storage_columns(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if "stimuli" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("stimuli")}
+    missing = [
+        ("media_storage_path", "ALTER TABLE stimuli ADD COLUMN media_storage_path TEXT"),
+        ("thumbnail_storage_path", "ALTER TABLE stimuli ADD COLUMN thumbnail_storage_path TEXT"),
+    ]
+
+    statements = [sql for column, sql in missing if column not in existing]
+    if not statements:
+        return
+
+    with engine.begin() as conn:
+        for sql in statements:
+            conn.execute(text(sql))

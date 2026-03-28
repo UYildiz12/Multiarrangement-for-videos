@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select, update
 
 from app.routers.experimenter import get_optional_owner, get_required_owner
+from app.supabase_storage import delete_storage_paths
 from app.schemas import (
     Language,
     MediaType,
@@ -57,6 +58,8 @@ def _parse_stimulus(row: dict) -> dict:
         "media_type": MediaType(row["media_type"]),
         "media_url": row.get("media_url"),
         "thumbnail_url": row.get("thumbnail_url"),
+        "media_storage_path": row.get("media_storage_path"),
+        "thumbnail_storage_path": row.get("thumbnail_storage_path"),
         "duration_seconds": row.get("duration_seconds"),
     }
 
@@ -81,6 +84,18 @@ def list_stimuli_for_study(study_id: UUID | str) -> list[dict]:
             ),
         )
     return [_parse_stimulus(row) for row in rows]
+
+
+def list_storage_paths_for_study(study_id: UUID | str) -> list[str]:
+    paths: set[str] = set()
+    for stimulus in list_stimuli_for_study(study_id):
+        media_path = stimulus.get("media_storage_path")
+        thumb_path = stimulus.get("thumbnail_storage_path")
+        if media_path:
+            paths.add(media_path)
+        if thumb_path:
+            paths.add(thumb_path)
+    return sorted(paths)
 
 
 @router.get("", response_model=List[StudyResponse])
@@ -184,6 +199,7 @@ async def delete_study(
     if existing["owner_id"] != owner_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your study")
 
+    delete_storage_paths(list_storage_paths_for_study(study_id))
     with connect() as conn:
         conn.execute(delete(studies_table).where(studies_table.c.id == str(study_id)))
 
@@ -225,6 +241,8 @@ async def register_stimuli(
                 "media_type": stim.media_type.value,
                 "media_url": stim.media_url,
                 "thumbnail_url": stim.thumbnail_url,
+                "media_storage_path": stim.media_storage_path,
+                "thumbnail_storage_path": stim.thumbnail_storage_path,
                 "duration_seconds": stim.duration_seconds,
             }
         )

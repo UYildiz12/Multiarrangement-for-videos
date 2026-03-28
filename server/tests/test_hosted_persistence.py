@@ -7,6 +7,8 @@ import importlib
 from fastapi.testclient import TestClient
 
 from app.main import app
+import app.routers.admin as admin_router
+import app.routers.studies as studies_router
 
 
 client = TestClient(app)
@@ -356,3 +358,143 @@ def test_demo_start_returns_hosted_session_payload():
     assert payload["n_stimuli"] == 16
     assert len(payload["stimuli"]) == 16
     assert all(stimulus["media_type"] == "video" for stimulus in payload["stimuli"])
+
+
+def test_stimuli_storage_paths_round_trip_in_list_and_export():
+    study_resp = client.post(
+        "/api/v1/studies",
+        json={
+            "name": "Storage Paths",
+            "paradigm": "setcover",
+            "language": "en",
+            "config": {"batch_size": 3},
+        },
+    )
+    assert study_resp.status_code == 201
+    study_id = study_resp.json()["id"]
+
+    stimuli_resp = client.post(
+        f"/api/v1/studies/{study_id}/stimuli",
+        json={
+            "stimuli": [
+                {
+                    "ordinal": 0,
+                    "filename": "owner_upload.jpg",
+                    "media_type": "image",
+                    "media_url": "https://example.com/owner_upload.jpg",
+                    "thumbnail_url": "https://example.com/owner_upload.jpg",
+                    "media_storage_path": "owners/o1/studies/s1/media/owner_upload.jpg",
+                    "thumbnail_storage_path": "owners/o1/studies/s1/media/owner_upload.jpg",
+                    "duration_seconds": 0.5,
+                }
+            ]
+        },
+    )
+    assert stimuli_resp.status_code == 200
+    assert stimuli_resp.json()[0]["media_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
+
+    list_resp = client.get(f"/api/v1/studies/{study_id}/stimuli")
+    assert list_resp.status_code == 200
+    listed = list_resp.json()
+    assert listed[0]["media_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
+    assert listed[0]["thumbnail_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
+
+    export_resp = client.get(f"/api/v1/studies/{study_id}/export?format=json")
+    assert export_resp.status_code == 200
+    exported_stimuli = export_resp.json()["stimuli"]
+    assert exported_stimuli[0]["media_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
+    assert exported_stimuli[0]["thumbnail_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
+
+
+def test_admin_delete_study_reports_storage_cleanup(monkeypatch):
+    study_resp = client.post(
+        "/api/v1/studies",
+        json={
+            "name": "Admin Cleanup",
+            "paradigm": "setcover",
+            "language": "en",
+            "config": {"batch_size": 3},
+        },
+    )
+    assert study_resp.status_code == 201
+    study_id = study_resp.json()["id"]
+
+    stimuli_resp = client.post(
+        f"/api/v1/studies/{study_id}/stimuli",
+        json={
+            "stimuli": [
+                {
+                    "ordinal": 0,
+                    "filename": "clip.mp4",
+                    "media_type": "video",
+                    "media_url": "https://example.com/clip.mp4",
+                    "thumbnail_url": "https://example.com/clip_thumb.jpg",
+                    "media_storage_path": "owners/o1/studies/s1/media/clip.mp4",
+                    "thumbnail_storage_path": "owners/o1/studies/s1/thumbs/clip.jpg",
+                    "duration_seconds": 5.0,
+                }
+            ]
+        },
+    )
+    assert stimuli_resp.status_code == 200
+
+    captured: dict[str, object] = {}
+
+    def fake_delete(paths: list[str]):
+        captured["paths"] = paths
+        return {"status": "deleted", "deleted": paths}
+
+    monkeypatch.setattr(admin_router, "delete_storage_paths", fake_delete)
+
+    delete_resp = client.delete(f"/api/v1/admin/studies/{study_id}")
+    assert delete_resp.status_code == 200
+    assert captured["paths"] == [
+        "owners/o1/studies/s1/media/clip.mp4",
+        "owners/o1/studies/s1/thumbs/clip.jpg",
+    ]
+    assert delete_resp.json()["storage_cleanup"]["status"] == "deleted"
+
+
+def test_owner_delete_study_triggers_storage_cleanup(monkeypatch):
+    study_resp = client.post(
+        "/api/v1/studies",
+        json={
+            "name": "Owner Cleanup",
+            "paradigm": "setcover",
+            "language": "en",
+            "config": {"batch_size": 3},
+        },
+    )
+    assert study_resp.status_code == 201
+    study_id = study_resp.json()["id"]
+
+    stimuli_resp = client.post(
+        f"/api/v1/studies/{study_id}/stimuli",
+        json={
+            "stimuli": [
+                {
+                    "ordinal": 0,
+                    "filename": "image.png",
+                    "media_type": "image",
+                    "media_url": "https://example.com/image.png",
+                    "thumbnail_url": "https://example.com/image.png",
+                    "media_storage_path": "owners/o1/studies/s2/media/image.png",
+                    "thumbnail_storage_path": "owners/o1/studies/s2/media/image.png",
+                    "duration_seconds": 0.5,
+                }
+            ]
+        },
+    )
+    assert stimuli_resp.status_code == 200
+
+    captured: dict[str, object] = {}
+
+    def fake_delete(paths: list[str]):
+        captured["paths"] = paths
+        return {"status": "deleted", "deleted": paths}
+
+    monkeypatch.setattr(studies_router, "delete_storage_paths", fake_delete)
+
+    delete_resp = client.delete(f"/api/v1/studies/{study_id}")
+    assert delete_resp.status_code == 204
+    assert captured["paths"] == ["owners/o1/studies/s2/media/image.png"]

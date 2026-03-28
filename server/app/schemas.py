@@ -114,6 +114,8 @@ class StimulusResponse(BaseModel):
     media_type: MediaType
     media_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    media_storage_path: Optional[str] = None
+    thumbnail_storage_path: Optional[str] = None
     duration_seconds: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -133,6 +135,8 @@ class StimulusCreate(BaseModel):
     media_type: MediaType
     media_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    media_storage_path: Optional[str] = None
+    thumbnail_storage_path: Optional[str] = None
     duration_seconds: Optional[float] = None
 
 

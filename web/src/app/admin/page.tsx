@@ -28,6 +28,18 @@ interface SessionSummary {
     n_trials: number;
 }
 
+interface StudyStimulus {
+    id: string;
+    ordinal: number;
+    filename: string;
+    media_type: "video" | "audio" | "image";
+    media_url?: string | null;
+    thumbnail_url?: string | null;
+    media_storage_path?: string | null;
+    thumbnail_storage_path?: string | null;
+    duration_seconds?: number | null;
+}
+
 interface ChainSession {
     chain_session_id: string;
     participant_id: string;
@@ -74,9 +86,11 @@ function AdminContent() {
     const [studies, setStudies] = useState<StudySummary[]>([]);
     const [sessions, setSessions] = useState<SessionSummary[]>([]);
     const [selectedStudyId, setSelectedStudyId] = useState<string | null>(null);
+    const [selectedStudyStimuli, setSelectedStudyStimuli] = useState<StudyStimulus[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [loadingStudies, setLoadingStudies] = useState(false);
     const [loadingSessions, setLoadingSessions] = useState(false);
+    const [loadingStimuli, setLoadingStimuli] = useState(false);
 
     // Chain sessions state
     const [selectedChainId, setSelectedChainId] = useState<string | null>(null);
@@ -165,17 +179,26 @@ function AdminContent() {
     const loadSessions = async (studyId: string) => {
         setError(null);
         setLoadingSessions(true);
+        setLoadingStimuli(true);
         setSelectedStudyId(studyId);
         try {
-            const data = await apiFetch<SessionSummary[]>(
-                `/api/v1/admin/studies/${studyId}/sessions`,
-                { headers: buildKeyHeaders() }
-            );
-            setSessions(data);
+            const [sessionData, stimulusData] = await Promise.all([
+                apiFetch<SessionSummary[]>(
+                    `/api/v1/admin/studies/${studyId}/sessions`,
+                    { headers: buildKeyHeaders() }
+                ),
+                apiFetch<StudyStimulus[]>(
+                    `/api/v1/studies/${studyId}/stimuli`,
+                    { headers: buildKeyHeaders() }
+                ),
+            ]);
+            setSessions(sessionData);
+            setSelectedStudyStimuli(stimulusData);
         } catch (err) {
             setError(describeAuthError(err, "Failed to load sessions"));
         } finally {
             setLoadingSessions(false);
+            setLoadingStimuli(false);
         }
     };
 
@@ -220,6 +243,7 @@ function AdminContent() {
             if (selectedStudyId === studyId) {
                 setSelectedStudyId(null);
                 setSessions([]);
+                setSelectedStudyStimuli([]);
             }
         } catch (err) {
             setError(describeAuthError(err, "Failed to delete study"));
@@ -269,6 +293,8 @@ function AdminContent() {
         cursor: "pointer",
         transition: "all 0.2s ease",
     });
+
+    const selectedStudy = studies.find((study) => study.id === selectedStudyId) ?? null;
 
     return (
         <div
@@ -532,11 +558,103 @@ function AdminContent() {
                         </div>
 
                         <div style={{ background: "#111", padding: 20, borderRadius: 8 }}>
-                            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Sessions</h2>
-                            {loadingSessions ? (
+                            <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Study Detail</h2>
+                            {!selectedStudyId || !selectedStudy ? (
+                                <div style={{ color: "#666", fontSize: 13 }}>Select a study to inspect its media and sessions.</div>
+                            ) : (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 18, marginBottom: 18 }}>
+                                    <div style={{ padding: 14, borderRadius: 8, background: "#0a0a0a", border: "1px solid #222" }}>
+                                        <div style={{ fontWeight: 600, marginBottom: 4 }}>{selectedStudy.name}</div>
+                                        <div style={{ fontSize: 12, color: "#666" }}>
+                                            {selectedStudy.paradigm} â€¢ {selectedStudy.n_stimuli} stimuli
+                                        </div>
+                                        <div style={{ fontSize: 11, color: "#444", marginTop: 6, fontFamily: "monospace", wordBreak: "break-all" }}>
+                                            {selectedStudy.id}
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Registered media</div>
+                                        {loadingStimuli ? (
+                                            <div style={{ color: "#666", fontSize: 13 }}>Loading media...</div>
+                                        ) : selectedStudyStimuli.length === 0 ? (
+                                            <div style={{ color: "#666", fontSize: 13 }}>No stimuli registered for this study.</div>
+                                        ) : (
+                                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
+                                                {selectedStudyStimuli.map((stimulus) => {
+                                                    const previewUrl = stimulus.thumbnail_url || stimulus.media_url || "";
+                                                    const canPreview = Boolean(previewUrl) && (stimulus.media_type === "image" || stimulus.media_type === "video");
+                                                    const storageLabel = stimulus.media_storage_path ? "Hosted" : "Bundled";
+                                                    return (
+                                                        <a
+                                                            key={stimulus.id}
+                                                            href={stimulus.media_url || "#"}
+                                                            target={stimulus.media_url ? "_blank" : undefined}
+                                                            rel={stimulus.media_url ? "noreferrer" : undefined}
+                                                            style={{
+                                                                display: "block",
+                                                                padding: 10,
+                                                                borderRadius: 8,
+                                                                border: "1px solid #222",
+                                                                background: "#0a0a0a",
+                                                                textDecoration: "none",
+                                                                color: "#fff",
+                                                            }}
+                                                        >
+                                                            <div style={{
+                                                                height: 84,
+                                                                borderRadius: 6,
+                                                                overflow: "hidden",
+                                                                background: "#151515",
+                                                                display: "flex",
+                                                                alignItems: "center",
+                                                                justifyContent: "center",
+                                                                marginBottom: 8,
+                                                            }}>
+                                                                {canPreview ? (
+                                                                    <div
+                                                                        aria-label={stimulus.filename}
+                                                                        role="img"
+                                                                        style={{
+                                                                            width: "100%",
+                                                                            height: "100%",
+                                                                            backgroundImage: `url("${previewUrl}")`,
+                                                                            backgroundSize: "cover",
+                                                                            backgroundPosition: "center",
+                                                                            backgroundRepeat: "no-repeat",
+                                                                        }}
+                                                                    />
+                                                                ) : (
+                                                                    <div style={{ color: "#666", fontSize: 12, textTransform: "uppercase" }}>
+                                                                        {stimulus.media_type}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                                                                {stimulus.filename}
+                                                            </div>
+                                                            <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
+                                                                #{stimulus.ordinal} â€¢ {storageLabel}
+                                                            </div>
+                                                            <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", wordBreak: "break-all" }}>
+                                                                {stimulus.media_storage_path || stimulus.media_url || "No media URL"}
+                                                            </div>
+                                                        </a>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div style={{ fontSize: 13, fontWeight: 600 }}>Sessions</div>
+                                </div>
+                            )}
+                            {selectedStudyId && loadingSessions ? (
                                 <div style={{ color: "#666", fontSize: 13 }}>Loading sessions...</div>
                             ) : sessions.length === 0 ? (
-                                <div style={{ color: "#666", fontSize: 13 }}>Select a study to view sessions.</div>
+                                <div style={{ color: "#666", fontSize: 13 }}>
+                                    {selectedStudyId ? "No participant sessions yet." : "Select a study to view sessions."}
+                                </div>
                             ) : (
                                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                                     {sessions.map((session) => (

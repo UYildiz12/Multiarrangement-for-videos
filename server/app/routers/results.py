@@ -93,6 +93,8 @@ async def export_study_results(
                 "media_type": stimulus["media_type"].value,
                 "media_url": stimulus.get("media_url"),
                 "thumbnail_url": stimulus.get("thumbnail_url"),
+                "media_storage_path": stimulus.get("media_storage_path"),
+                "thumbnail_storage_path": stimulus.get("thumbnail_storage_path"),
                 "duration_seconds": stimulus.get("duration_seconds"),
             }
             for stimulus in stimuli

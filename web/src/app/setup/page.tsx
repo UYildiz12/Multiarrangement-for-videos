@@ -28,6 +28,15 @@ interface VideoFile {
     selected: boolean;
     mediaType: "video" | "audio" | "image";
     durationSeconds?: number;
+    sourceFile?: File;
+    thumbnailDataUrl?: string;
+    mediaStoragePath?: string;
+    thumbnailStoragePath?: string;
+}
+
+interface HostedStudyIdentity {
+    id: string;
+    owner_id: string;
 }
 
 interface ExperimentConfig {
@@ -221,44 +230,43 @@ export default function SetupPage() {
         setProcessingUploads(true);
         const newVideos: VideoFile[] = [];
 
-        const supabase = uploadMode === "supabase" ? getSupabaseClient() : null;
-
         for (const file of Array.from(files)) {
             const label = file.name.replace(/\.[^/.]+$/, "");
             const mediaType = detectUploadedMediaType(file);
+            if (!mediaType) {
+                continue;
+            }
             if (mediaType === "video") {
                 const durationSeconds = await getDurationFromFile(file, "video");
-                const mediaUrl = uploadMode === "supabase" && supabase
-                    ? await uploadToSupabase(file, label, supabase)
-                    : URL.createObjectURL(file);
+                const previewUrl = URL.createObjectURL(file);
                 try {
                     const thumbnail = await extractThumbnail(file);
-                    const thumbUrl = uploadMode === "supabase" && supabase
-                        ? await uploadThumbnailToSupabase(thumbnail, label, supabase)
-                        : thumbnail;
                     newVideos.push({
                         name: label,
-                        url: mediaUrl,
-                        thumbnail: thumbUrl,
+                        url: previewUrl,
+                        thumbnail,
                         selected: true,
                         mediaType: "video",
                         durationSeconds: coalesceDuration(durationSeconds, "video"),
+                        sourceFile: uploadMode === "supabase" ? file : undefined,
+                        thumbnailDataUrl: uploadMode === "supabase" ? thumbnail : undefined,
                     });
                     if (uploadMode === "local") {
                         await cacheMedia(label, {
                             blob: file,
                             mediaType: "video",
-                            thumbnail: thumbUrl,
+                            thumbnail,
                             durationSeconds: coalesceDuration(durationSeconds, "video"),
                         });
                     }
                 } catch {
                     newVideos.push({
                         name: label,
-                        url: mediaUrl,
+                        url: previewUrl,
                         selected: true,
                         mediaType: "video",
                         durationSeconds: coalesceDuration(durationSeconds, "video"),
+                        sourceFile: uploadMode === "supabase" ? file : undefined,
                     });
                     if (uploadMode === "local") {
                         await cacheMedia(label, {
@@ -270,16 +278,15 @@ export default function SetupPage() {
                 }
             } else if (mediaType === "audio") {
                 const durationSeconds = await getDurationFromFile(file, "audio");
-                const mediaUrl = uploadMode === "supabase" && supabase
-                    ? await uploadToSupabase(file, label, supabase)
-                    : URL.createObjectURL(file);
+                const previewUrl = URL.createObjectURL(file);
                 newVideos.push({
                     name: label,
-                    url: mediaUrl,
+                    url: previewUrl,
                     thumbnail: "/audio.png",
                     selected: true,
                     mediaType: "audio",
                     durationSeconds: coalesceDuration(durationSeconds, "audio"),
+                    sourceFile: uploadMode === "supabase" ? file : undefined,
                 });
                 if (uploadMode === "local") {
                     await cacheMedia(label, {
@@ -290,22 +297,21 @@ export default function SetupPage() {
                     });
                 }
             } else if (mediaType === "image") {
-                const mediaUrl = uploadMode === "supabase" && supabase
-                    ? await uploadToSupabase(file, label, supabase)
-                    : URL.createObjectURL(file);
+                const previewUrl = URL.createObjectURL(file);
                 newVideos.push({
                     name: label,
-                    url: mediaUrl,
-                    thumbnail: mediaUrl,
+                    url: previewUrl,
+                    thumbnail: previewUrl,
                     selected: true,
                     mediaType: "image",
                     durationSeconds: coalesceDuration(null, "image"),
+                    sourceFile: uploadMode === "supabase" ? file : undefined,
                 });
                 if (uploadMode === "local") {
                     await cacheMedia(label, {
                         blob: file,
                         mediaType: "image",
-                        thumbnail: mediaUrl,
+                        thumbnail: previewUrl,
                         durationSeconds: coalesceDuration(null, "image"),
                     });
                 }
@@ -352,6 +358,10 @@ export default function SetupPage() {
         const videosToUse = videoSource === "preset"
             ? classicVideos.filter((v) => v.selected)
             : config.videos;
+        if (videoSource === "upload" && uploadMode === "supabase" && hasUnhostableCustomMedia(videosToUse)) {
+            alert("Some uploaded items are still local-only. Re-add them while Hosted (Supabase) is selected.");
+            return;
+        }
         if (starting) return;
         setStarting(true);
         setStartError(null);
@@ -418,7 +428,7 @@ export default function SetupPage() {
                 studyConfig.avoid_anchor_reuse = config.avoidAnchorReuse;
             }
 
-            const study = await apiFetch<{ id: string }>("/api/v1/studies", {
+            const study = await apiFetch<HostedStudyIdentity>("/api/v1/studies", {
                 method: "POST",
                 headers: keyHeaders,
                 body: JSON.stringify({
@@ -431,13 +441,16 @@ export default function SetupPage() {
                 }),
             });
 
+            const studyVideos = await materializeStudyVideos(videosWithDuration, study);
             const stimuliPayload = {
-                stimuli: videosWithDuration.map((v, i) => ({
+                stimuli: studyVideos.map((v, i) => ({
                     ordinal: i,
                     filename: v.name,
                     media_type: v.mediaType,
                     media_url: v.url,
                     thumbnail_url: v.thumbnail ?? null,
+                    media_storage_path: v.mediaStoragePath ?? null,
+                    thumbnail_storage_path: v.thumbnailStoragePath ?? null,
                     duration_seconds: v.durationSeconds ?? null,
                 })),
             };
@@ -455,7 +468,7 @@ export default function SetupPage() {
                 }
             );
 
-            const stimuliForClient = videosWithDuration.map((v, i) => ({
+            const stimuliForClient = studyVideos.map((v, i) => ({
                 id: `stim-${i}`,
                 ordinal: i,
                 label: v.name,
@@ -466,7 +479,7 @@ export default function SetupPage() {
 
             sessionStorage.setItem("experimentConfig", JSON.stringify({
                 ...config,
-                videos: videosWithDuration,
+                videos: serializeVideosForSession(studyVideos),
             }));
             if (instructions && instructions.length > 0) {
                 sessionStorage.setItem("experimentInstructions", JSON.stringify(instructions));
@@ -498,6 +511,10 @@ export default function SetupPage() {
         const videosToUse = videoSource === "preset"
             ? classicVideos.filter((v) => v.selected)
             : config.videos;
+        if (videoSource === "upload" && uploadMode === "supabase" && hasUnhostableCustomMedia(videosToUse)) {
+            setPublishError("Some uploaded items are still local-only. Re-add them while Hosted (Supabase) is selected.");
+            return;
+        }
         setPublishing(true);
         setPublishError(null);
         setInviteLink(null);
@@ -555,7 +572,7 @@ export default function SetupPage() {
                 studyConfig.avoid_anchor_reuse = config.avoidAnchorReuse;
             }
 
-            const study = await apiFetch<{ id: string }>("/api/v1/studies", {
+            const study = await apiFetch<HostedStudyIdentity>("/api/v1/studies", {
                 method: "POST",
                 headers: keyHeaders,
                 body: JSON.stringify({
@@ -568,13 +585,16 @@ export default function SetupPage() {
                 }),
             });
 
+            const studyVideos = await materializeStudyVideos(videosWithDuration, study);
             const stimuliPayload = {
-                stimuli: videosWithDuration.map((v, i) => ({
+                stimuli: studyVideos.map((v, i) => ({
                     ordinal: i,
                     filename: v.name,
                     media_type: v.mediaType,
                     media_url: v.url,
                     thumbnail_url: v.thumbnail ?? null,
+                    media_storage_path: v.mediaStoragePath ?? null,
+                    thumbnail_storage_path: v.thumbnailStoragePath ?? null,
                     duration_seconds: v.durationSeconds ?? null,
                 })),
             };
@@ -1497,7 +1517,7 @@ const DEFAULT_INSTRUCTIONS = {
     tr: {
         arrangement: [
             "Tüm öğeleri dairenin içine sürükleyin.",
-            "Benzerleri yakın yerleştirin — token merkez mesafeleri benzerliği yansıtır.",
+            "Benzer tokenleri merkezlerinin arasındaki mesafeyi esas alarak yerleştirin.",
             "Öğeyi oynatmak için çift tıklayın (ses/video).",
             "Hepsi içerideyken Bitir'e basın.",
         ],
@@ -1650,29 +1670,120 @@ function safeName(name: string): string {
     return name.replace(/[^a-zA-Z0-9_-]+/g, "_");
 }
 
-async function uploadToSupabase(file: File, label: string, supabase: ReturnType<typeof getSupabaseClient>) {
-    if (!supabase) throw new Error("Supabase client not configured");
-    const ext = file.name.split(".").pop() || "dat";
-    const filename = `${Date.now()}_${safeName(label)}.${ext}`;
-    const { error } = await supabase.storage.from(SUPABASE_BUCKET).upload(filename, file, {
-        cacheControl: "3600",
-        upsert: false,
+function hasUnhostableCustomMedia(videos: VideoFile[]): boolean {
+    return videos.some((video) => {
+        const hasHostedPath = Boolean(video.mediaStoragePath);
+        const canUploadNow = Boolean(video.sourceFile);
+        const isLocalBlob = video.url.startsWith("blob:");
+        return isLocalBlob && !hasHostedPath && !canUploadNow;
     });
-    if (error) throw new Error(`Upload failed: ${error.message}`);
-    const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(filename);
+}
+
+function createUploadToken(): string {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+        return crypto.randomUUID().replace(/-/g, "");
+    }
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildStudyScopedPath(
+    ownerId: string,
+    studyId: string,
+    section: "media" | "thumbs",
+    index: number,
+    label: string,
+    ext: string
+): string {
+    return `owners/${ownerId}/studies/${studyId}/${section}/${String(index).padStart(3, "0")}_${safeName(label)}_${createUploadToken()}.${ext}`;
+}
+
+function publicUrlForPath(path: string, supabase: ReturnType<typeof getSupabaseClient>) {
+    if (!supabase) throw new Error("Supabase client not configured");
+    const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(path);
     return data.publicUrl;
 }
 
-async function uploadThumbnailToSupabase(dataUrl: string, label: string, supabase: ReturnType<typeof getSupabaseClient>) {
+async function uploadToSupabase(file: File, storagePath: string, supabase: ReturnType<typeof getSupabaseClient>) {
+    if (!supabase) throw new Error("Supabase client not configured");
+    const { error } = await supabase.storage.from(SUPABASE_BUCKET).upload(storagePath, file, {
+        cacheControl: "3600",
+        upsert: false,
+        contentType: file.type || undefined,
+    });
+    if (error) throw new Error(`Upload failed: ${error.message}`);
+    return publicUrlForPath(storagePath, supabase);
+}
+
+async function uploadThumbnailToSupabase(
+    dataUrl: string,
+    storagePath: string,
+    supabase: ReturnType<typeof getSupabaseClient>
+) {
     if (!supabase) throw new Error("Supabase client not configured");
     const blob = dataUrlToBlob(dataUrl);
-    const filename = `${Date.now()}_${safeName(label)}_thumb.jpg`;
-    const { error } = await supabase.storage.from(SUPABASE_BUCKET).upload(filename, blob, {
+    const { error } = await supabase.storage.from(SUPABASE_BUCKET).upload(storagePath, blob, {
         cacheControl: "3600",
         upsert: false,
         contentType: "image/jpeg",
     });
     if (error) throw new Error(`Thumbnail upload failed: ${error.message}`);
-    const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(filename);
-    return data.publicUrl;
+    return publicUrlForPath(storagePath, supabase);
+}
+
+async function materializeStudyVideos(videos: VideoFile[], study: HostedStudyIdentity): Promise<VideoFile[]> {
+    const pendingUploads = videos.some((video) => Boolean(video.sourceFile));
+    if (!pendingUploads) {
+        return videos;
+    }
+
+    const supabase = getSupabaseClient();
+    if (!supabase) {
+        throw new Error("Supabase client not configured");
+    }
+
+    const uploaded: VideoFile[] = [];
+    for (const [index, video] of videos.entries()) {
+        if (!video.sourceFile) {
+            uploaded.push(video);
+            continue;
+        }
+
+        const mediaExt = getFileExtension(video.sourceFile.name) || "dat";
+        const mediaPath = buildStudyScopedPath(study.owner_id, study.id, "media", index, video.name, mediaExt);
+        const mediaUrl = await uploadToSupabase(video.sourceFile, mediaPath, supabase);
+
+        let thumbnailUrl = video.thumbnail;
+        let thumbnailStoragePath = video.thumbnailStoragePath;
+        if (video.mediaType === "video" && video.thumbnailDataUrl) {
+            const thumbPath = buildStudyScopedPath(study.owner_id, study.id, "thumbs", index, `${video.name}_thumb`, "jpg");
+            thumbnailUrl = await uploadThumbnailToSupabase(video.thumbnailDataUrl, thumbPath, supabase);
+            thumbnailStoragePath = thumbPath;
+        } else if (video.mediaType === "image") {
+            thumbnailUrl = mediaUrl;
+            thumbnailStoragePath = mediaPath;
+        }
+
+        uploaded.push({
+            ...video,
+            url: mediaUrl,
+            thumbnail: thumbnailUrl,
+            mediaStoragePath: mediaPath,
+            thumbnailStoragePath,
+        });
+    }
+
+    return uploaded;
+}
+
+function serializeVideosForSession(videos: VideoFile[]): Array<Omit<VideoFile, "sourceFile" | "thumbnailDataUrl">> {
+    return videos.map((video) => ({
+        name: video.name,
+        url: video.url,
+        thumbnail: video.thumbnail,
+        selected: video.selected,
+        mediaType: video.mediaType,
+        durationSeconds: video.durationSeconds,
+        mediaStoragePath: video.mediaStoragePath,
+        thumbnailStoragePath: video.thumbnailStoragePath,
+    }));
 }

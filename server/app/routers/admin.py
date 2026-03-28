@@ -18,8 +18,9 @@ from app.routers.experimenter import (
     owner_id_from_key,
 )
 from app.routers.sessions import delete_session_record, get_session_record, get_trials_for_session, list_sessions_for_study
-from app.routers.studies import get_study, get_studies_db, list_stimuli_for_study
+from app.routers.studies import get_study, get_studies_db, list_stimuli_for_study, list_storage_paths_for_study
 from app.storage import connect, studies_table
+from app.supabase_storage import delete_storage_paths
 
 router = APIRouter(tags=["admin"])
 
@@ -126,6 +127,12 @@ async def delete_study(study_id: UUID, owner_id: UUID | None = Depends(_resolve_
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your study")
 
     session_count = len(list_sessions_for_study(study_id))
+    cleanup = delete_storage_paths(list_storage_paths_for_study(study_id))
     with connect() as conn:
         conn.execute(delete(studies_table).where(studies_table.c.id == str(study_id)))
-    return {"status": "deleted", "study_id": str(study_id), "sessions_deleted": session_count}
+    return {
+        "status": "deleted",
+        "study_id": str(study_id),
+        "sessions_deleted": session_count,
+        "storage_cleanup": cleanup,
+    }
