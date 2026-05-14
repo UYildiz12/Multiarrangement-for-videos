@@ -6,8 +6,10 @@ This directory contains the FastAPI backend that powers the browser-based Multia
 
 - create and manage studies, stimuli, sessions, and trials
 - generate set-cover batches and adaptive LTW subsets
-- fuse trial data into RDM and evidence outputs
+- fuse token-center distances into RDM and evidence outputs
 - expose experimenter and admin endpoints for the web UI
+
+For arrangement paradigms, submitted positions are token centers. When the web client provides arena size, the backend attaches the arena center and radius to each trial before RDM estimation so distances are computed in arena-radius units rather than raw pixels.
 
 The local development path uses SQLite by default, so studies, invites, sessions, and results survive backend restarts even without Supabase.
 

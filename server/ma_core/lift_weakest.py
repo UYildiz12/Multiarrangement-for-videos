@@ -20,23 +20,50 @@ class TrialArrangement:
 
     Attributes:
         subset: list of global item indices included in the trial
-        positions: mapping from item index to (x, y) in on-screen coordinates
+        positions: mapping from item index to token-center (x, y) coordinates
+        arena_center: optional center of the arena coordinate frame
+        arena_radius: optional arena radius used to express distances in arena-radius units
     """
     subset: List[int]
     positions: Dict[int, Tuple[float, float]]
+    arena_center: Optional[Tuple[float, float]] = None
+    arena_radius: Optional[float] = None
 
 
-def _pairwise_distances_from_positions(indices: List[int], positions: Dict[int, Tuple[float, float]]) -> np.ndarray:
+def _normalize_point(
+    x: float,
+    y: float,
+    arena_center: Optional[Tuple[float, float]],
+    arena_radius: Optional[float],
+) -> Tuple[float, float]:
+    if arena_center is None or arena_radius is None:
+        return x, y
+    radius = float(arena_radius)
+    if not math.isfinite(radius) or radius <= 1e-12:
+        return x, y
+    cx, cy = arena_center
+    return (x - float(cx)) / radius, (y - float(cy)) / radius
+
+
+def _pairwise_distances_from_positions(
+    indices: List[int],
+    positions: Dict[int, Tuple[float, float]],
+    arena_center: Optional[Tuple[float, float]] = None,
+    arena_radius: Optional[float] = None,
+) -> np.ndarray:
     """Compute an (m x m) Euclidean distance matrix for given indices from positions.
 
-    Returns distances in on-screen units (unscaled as placed by the subject).
+    Positions are token centers. If arena geometry is provided, distances are
+    returned in arena-radius units; otherwise they use the submitted coordinate units.
     """
     m = len(indices)
     D = np.zeros((m, m), dtype=float)
     for i in range(m):
         xi, yi = positions[indices[i]]
+        xi, yi = _normalize_point(xi, yi, arena_center, arena_radius)
         for j in range(i + 1, m):
             xj, yj = positions[indices[j]]
+            xj, yj = _normalize_point(xj, yj, arena_center, arena_radius)
             d = math.hypot(xi - xj, yi - yj)
             D[i, j] = D[j, i] = d
     return D
@@ -73,7 +100,7 @@ def _prepare_trial_info(
             continue
         if not t.positions:
             continue
-        D_sub = _pairwise_distances_from_positions(subset, t.positions)
+        D_sub = _pairwise_distances_from_positions(subset, t.positions, t.arena_center, t.arena_radius)
         trial_info.append((subset, D_sub))
     return trial_info
 
@@ -244,12 +271,12 @@ def estimate_rdm_weighted_average(
     robust_method: Optional[str] = None,  # 'winsor' | 'huber' | 'resid_huber' | 'winsor_resid_huber' | None
     robust_winsor_high: float = 0.98,
     robust_huber_c: float = 0.9,
-    weight_mode: str = 'max',  # 'max' (dnorm=d/max), 'rms' (scaled to match RMS), or 'k2012' (raw unscaled^alpha weights)
+    weight_mode: str = 'max',  # 'max' (dnorm=d/max), 'rms' (scaled to match RMS), or 'k2012' (raw center-distance^alpha weights)
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Estimate full RDM (n x n) via weighted average of iteratively scaled subset RDMS.
 
     Weight per pair in a trial is configurable via `weight_mode`:
-        - 'k2012': evidence weight equals unscaled on-screen distance^alpha (typically alpha=2),
+        - 'k2012': evidence weight equals raw center-to-center distance^alpha (typically alpha=2),
                    matching the description in inversemdsalgos.txt (no per-trial normalization).
         - 'max':   evidence weight equals (d_ij / max_d_in_trial)^alpha (per-trial max normalization).
         - 'rms':   evidence weight uses RMS-matched distances (D_scaled)^alpha.
@@ -378,7 +405,7 @@ def estimate_rdm_weighted_average(
                         num[ib, ia] += D_scaled[a, b] * w
                         den[ib, ia] += w
             elif weight_mode == 'k2012':
-                # Use unscaled on-screen distances directly for weighting (no per-trial normalization)
+                # Use raw center-to-center distances directly for weighting (no per-trial max normalization)
                 # WARNING: robust thresholds assume normalized distances; use with care.
                 for a in range(m):
                     ia = subset[a]
@@ -815,7 +842,7 @@ def refine_rdm_inverse_mds(
 
     Args:
         D_init: initial full RDM estimate (n x n), symmetric with zeros diagonal
-        trials: trial arrangements (subsets and on-screen positions)
+        trials: trial arrangements (subsets and token-center positions)
         max_iter: maximum refinement iterations
         tol: RMS disparity threshold for stopping
         step_c: adjustment factor for dissimilarity update (c in the description)
@@ -827,14 +854,14 @@ def refine_rdm_inverse_mds(
     D = D_init.copy().astype(float)
     np.fill_diagonal(D, 0.0)
 
-    # Prepare trial subset true on-screen distance matrices
+    # Prepare trial subset observed center-to-center distance matrices
     trials = list(trials)
     trial_data: List[Tuple[List[int], np.ndarray]] = []
     for t in trials:
         subset = list(t.subset)
         if len(subset) < 2:
             continue
-        D_obs = _pairwise_distances_from_positions(subset, t.positions)
+        D_obs = _pairwise_distances_from_positions(subset, t.positions, t.arena_center, t.arena_radius)
         trial_data.append((subset, D_obs))
 
     iu_full = np.triu_indices(n, 1)

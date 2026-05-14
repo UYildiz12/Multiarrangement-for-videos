@@ -5,6 +5,8 @@
 
 Multiarrangement is an open-source toolkit for collecting human similarity judgments by arranging video, image, or audio stimuli on a 2D canvas. The package supports fixed-batch set-cover experiments and adaptive Lift-the-Weakest (LTW) experiments, then fuses trial-level layouts into representational dissimilarity matrices (RDMs) for downstream analysis.
 
+Distances are computed between stimulus token centers. In the hosted web implementation, submitted center coordinates are interpreted relative to the arena center and scaled by the arena radius before RDM estimation, so equivalent layouts have the same geometry across screen sizes while exact raw coordinates remain available for trial reconstruction.
+
 ## Repository layout
 
 - `multiarrangement/` and `coverlib/`: desktop package source, demos, bundled media, and covering-design utilities

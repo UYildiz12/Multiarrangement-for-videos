@@ -4,13 +4,14 @@ Set-cover fusion utilities for web backend.
 Implements the same fusion modes as the desktop library:
 - max: per-trial max-normalized distances with weights (d/max)^alpha
 - rms: RMS-matched weighted average
-- k2012: raw-distance weights + RMS-matched numerator
+- k2012: raw center-distance weights + RMS-matched numerator
 Optional robust weighting and inverse-MDS refinement.
 """
 
 from __future__ import annotations
 
 from typing import Iterable, Optional, Tuple
+import math
 import numpy as np
 
 from .lift_weakest import (
@@ -23,16 +24,35 @@ from .lift_weakest import (
 def _pairwise_distances_from_positions(
     subset: list[int],
     positions: dict[int, tuple[float, float]],
+    arena_center: tuple[float, float] | None = None,
+    arena_radius: float | None = None,
 ) -> np.ndarray:
     m = len(subset)
     D = np.zeros((m, m), dtype=float)
     for i in range(m):
         xi, yi = positions[subset[i]]
+        xi, yi = _normalize_point(xi, yi, arena_center, arena_radius)
         for j in range(i + 1, m):
             xj, yj = positions[subset[j]]
+            xj, yj = _normalize_point(xj, yj, arena_center, arena_radius)
             d = float(np.hypot(xi - xj, yi - yj))
             D[i, j] = D[j, i] = d
     return D
+
+
+def _normalize_point(
+    x: float,
+    y: float,
+    arena_center: tuple[float, float] | None,
+    arena_radius: float | None,
+) -> tuple[float, float]:
+    if arena_center is None or arena_radius is None:
+        return x, y
+    radius = float(arena_radius)
+    if not math.isfinite(radius) or radius <= 1e-12:
+        return x, y
+    cx, cy = arena_center
+    return (x - float(cx)) / radius, (y - float(cy)) / radius
 
 
 def fuse_setcover(
@@ -66,7 +86,7 @@ def fuse_setcover(
             subset = list(t.subset)
             if len(subset) < 2 or not t.positions:
                 continue
-            D_sub = _pairwise_distances_from_positions(subset, t.positions)
+            D_sub = _pairwise_distances_from_positions(subset, t.positions, t.arena_center, t.arena_radius)
             iu = np.triu_indices(len(subset), 1)
             maxd = float(np.max(D_sub[iu])) if iu[0].size else 0.0
             norm = (1.0 / maxd) if maxd > 1e-12 else 0.0

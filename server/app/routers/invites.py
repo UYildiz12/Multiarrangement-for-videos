@@ -147,7 +147,8 @@ def _create_demo_study(paradigm: str, n_stimuli: int) -> UUID:
         "language": Language.EN.value,
         "instructions_json": [
             "Arrange the stimuli based on their perceived similarity.",
-            "Place similar stimuli closer together so token distances reflect dissimilarity.",
+            "Use each token's center as its location; center-to-center distances become dissimilarities.",
+            "Place similar token centers close together and different token centers far apart.",
             "Double-click a stimulus to play it.",
             "All stimuli must be inside the circle before you submit.",
         ],

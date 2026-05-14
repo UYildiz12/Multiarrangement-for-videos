@@ -31,7 +31,8 @@ def show_instructions_pygame(mode: str = "video", language: str = "en"):
                 ("You will see groups of videos that you need to arrange by similarity.", "similar.mp4"),
                 ("First, you will watch all videos in the group.", "Same.mkv"),
                 ("Then, arrange the video circles by dragging them.", "drag.mp4"),
-                ("Place similar videos close together, dissimilar videos far apart.", "similar.mp4"),
+                ("Use each circle's center as its location.", "similar.mp4"),
+                ("Place similar circle centers close together, dissimilar circle centers far apart.", "similar.mp4"),
                 ("Double-click any circle to replay its video.", "Doubleclick.mp4"),
                 ("Click 'Done' when you're satisfied with the arrangement.", "Done.mp4"),
                 ("Press SPACE to continue through these instructions.", None)
@@ -42,7 +43,8 @@ def show_instructions_pygame(mode: str = "video", language: str = "en"):
                 ("You will see groups of images that you need to arrange by similarity.", "similar.mp4"),
                 ("First, you will view all images in the group.", "Same.mkv"),
                 ("Then, arrange the image circles by dragging them.", "drag.mp4"),
-                ("Place similar images close together, dissimilar images far apart.", "similar.mp4"),
+                ("Use each circle's center as its location.", "similar.mp4"),
+                ("Place similar circle centers close together, dissimilar circle centers far apart.", "similar.mp4"),
                 ("Double-click any circle to view the image again.", "Doubleclick.mp4"),
                 ("Click 'Done' when you're satisfied with the arrangement.", "Done.mp4"),
                 ("Press SPACE to continue through these instructions.", None)
@@ -53,7 +55,8 @@ def show_instructions_pygame(mode: str = "video", language: str = "en"):
                 ("You will see groups of sounds that you need to arrange by similarity.", "similar.mp4"),
                 ("First, you will listen to all sounds in the group.", "Same.mkv"),
                 ("Then, arrange the sound circles by dragging them.", "drag.mp4"),
-                ("Place similar sounds close together, dissimilar sounds far apart.", "similar.mp4"),
+                ("Use each circle's center as its location.", "similar.mp4"),
+                ("Place similar circle centers close together, dissimilar circle centers far apart.", "similar.mp4"),
                 ("Double-click any circle to replay its sound.", "Doubleclick.mp4"),
                 ("Click 'Done' when you're satisfied with the arrangement.", "Done.mp4"),
                 ("Press SPACE to continue through these instructions.", None)
@@ -872,7 +875,7 @@ def run_multiarrangement_experiment(
     Num = np.zeros((n_media, n_media), dtype=float)
     W = np.zeros((n_media, n_media), dtype=float)
     # For optional inverse-MDS, keep trial arrangements
-    trial_arrangements = []  # list of (subset_indices, positions_by_index)
+    trial_arrangements = []  # list of (subset_indices, positions_by_index, arena_center, arena_radius)
     
     frame_cache = {}
     
@@ -1055,12 +1058,14 @@ def run_multiarrangement_experiment(
                             trial_logs.append({
                                 "subset": [int(x) for x in frame_indices],
                                 "positions": positions_by_index,
+                                "arena_center": [float(circle_center[0]), float(circle_center[1])],
+                                "arena_radius": float(circle_radius),
                             })
 
                             # Record trial for optional inverse-MDS refinement
                             if use_inverse_mds:
                                 positions_by_index = {frame_indices[i]: (float(centers[i][0]), float(centers[i][1])) for i in range(m)}
-                                trial_arrangements.append((list(frame_indices), positions_by_index))
+                                trial_arrangements.append((list(frame_indices), positions_by_index, circle_center, circle_radius))
 
                         running = False
                         break
@@ -1169,7 +1174,19 @@ def run_multiarrangement_experiment(
             for t in trial_logs:
                 subset = list(map(int, t["subset"]))
                 positions = {int(k): (float(v[0]), float(v[1])) for k, v in t["positions"].items()}
-                trials.append(TrialArrangement(subset=subset, positions=positions))
+                arena_center_raw = t.get("arena_center")
+                arena_center = None
+                if isinstance(arena_center_raw, (list, tuple)) and len(arena_center_raw) >= 2:
+                    arena_center = (float(arena_center_raw[0]), float(arena_center_raw[1]))
+                arena_radius = float(t["arena_radius"]) if t.get("arena_radius") is not None else None
+                trials.append(
+                    TrialArrangement(
+                        subset=subset,
+                        positions=positions,
+                        arena_center=arena_center,
+                        arena_radius=arena_radius,
+                    )
+                )
             D_hat, W_est = estimate_rdm_weighted_average(
                 n_media,
                 trials,
@@ -1208,7 +1225,15 @@ def run_multiarrangement_experiment(
         try:
             # Reuse adaptive utilities
             from .adaptive.lift_weakest import refine_rdm_inverse_mds, TrialArrangement
-            trials = [TrialArrangement(subset=sub, positions=pos) for (sub, pos) in trial_arrangements]
+            trials = [
+                TrialArrangement(
+                    subset=sub,
+                    positions=pos,
+                    arena_center=(float(center[0]), float(center[1])),
+                    arena_radius=float(radius),
+                )
+                for (sub, pos, center, radius) in trial_arrangements
+            ]
             D_hat = refine_rdm_inverse_mds(
                 D_hat,
                 trials,

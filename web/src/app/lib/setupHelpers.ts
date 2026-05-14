@@ -29,8 +29,9 @@ const DEFAULT_INSTRUCTIONS = {
   en: {
     arrangement: [
       "Double-click an item to play it.",
-      "Drag each item inside the white circle.",
-      "Press Done once all items are inside.",
+      "Use each token's center as its location.",
+      "Place similar token centers close together and different token centers far apart.",
+      "Drag every token center inside the white circle, then press Done.",
     ],
     pairwise: [
       "Play both items, then rate their similarity.",
@@ -41,8 +42,9 @@ const DEFAULT_INSTRUCTIONS = {
   tr: {
     arrangement: [
       "Ogeleri oynatmak icin cift tiklayin (ses/video).",
-      "Her ogeyi beyaz dairenin icine surukleyin.",
-      "Hepsi icerideyken Bitir'e basin.",
+      "Her tokenin merkezini konumu olarak dusunun.",
+      "Benzer token merkezlerini yakin, farkli token merkezlerini uzak yerlestirin.",
+      "Tum token merkezlerini beyaz dairenin icine surukleyin, sonra Bitir'e basin.",
     ],
     pairwise: [
       "Her iki ogeyi oynatin, sonra benzerlik puani verin.",

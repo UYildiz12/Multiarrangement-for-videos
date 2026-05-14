@@ -50,6 +50,8 @@ from ma_core import (
 
 router = APIRouter(tags=["sessions"])
 
+WEB_ARENA_PADDING = 20.0
+
 
 def _parse_dt(value: str | datetime | None) -> datetime | None:
     if value is None or value == "":
@@ -187,6 +189,18 @@ def _normalize_positions_payload(positions: dict[str, Any] | None) -> dict[str, 
             x, y = value.x, value.y
         normalized[str(key)] = [float(x), float(y)]
     return normalized
+
+
+def _arena_geometry_from_size(arena_size: float | None) -> tuple[tuple[float, float] | None, float | None]:
+    """Return the web arena center/radius used for scale-invariant RDM distances."""
+    if arena_size is None:
+        return None, None
+    size = float(arena_size)
+    if not np.isfinite(size) or size <= 0:
+        return None, None
+    center = (size / 2.0, size / 2.0)
+    radius = max(1.0, size / 2.0 - WEB_ARENA_PADDING)
+    return center, radius
 
 
 def _duplicate_trial_response(
@@ -661,7 +675,13 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
 
     session["current_trial_index"] = trial.trial_index + 1
     positions_dict = {int(key): (value.x, value.y) for key, value in trial.positions.items()}
-    arrangement = TrialArrangement(subset=trial.subset_indices, positions=positions_dict)
+    arena_center, arena_radius = _arena_geometry_from_size(trial.arena_size)
+    arrangement = TrialArrangement(
+        subset=trial.subset_indices,
+        positions=positions_dict,
+        arena_center=arena_center,
+        arena_radius=arena_radius,
+    )
     session["trial_arrangements"] = list(session.get("trial_arrangements") or [])
     session["trial_arrangements"].append(arrangement)
 

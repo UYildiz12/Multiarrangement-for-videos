@@ -19,11 +19,13 @@ describe("setupHelpers", () => {
   });
 
   it("builds default and custom instructions", () => {
-    expect(buildInstructions({
+    const arrangementInstructions = buildInstructions({
       paradigm: "setcover",
       instructionsMode: "en",
       customInstructions: "",
-    })).toHaveLength(3);
+    });
+    expect(arrangementInstructions).toHaveLength(4);
+    expect(arrangementInstructions?.join(" ")).toContain("token centers");
 
     expect(buildInstructions({
       paradigm: "pairwise",

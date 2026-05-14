@@ -107,6 +107,27 @@ class TestEstimateRDM:
         # Evidence should be accumulated
         assert np.sum(W) > 0
 
+    def test_arena_geometry_makes_raw_weighting_scale_invariant(self):
+        """Equivalent layouts in different arena sizes should produce the same evidence."""
+        small = TrialArrangement(
+            subset=[0, 1, 2],
+            positions={0: (300.0, 300.0), 1: (580.0, 300.0), 2: (300.0, 580.0)},
+            arena_center=(300.0, 300.0),
+            arena_radius=280.0,
+        )
+        large = TrialArrangement(
+            subset=[0, 1, 2],
+            positions={0: (375.0, 375.0), 1: (730.0, 375.0), 2: (375.0, 730.0)},
+            arena_center=(375.0, 375.0),
+            arena_radius=355.0,
+        )
+
+        D_small, W_small = estimate_rdm_weighted_average(3, [small], weight_mode="k2012")
+        D_large, W_large = estimate_rdm_weighted_average(3, [large], weight_mode="k2012")
+
+        np.testing.assert_allclose(D_small, D_large, atol=1e-9)
+        np.testing.assert_allclose(W_small, W_large, atol=1e-9)
+
 
 class TestSelectNextSubset:
     """Tests for lift-the-weakest subset selection."""

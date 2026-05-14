@@ -59,7 +59,7 @@ def _scale_rdm_for_output(D: np.ndarray, paradigm: str) -> tuple[list[list[float
     return scaled.tolist(), raw.tolist(), {
         "method": "max_offdiag_0_1",
         "divisor": divisor,
-        "raw_units": "reconstructed Euclidean dissimilarity",
+        "raw_units": "reconstructed center-to-center Euclidean dissimilarity",
         "description": "Arrangement RDM divided by its maximum finite off-diagonal value; ratios and rank order are preserved.",
     }
 

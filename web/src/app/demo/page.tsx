@@ -91,7 +91,8 @@ export default function DemoPage() {
             }));
             sessionStorage.setItem("experimentInstructions", JSON.stringify([
                 "Arrange the stimuli based on their perceived similarity.",
-                "Place similar stimuli closer together — token center distances reflect similarity.",
+                "Use each token's center as its location; center-to-center distances become dissimilarities.",
+                "Place similar token centers close together and different token centers far apart.",
                 "Double-click a stimulus to play it.",
                 "All stimuli must be inside the circle before you can submit.",
             ]));

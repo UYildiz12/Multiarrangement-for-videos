@@ -53,13 +53,20 @@ def _decode_pairwise_ratings(value: dict[str, list[Any]] | None) -> dict[tuple[i
 
 
 def _serialize_trial_arrangement(arrangement: TrialArrangement) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "subset": list(arrangement.subset),
         "positions": {
             str(int(idx)): [float(pos[0]), float(pos[1])]
             for idx, pos in arrangement.positions.items()
         },
     }
+    arena_center = getattr(arrangement, "arena_center", None)
+    arena_radius = getattr(arrangement, "arena_radius", None)
+    if arena_center is not None:
+        payload["arena_center"] = [float(arena_center[0]), float(arena_center[1])]
+    if arena_radius is not None:
+        payload["arena_radius"] = float(arena_radius)
+    return payload
 
 
 def _deserialize_trial_arrangement(payload: dict[str, Any]) -> TrialArrangement:
@@ -67,9 +74,17 @@ def _deserialize_trial_arrangement(payload: dict[str, Any]) -> TrialArrangement:
         int(idx): (float(values[0]), float(values[1]))
         for idx, values in (payload.get("positions") or {}).items()
     }
+    arena_center_raw = payload.get("arena_center")
+    arena_center = None
+    if isinstance(arena_center_raw, (list, tuple)) and len(arena_center_raw) >= 2:
+        arena_center = (float(arena_center_raw[0]), float(arena_center_raw[1]))
+    arena_radius_raw = payload.get("arena_radius")
+    arena_radius = float(arena_radius_raw) if arena_radius_raw is not None else None
     return TrialArrangement(
         subset=[int(idx) for idx in payload.get("subset") or []],
         positions=positions,
+        arena_center=arena_center,
+        arena_radius=arena_radius,
     )
 
 

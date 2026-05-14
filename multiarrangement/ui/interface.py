@@ -182,7 +182,8 @@ class BaseInterface(ABC):
                     "You will see groups of videos that you need to arrange by similarity.",
                     "First, you will watch all videos in the group.",
                     "Then, arrange the video circles by dragging them.",
-                    "Place similar videos close together, dissimilar videos far apart.",
+                    "Use each circle's center as its location.",
+                    "Place similar circle centers close together, dissimilar circle centers far apart.",
                     "Double-click any circle to replay its video.",
                     "Click 'Done' when you're satisfied with the arrangement.",
                     "Press SPACE to continue through these instructions."
@@ -193,7 +194,8 @@ class BaseInterface(ABC):
                     "You will see groups of images that you need to arrange by similarity.",
                     "First, you will view all images in the group.",
                     "Then, arrange the image circles by dragging them.",
-                    "Place similar images close together, dissimilar images far apart.",
+                    "Use each circle's center as its location.",
+                    "Place similar circle centers close together, dissimilar circle centers far apart.",
                     "Double-click any circle to view the image again.",
                     "Click 'Done' when you're satisfied with the arrangement.",
                     "Press SPACE to continue through these instructions."
@@ -204,7 +206,8 @@ class BaseInterface(ABC):
                     "You will see groups of sounds that you need to arrange by similarity.",
                     "First, you will listen to all sounds in the group.",
                     "Then, arrange the sound circles by dragging them.",
-                    "Place similar sounds close together, dissimilar sounds far apart.",
+                    "Use each circle's center as its location.",
+                    "Place similar circle centers close together, dissimilar circle centers far apart.",
                     "Double-click any circle to replay its sound.",
                     "Click 'Done' when you're satisfied with the arrangement.",
                     "Press SPACE to continue through these instructions."
