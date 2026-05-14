@@ -163,6 +163,64 @@ def get_trials_for_session(session_id: UUID | str) -> list[dict[str, Any]]:
     return [_trial_from_row(row) for row in rows]
 
 
+def _get_trial_for_index(session_id: UUID | str, trial_index: int) -> dict[str, Any] | None:
+    with connect(readonly=True) as conn:
+        row = fetch_one(
+            conn,
+            select(trials_table).where(
+                trials_table.c.session_id == str(session_id),
+                trials_table.c.trial_index == int(trial_index),
+            ),
+        )
+    return _trial_from_row(row) if row else None
+
+
+def _normalize_positions_payload(positions: dict[str, Any] | None) -> dict[str, list[float]] | None:
+    if positions is None:
+        return None
+    normalized: dict[str, list[float]] = {}
+    for key, value in positions.items():
+        if isinstance(value, (list, tuple)) and len(value) >= 2:
+            x, y = value[0], value[1]
+        else:
+            x, y = value.x, value.y
+        normalized[str(key)] = [float(x), float(y)]
+    return normalized
+
+
+def _duplicate_trial_response(
+    session_id: UUID,
+    trial: TrialSubmit,
+    session: dict[str, Any],
+    study: dict[str, Any],
+    n_stimuli: int,
+    positions_json: dict[str, list[float]] | None,
+) -> TrialResponse | None:
+    existing = _get_trial_for_index(session_id, trial.trial_index)
+    if existing is None:
+        return None
+    if [int(idx) for idx in trial.subset_indices] != existing["subset_indices"]:
+        return None
+    rating = int(trial.rating) if trial.rating is not None else None
+    if rating != existing["rating"]:
+        return None
+    if _normalize_positions_payload(existing["positions"]) != positions_json:
+        return None
+
+    next_trial, session_changed = _build_next_trial_response(session, study, n_stimuli)
+    if session_changed:
+        _save_session(session)
+    return TrialResponse(
+        id=existing["id"],
+        trial_index=existing["trial_index"],
+        subset_indices=existing["subset_indices"],
+        duration_seconds=existing["duration_seconds"],
+        started_at=existing["started_at"],
+        completed_at=existing["completed_at"],
+        next_trial=next_trial,
+    )
+
+
 def list_sessions_for_study(study_id: UUID | str) -> list[dict[str, Any]]:
     with connect(readonly=True) as conn:
         rows = fetch_all(
@@ -484,12 +542,24 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
     if study is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
 
+    stimuli = list_stimuli_for_study(session["study_id"])
+    n_stimuli = len(stimuli)
     now = datetime.now(timezone.utc)
     trial_id = uuid4()
 
     if study["paradigm"] == Paradigm.PAIRWISE:
         pairs = session.get("pairs", [])
         if trial.trial_index != session["current_trial_index"]:
+            duplicate = _duplicate_trial_response(
+                session_id,
+                trial,
+                session,
+                study,
+                n_stimuli,
+                positions_json=None,
+            )
+            if duplicate is not None:
+                return duplicate
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trial index out of sequence")
         if len(trial.subset_indices) != 2:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pairwise trials must include exactly two indices")
@@ -513,8 +583,6 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             "completed_at": now.isoformat(),
         }
 
-        stimuli = list_stimuli_for_study(session["study_id"])
-        n_stimuli = len(stimuli)
         if n_stimuli >= 2:
             pairwise_ratings = dict(session.get("pairwise_ratings") or {})
             left, right = trial.subset_indices[0], trial.subset_indices[1]
@@ -555,17 +623,25 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
 
     if trial.positions is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Positions are required for arrangement paradigms")
-    if trial.trial_index != session["current_trial_index"]:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trial index out of sequence")
 
     missing = [idx for idx in trial.subset_indices if str(idx) not in trial.positions]
     if missing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing positions for indices: {missing}")
 
-    positions_json = {
-        str(key): [float(value.x), float(value.y)]
-        for key, value in trial.positions.items()
-    }
+    positions_json = _normalize_positions_payload(trial.positions)
+    if trial.trial_index != session["current_trial_index"]:
+        duplicate = _duplicate_trial_response(
+            session_id,
+            trial,
+            session,
+            study,
+            n_stimuli,
+            positions_json=positions_json,
+        )
+        if duplicate is not None:
+            return duplicate
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trial index out of sequence")
+
     trial_row = {
         "id": str(trial_id),
         "session_id": str(session_id),
@@ -600,7 +676,6 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             anchor_a, anchor_b = subset_for_tracking[0], subset_for_tracking[1]
             session["last_anchor_pair"] = (min(anchor_a, anchor_b), max(anchor_a, anchor_b))
 
-    n_stimuli = len(list_stimuli_for_study(session["study_id"]))
     if n_stimuli >= 2:
         config = study["config"]
         robust_method = config.get("robust_method")

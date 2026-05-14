@@ -91,6 +91,35 @@ def test_setcover_session_caps_batch_size_to_available_stimuli(client):
     assert len(next_resp.json()["subset_indices"]) == 4
 
 
+def test_duplicate_arrangement_submit_is_idempotent(client):
+    study_id = _create_study_with_stimuli(
+        client,
+        name="duplicate_submit",
+        paradigm="setcover",
+        n=6,
+        config={"batch_size": 4},
+    )
+    session_resp = client.post(f"/api/v1/studies/{study_id}/sessions", json={"participant_id": "p1"})
+    assert session_resp.status_code == 201
+    session_id = session_resp.json()["session_id"]
+    first_trial = client.get(f"/api/v1/sessions/{session_id}/next").json()
+    payload = {
+        "trial_index": first_trial["trial_index"],
+        "subset_indices": first_trial["subset_indices"],
+        "positions": _circle_positions(first_trial["subset_indices"]),
+        "duration_seconds": 45.0,
+    }
+
+    first_submit = client.post(f"/api/v1/sessions/{session_id}/trials", json=payload)
+    assert first_submit.status_code == 200
+    duplicate_submit = client.post(f"/api/v1/sessions/{session_id}/trials", json=payload)
+
+    assert duplicate_submit.status_code == 200
+    assert duplicate_submit.json()["trial_index"] == first_submit.json()["trial_index"]
+    assert duplicate_submit.json()["id"] == first_submit.json()["id"]
+    assert duplicate_submit.json()["next_trial"] == first_submit.json()["next_trial"]
+
+
 def test_adaptive_first_trial_and_rdm_are_valid_for_large_video_sets(client):
     n_stimuli = 58
     study_id = _create_study_with_stimuli(

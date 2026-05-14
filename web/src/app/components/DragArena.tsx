@@ -33,6 +33,7 @@ interface ArenaProps {
   size?: number;
   trialIndex?: number;
   language?: "en" | "tr";
+  submitting?: boolean;
 }
 
 const MAX_ITEM_RADIUS = 55;
@@ -72,6 +73,7 @@ export default function DragArena({
   size = 600,
   trialIndex = 0,
   language = "en",
+  submitting = false,
 }: ArenaProps) {
   const arenaRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<DraggableItem[]>([]);
@@ -275,22 +277,7 @@ export default function DragArena({
   const allPlayed = items.every((item) =>
     item.mediaType === "image" || playedItems.has(item.id)
   );
-  const playableItems = items.filter((item) => item.mediaType !== "image");
-  const playedPlayableCount = playableItems.filter((item) => playedItems.has(item.id)).length;
-  const canSubmit = allInside && allPlayed;
-  const playProgressText =
-    playableItems.length > 0
-      ? language === "tr"
-        ? `${playedPlayableCount}/${playableItems.length} oynatildi`
-        : `Played ${playedPlayableCount}/${playableItems.length}`
-      : null;
-  const placementText = allInside
-    ? language === "tr"
-      ? "Yerlesim hazir"
-      : "Placement ready"
-    : language === "tr"
-      ? "Tum ogeleri cembere tasiyin"
-      : "Move all items into the circle";
+  const canSubmit = allInside && allPlayed && !submitting;
 
   const containerSize = size + itemRadius * 2 + seatGap * 2;
 
@@ -407,44 +394,6 @@ export default function DragArena({
         })}
       </div>
 
-      <div
-        role="status"
-        aria-live="polite"
-        style={{
-          position: "absolute",
-          bottom: 52,
-          left: 8,
-          display: "flex",
-          gap: 8,
-          flexWrap: "wrap",
-          maxWidth: Math.min(360, containerSize - 16),
-          color: "#fff",
-          fontSize: 12,
-          fontWeight: 700,
-        }}
-      >
-        {playProgressText && (
-          <span
-            style={{
-              padding: "6px 10px",
-              borderRadius: 999,
-              background: allPlayed ? "rgba(0, 160, 0, 0.75)" : "rgba(200, 0, 0, 0.78)",
-            }}
-          >
-            {playProgressText}
-          </span>
-        )}
-        <span
-          style={{
-            padding: "6px 10px",
-            borderRadius: 999,
-            background: allInside ? "rgba(0, 160, 0, 0.75)" : "rgba(200, 0, 0, 0.78)",
-          }}
-        >
-          {placementText}
-        </span>
-      </div>
-
       {/* Done button */}
       <button
         onClick={onSubmit}
@@ -452,7 +401,7 @@ export default function DragArena({
         style={{
           position: "absolute",
           bottom: 8,
-          left: 8,
+          left: -12,
           padding: "10px 30px",
           borderRadius: 2,
           border: "none",

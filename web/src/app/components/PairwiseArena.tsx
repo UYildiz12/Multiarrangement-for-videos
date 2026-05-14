@@ -20,6 +20,7 @@ interface PairwiseArenaProps {
     trialIndex: number;
     totalTrials: number;
     language?: "en" | "tr";
+    submitting?: boolean;
 }
 
 export default function PairwiseArena({
@@ -30,12 +31,13 @@ export default function PairwiseArena({
     trialIndex,
     totalTrials,
     language = "en",
+    submitting = false,
 }: PairwiseArenaProps) {
     const [rating, setRating] = useState<number | null>(null);
     const [watchedA, setWatchedA] = useState(stimulusA.mediaType === "image");
     const [watchedB, setWatchedB] = useState(stimulusB.mediaType === "image");
 
-    const canSubmit = rating !== null && watchedA && watchedB;
+    const canSubmit = rating !== null && watchedA && watchedB && !submitting;
 
     const handlePlayA = useCallback(() => {
         onMediaPlay(stimulusA.id, stimulusA.mediaUrl, stimulusA.mediaType);
@@ -48,14 +50,14 @@ export default function PairwiseArena({
     }, [stimulusB, onMediaPlay]);
 
     const handleSubmit = useCallback(() => {
-        if (rating !== null) {
+        if (rating !== null && !submitting) {
             onSubmit(rating);
             // Reset for next trial
             setRating(null);
             setWatchedA(false);
             setWatchedB(false);
         }
-    }, [rating, onSubmit]);
+    }, [rating, submitting, onSubmit]);
 
     // Rating labels: 1 = very different to 7 = very similar (similarity scale)
     const ratingLabels = language === "tr"

@@ -169,6 +169,7 @@ function ExperimentContent() {
     const [isFinal, setIsFinal] = useState(false);
     const [loadingTrial, setLoadingTrial] = useState(false);
     const [loadingSession, setLoadingSession] = useState(false);
+    const [submittingTrial, setSubmittingTrial] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [paradigm, setParadigm] = useState<Paradigm>("setcover");
     const [instructions, setInstructions] = useState<string[]>([]);
@@ -189,6 +190,7 @@ function ExperimentContent() {
     // Chain state
     const hydrationDoneRef = useRef(false);
     const hydrationKeyRef = useRef<string | null>(null);
+    const submittingTrialRef = useRef(false);
     const [chainToken, setChainToken] = useState<string | null>(null);
     const [chainName, setChainName] = useState<string | null>(null);
     const [chainTotalStudies, setChainTotalStudies] = useState<number>(0);
@@ -621,6 +623,10 @@ function ExperimentContent() {
 
     const handleSubmit = useCallback(async () => {
         if (!sessionId || subsetIndices.length === 0) return;
+        if (submittingTrialRef.current) return;
+        submittingTrialRef.current = true;
+        setSubmittingTrial(true);
+        setError(null);
         const durationSeconds = trialStartedAt ? (Date.now() - trialStartedAt) / 1000 : 0;
 
         try {
@@ -641,11 +647,18 @@ function ExperimentContent() {
         } catch (err) {
             const msg = err instanceof Error ? err.message : copy.submitTrialError;
             setError(msg);
+        } finally {
+            submittingTrialRef.current = false;
+            setSubmittingTrial(false);
         }
     }, [sessionId, subsetIndices, positions, trialStartedAt, trialIndex, loadNextTrial, applyNextTrial, copy]);
 
     const handlePairwiseSubmit = useCallback(async (rating: number) => {
         if (!sessionId || subsetIndices.length !== 2) return;
+        if (submittingTrialRef.current) return;
+        submittingTrialRef.current = true;
+        setSubmittingTrial(true);
+        setError(null);
         const durationSeconds = trialStartedAt ? (Date.now() - trialStartedAt) / 1000 : 0;
 
         try {
@@ -666,6 +679,9 @@ function ExperimentContent() {
         } catch (err) {
             const msg = err instanceof Error ? err.message : copy.submitTrialError;
             setError(msg);
+        } finally {
+            submittingTrialRef.current = false;
+            setSubmittingTrial(false);
         }
     }, [sessionId, subsetIndices, trialStartedAt, trialIndex, loadNextTrial, applyNextTrial, copy]);
 
@@ -1093,6 +1109,7 @@ function ExperimentContent() {
                     trialIndex={trialIndex}
                     totalTrials={totalTrials || 0} // You might want to get total from session
                     language={language}
+                    submitting={submittingTrial}
                 />
             ) : (
                 <DragArena
@@ -1105,6 +1122,7 @@ function ExperimentContent() {
                     size={arenaSize}
                     trialIndex={trialIndex}
                     language={language}
+                    submitting={submittingTrial}
                 />
             )}
 

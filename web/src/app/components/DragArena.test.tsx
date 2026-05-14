@@ -41,7 +41,7 @@ describe("DragArena", () => {
     expect(screen.getAllByLabelText(/Play stimulus Stimulus/i)).toHaveLength(58);
   });
 
-  it("shows playback progress for dense all-video trials", () => {
+  it("keeps the dense all-video arena free of status badges", () => {
     render(
       <DragArena
         stimuli={makeStimuli(58, "video")}
@@ -51,7 +51,13 @@ describe("DragArena", () => {
       />
     );
 
-    expect(screen.getByText("Played 2/58")).toBeInTheDocument();
-    expect(screen.getByText("Move all items into the circle")).toBeInTheDocument();
+    expect(screen.queryByText("Played 2/58")).not.toBeInTheDocument();
+    expect(screen.queryByText("Move all items into the circle")).not.toBeInTheDocument();
+  });
+
+  it("places the Done button slightly left of the arena edge", () => {
+    render(<DragArena stimuli={makeStimuli(4)} size={600} trialIndex={0} />);
+
+    expect(screen.getByRole("button", { name: "Done" })).toHaveStyle({ left: "-12px" });
   });
 });
