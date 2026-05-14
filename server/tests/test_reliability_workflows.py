@@ -117,16 +117,23 @@ def test_duplicate_arrangement_submit_is_idempotent(client):
         "subset_indices": first_trial["subset_indices"],
         "positions": _circle_positions(first_trial["subset_indices"]),
         "duration_seconds": 45.0,
+        "arena_size": 600,
     }
 
     first_submit = client.post(f"/api/v1/sessions/{session_id}/trials", json=payload)
     assert first_submit.status_code == 200
+    assert first_submit.json()["arena_size"] == 600
     duplicate_submit = client.post(f"/api/v1/sessions/{session_id}/trials", json=payload)
 
     assert duplicate_submit.status_code == 200
     assert duplicate_submit.json()["trial_index"] == first_submit.json()["trial_index"]
     assert duplicate_submit.json()["id"] == first_submit.json()["id"]
     assert duplicate_submit.json()["next_trial"] == first_submit.json()["next_trial"]
+    assert duplicate_submit.json()["arena_size"] == 600
+
+    trials_resp = client.get(f"/api/v1/admin/sessions/{session_id}/trials")
+    assert trials_resp.status_code == 200
+    assert trials_resp.json()[0]["arena_size"] == 600
 
 
 def test_arrangement_results_return_scaled_rdm_with_raw_audit_matrix(client):

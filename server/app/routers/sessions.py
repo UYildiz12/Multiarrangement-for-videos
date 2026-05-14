@@ -88,6 +88,7 @@ def _trial_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "positions": row.get("positions_json"),
         "rating": row.get("rating"),
         "duration_seconds": float(row["duration_seconds"]),
+        "arena_size": float(row["arena_size"]) if row.get("arena_size") is not None else None,
         "started_at": _parse_dt(row["started_at"]),
         "completed_at": _parse_dt(row.get("completed_at")),
     }
@@ -215,6 +216,7 @@ def _duplicate_trial_response(
         trial_index=existing["trial_index"],
         subset_indices=existing["subset_indices"],
         duration_seconds=existing["duration_seconds"],
+        arena_size=existing.get("arena_size"),
         started_at=existing["started_at"],
         completed_at=existing["completed_at"],
         next_trial=next_trial,
@@ -579,6 +581,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             "positions_json": None,
             "rating": trial.rating,
             "duration_seconds": float(trial.duration_seconds),
+            "arena_size": None,
             "started_at": now.isoformat(),
             "completed_at": now.isoformat(),
         }
@@ -616,6 +619,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             trial_index=trial.trial_index,
             subset_indices=[int(idx) for idx in trial.subset_indices],
             duration_seconds=trial.duration_seconds,
+            arena_size=None,
             started_at=now,
             completed_at=now,
             next_trial=next_trial,
@@ -650,6 +654,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         "positions_json": positions_json,
         "rating": None,
         "duration_seconds": float(trial.duration_seconds),
+        "arena_size": float(trial.arena_size) if trial.arena_size is not None else None,
         "started_at": now.isoformat(),
         "completed_at": now.isoformat(),
     }
@@ -754,6 +759,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         trial_index=trial.trial_index,
         subset_indices=[int(idx) for idx in trial.subset_indices],
         duration_seconds=trial.duration_seconds,
+        arena_size=trial.arena_size,
         started_at=now,
         completed_at=now,
         next_trial=next_trial,

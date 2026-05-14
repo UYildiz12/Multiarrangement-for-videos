@@ -7,6 +7,7 @@ export interface TrialDetail {
   positions?: Record<string, [number, number] | { x: number; y: number }> | null;
   rating?: number | null;
   duration_seconds?: number | null;
+  arena_size?: number | null;
   started_at?: string | null;
   completed_at?: string | null;
 }
@@ -48,6 +49,43 @@ function formatPoint(value: [number, number] | null): string {
   return `${value[0].toFixed(2)}, ${value[1].toFixed(2)}`;
 }
 
+const SVG_WIDTH = 220;
+const SVG_HEIGHT = 180;
+const SVG_CENTER_X = SVG_WIDTH / 2;
+const SVG_CENTER_Y = SVG_HEIGHT / 2;
+const SVG_ARENA_RADIUS = 74;
+const SOURCE_ARENA_PADDING = 20;
+const MIN_SOURCE_ARENA_SIZE = 260;
+const MAX_SOURCE_ARENA_SIZE = 760;
+const INFERRED_ARENA_ROUNDING = 20;
+
+function inferArenaSize(points: { x: number; y: number }[], submittedArenaSize?: number | null): number {
+  if (submittedArenaSize && Number.isFinite(submittedArenaSize) && submittedArenaSize > 0) {
+    return submittedArenaSize;
+  }
+  if (points.length === 0) return 600;
+
+  const maxCoordinate = Math.max(...points.flatMap((point) => [point.x, point.y]));
+  const minCandidate = Math.max(MIN_SOURCE_ARENA_SIZE, Math.ceil(maxCoordinate));
+  for (let size = minCandidate; size <= MAX_SOURCE_ARENA_SIZE; size += 1) {
+    const center = size / 2;
+    const radius = center - SOURCE_ARENA_PADDING;
+    const containsAll = points.every((point) => {
+      const dx = point.x - center;
+      const dy = point.y - center;
+      return Math.sqrt(dx * dx + dy * dy) <= radius + 2;
+    });
+    if (containsAll) {
+      return Math.min(MAX_SOURCE_ARENA_SIZE, Math.ceil(size / INFERRED_ARENA_ROUNDING) * INFERRED_ARENA_ROUNDING);
+    }
+  }
+
+  return Math.min(
+    MAX_SOURCE_ARENA_SIZE,
+    Math.max(MIN_SOURCE_ARENA_SIZE, Math.ceil(maxCoordinate / INFERRED_ARENA_ROUNDING) * INFERRED_ARENA_ROUNDING)
+  );
+}
+
 function buildSvgPoints(trial: TrialDetail) {
   const points = trial.subset_indices
     .map((ordinal) => {
@@ -56,23 +94,21 @@ function buildSvgPoints(trial: TrialDetail) {
     })
     .filter(Boolean) as { ordinal: number; x: number; y: number }[];
 
-  if (points.length === 0) return [];
+  if (points.length === 0) return { points: [], arenaSize: trial.arena_size ?? null };
 
-  const width = 220;
-  const height = 180;
-  const pad = 22;
-  const minX = Math.min(...points.map((point) => point.x));
-  const maxX = Math.max(...points.map((point) => point.x));
-  const minY = Math.min(...points.map((point) => point.y));
-  const maxY = Math.max(...points.map((point) => point.y));
-  const rangeX = Math.max(1, maxX - minX);
-  const rangeY = Math.max(1, maxY - minY);
+  const arenaSize = inferArenaSize(points, trial.arena_size);
+  const sourceCenter = arenaSize / 2;
+  const sourceRadius = Math.max(1, sourceCenter - SOURCE_ARENA_PADDING);
+  const scale = SVG_ARENA_RADIUS / sourceRadius;
 
-  return points.map((point) => ({
-    ...point,
-    sx: pad + ((point.x - minX) / rangeX) * (width - pad * 2),
-    sy: pad + ((point.y - minY) / rangeY) * (height - pad * 2),
-  }));
+  return {
+    arenaSize,
+    points: points.map((point) => ({
+      ...point,
+      sx: SVG_CENTER_X + (point.x - sourceCenter) * scale,
+      sy: SVG_CENTER_Y + (point.y - sourceCenter) * scale,
+    })),
+  };
 }
 
 export default function TrialReconstruction({ trials, stimuli }: TrialReconstructionProps) {
@@ -83,7 +119,7 @@ export default function TrialReconstruction({ trials, stimuli }: TrialReconstruc
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {trials.map((trial) => {
-        const svgPoints = buildSvgPoints(trial);
+        const svgReconstruction = buildSvgPoints(trial);
         return (
           <section
             key={trial.id}
@@ -111,19 +147,36 @@ export default function TrialReconstruction({ trials, stimuli }: TrialReconstruc
                 <svg
                   role="img"
                   aria-label={`Trial ${trial.trial_index + 1} submitted arrangement`}
-                  viewBox="0 0 220 180"
+                  viewBox={`0 0 ${SVG_WIDTH} ${SVG_HEIGHT}`}
+                  data-arena-size={svgReconstruction.arenaSize ?? undefined}
                   style={{
-                    width: 220,
-                    height: 180,
+                    width: SVG_WIDTH,
+                    height: SVG_HEIGHT,
                     background: "radial-gradient(circle at 50% 50%, #111 0%, #050505 72%)",
                     border: "1px solid #222",
                     borderRadius: 10,
                   }}
                 >
-                  <circle cx="110" cy="90" r="74" fill="none" stroke="#333" strokeWidth="1.5" />
-                  {svgPoints.map((point) => (
+                  <circle
+                    data-testid={`trial-${trial.trial_index}-arena-circle`}
+                    cx={SVG_CENTER_X}
+                    cy={SVG_CENTER_Y}
+                    r={SVG_ARENA_RADIUS}
+                    fill="none"
+                    stroke="#333"
+                    strokeWidth="1.5"
+                  />
+                  {svgReconstruction.points.map((point) => (
                     <g key={point.ordinal}>
-                      <circle cx={point.sx} cy={point.sy} r="10" fill="#00ff88" fillOpacity="0.18" stroke="#00ff88" />
+                      <circle
+                        data-testid={`trial-${trial.trial_index}-point-${point.ordinal}`}
+                        cx={point.sx.toFixed(2)}
+                        cy={point.sy.toFixed(2)}
+                        r="10"
+                        fill="#00ff88"
+                        fillOpacity="0.18"
+                        stroke="#00ff88"
+                      />
                       <text x={point.sx} y={point.sy + 3} textAnchor="middle" fontSize="9" fill="#fff">
                         {point.ordinal + 1}
                       </text>

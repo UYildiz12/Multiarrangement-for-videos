@@ -644,6 +644,7 @@ function ExperimentContent() {
                     subset_indices: subsetIndices,
                     positions,
                     duration_seconds: durationSeconds,
+                    arena_size: arenaSize,
                 }),
             });
             if (response.next_trial) {
@@ -658,7 +659,7 @@ function ExperimentContent() {
             submittingTrialRef.current = false;
             setSubmittingTrial(false);
         }
-    }, [sessionId, subsetIndices, positions, trialStartedAt, trialIndex, loadNextTrial, applyNextTrial, copy]);
+    }, [sessionId, subsetIndices, positions, trialStartedAt, trialIndex, arenaSize, loadNextTrial, applyNextTrial, copy]);
 
     const handlePairwiseSubmit = useCallback(async (rating: number) => {
         if (!sessionId || subsetIndices.length !== 2) return;

@@ -211,6 +211,7 @@ class TrialSubmit(BaseModel):
     positions: Optional[Dict[str, Position]] = None  # ordinal -> position (for arrangement)
     rating: Optional[int] = Field(default=None, ge=1, le=7)  # 1-7 scale (for pairwise)
     duration_seconds: float = Field(..., ge=0)
+    arena_size: Optional[float] = Field(default=None, gt=0)
 
 
 class TrialResponse(BaseModel):
@@ -219,6 +220,7 @@ class TrialResponse(BaseModel):
     trial_index: int
     subset_indices: List[int]
     duration_seconds: Optional[float]
+    arena_size: Optional[float] = None
     started_at: datetime
     completed_at: Optional[datetime]
     next_trial: Optional[NextTrialResponse] = None

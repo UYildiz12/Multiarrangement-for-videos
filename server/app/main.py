@@ -11,7 +11,7 @@ from app.routers import studies_router, sessions_router, results_router, invites
 from app.schemas import HealthResponse
 from app.storage import init_db
 
-APP_VERSION = "0.1.11"
+APP_VERSION = "0.1.12"
 
 app = FastAPI(
     title="Multiarrangement Web API",

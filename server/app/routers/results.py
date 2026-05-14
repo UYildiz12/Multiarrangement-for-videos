@@ -186,6 +186,7 @@ async def export_study_results(
                         "positions": trial["positions"],
                         "rating": trial.get("rating"),
                         "duration_seconds": trial["duration_seconds"],
+                        "arena_size": trial.get("arena_size"),
                         "started_at": trial["started_at"].isoformat() if trial.get("started_at") else None,
                         "completed_at": trial["completed_at"].isoformat() if trial.get("completed_at") else None,
                     }
@@ -209,6 +210,7 @@ async def export_study_results(
                 "subset_indices",
                 "rating",
                 "duration_seconds",
+                "arena_size",
                 "started_at",
                 "completed_at",
                 "positions",
@@ -225,6 +227,7 @@ async def export_study_results(
                         json.dumps(trial["subset_indices"]),
                         trial["rating"],
                         trial["duration_seconds"],
+                        trial.get("arena_size"),
                         trial["started_at"],
                         trial["completed_at"],
                         json.dumps(trial["positions"]),

@@ -91,6 +91,7 @@ trials_table = Table(
     Column("positions_json", JSON, nullable=True),
     Column("rating", Integer, nullable=True),
     Column("duration_seconds", Float, nullable=False),
+    Column("arena_size", Float, nullable=True),
     Column("started_at", String(64), nullable=False),
     Column("completed_at", String(64), nullable=True),
     UniqueConstraint("session_id", "trial_index", name="uq_trials_session_index"),
@@ -211,6 +212,7 @@ def init_db() -> None:
     engine = get_engine()
     metadata.create_all(engine)
     _ensure_stimuli_storage_columns(engine)
+    _ensure_trials_arena_size_column(engine)
 
 
 def reset_db() -> None:
@@ -287,3 +289,16 @@ def _ensure_stimuli_storage_columns(engine: Engine) -> None:
     with engine.begin() as conn:
         for sql in statements:
             conn.execute(text(sql))
+
+
+def _ensure_trials_arena_size_column(engine: Engine) -> None:
+    inspector = inspect(engine)
+    if "trials" not in inspector.get_table_names():
+        return
+
+    existing = {column["name"] for column in inspector.get_columns("trials")}
+    if "arena_size" in existing:
+        return
+
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE trials ADD COLUMN arena_size FLOAT"))
