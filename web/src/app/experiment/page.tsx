@@ -9,6 +9,7 @@ import RdmHeatmap from "../components/RdmHeatmap";
 import MediaModal from "../components/MediaModal";
 import { apiFetch } from "../lib/api";
 import { deriveTrialAdvanceState } from "../lib/experimentHelpers";
+import { getExperimentArenaSize } from "../lib/experimentDisplay";
 import { getCachedMedia } from "../lib/mediaCache";
 
 interface ResultsResponse {
@@ -84,19 +85,27 @@ async function captureVideoThumbnail(url: string): Promise<string | null> {
     return new Promise((resolve) => {
         const video = document.createElement("video");
         let settled = false;
-        const cleanup = () => {
+        const finish = (value: string | null) => {
             if (settled) return;
             settled = true;
+            window.clearTimeout(timeoutId);
             video.src = "";
             video.load();
             video.remove();
+            resolve(value);
         };
+        const timeoutId = window.setTimeout(() => finish(null), 2500);
         video.preload = "metadata";
         video.muted = true;
         video.crossOrigin = "anonymous";
-        video.onloadeddata = () => {
-            const target = Math.min(0.1, Math.max(0, video.duration ? video.duration * 0.1 : 0.1));
-            video.currentTime = target;
+        video.onloadedmetadata = () => {
+            try {
+                const duration = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 1;
+                const target = Math.min(0.1, Math.max(0, duration * 0.1));
+                video.currentTime = target;
+            } catch {
+                finish(null);
+            }
         };
         video.onseeked = () => {
             try {
@@ -107,23 +116,17 @@ async function captureVideoThumbnail(url: string): Promise<string | null> {
                 canvas.height = Math.max(60, Math.round((canvas.width * h) / w));
                 const ctx = canvas.getContext("2d");
                 if (!ctx) {
-                    cleanup();
-                    resolve(null);
+                    finish(null);
                     return;
                 }
                 ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
-                cleanup();
-                resolve(dataUrl);
+                finish(dataUrl);
             } catch {
-                cleanup();
-                resolve(null);
+                finish(null);
             }
         };
-        video.onerror = () => {
-            cleanup();
-            resolve(null);
-        };
+        video.onerror = () => finish(null);
         video.src = url;
     });
 }
@@ -181,10 +184,11 @@ function ExperimentContent() {
     const [currentMedia, setCurrentMedia] = useState<{ url: string; type: Stimulus["mediaType"] } | null>(null);
     const [results, setResults] = useState<ResultsResponse | null>(null);
     const [loadingResults, setLoadingResults] = useState(false);
-    const [hydrating, setHydrating] = useState(false);
+    const [arenaSize, setArenaSize] = useState(600);
 
     // Chain state
     const hydrationDoneRef = useRef(false);
+    const hydrationKeyRef = useRef<string | null>(null);
     const [chainToken, setChainToken] = useState<string | null>(null);
     const [chainName, setChainName] = useState<string | null>(null);
     const [chainTotalStudies, setChainTotalStudies] = useState<number>(0);
@@ -236,6 +240,7 @@ function ExperimentContent() {
             sessionStorage.removeItem("experimentInstructions");
             sessionStorage.setItem("experimentSessionId", fromQuery);
             hydrationDoneRef.current = false;
+            hydrationKeyRef.current = null;
         }
         setSessionId(resolvedSessionId);
         const storedStudyId = sessionStorage.getItem("experimentStudyId");
@@ -493,49 +498,53 @@ function ExperimentContent() {
     }, [sessionId, stimuli]);
 
     useEffect(() => {
+        const updateArenaSize = () => {
+            setArenaSize(getExperimentArenaSize(window.innerWidth, window.innerHeight, subsetIndices.length || stimuli.length));
+        };
+        updateArenaSize();
+        window.addEventListener("resize", updateArenaSize);
+        return () => window.removeEventListener("resize", updateArenaSize);
+    }, [stimuli.length, subsetIndices.length]);
+
+    useEffect(() => {
         if (stimuli.length === 0 || hydrationDoneRef.current) return;
+        const hydrationKey = stimuli.map((s) => s.id).join(",");
+        if (hydrationKeyRef.current === hydrationKey) return;
+        hydrationKeyRef.current = hydrationKey;
         let cancelled = false;
-        setHydrating(true);
         const hydrate = async () => {
-            const updated = await Promise.all(
-                stimuli.map(async (s) => {
-                    let changed = false;
-                    let mediaUrl = s.mediaUrl;
-                    let thumbnail = s.thumbnail;
+            for (const s of stimuli) {
+                if (cancelled) return;
+                let changed = false;
+                let mediaUrl = s.mediaUrl;
+                let thumbnail = s.thumbnail;
 
-                    if (!mediaUrl || mediaUrl.startsWith("blob:")) {
-                        const cached = await getCachedMedia(s.label);
-                        if (cached) {
-                            mediaUrl = URL.createObjectURL(cached.blob);
-                            if (!thumbnail && cached.thumbnail) {
-                                thumbnail = cached.thumbnail;
-                            }
-                            changed = true;
+                if (!mediaUrl || mediaUrl.startsWith("blob:")) {
+                    const cached = await getCachedMedia(s.label);
+                    if (cached) {
+                        mediaUrl = URL.createObjectURL(cached.blob);
+                        if (!thumbnail && cached.thumbnail) {
+                            thumbnail = cached.thumbnail;
                         }
+                        changed = true;
                     }
+                }
 
-                    if (!thumbnail && s.mediaType === "video" && mediaUrl) {
-                        const captured = await captureVideoThumbnail(mediaUrl);
-                        if (captured) {
-                            thumbnail = captured;
-                            changed = true;
-                        }
+                if (!thumbnail && s.mediaType === "video" && mediaUrl) {
+                    const captured = await captureVideoThumbnail(mediaUrl);
+                    if (captured) {
+                        thumbnail = captured;
+                        changed = true;
                     }
+                }
 
-                    if (changed) {
-                        return { ...s, mediaUrl, thumbnail };
-                    }
-                    return s;
-                })
-            );
-
-            if (cancelled) return;
-            hydrationDoneRef.current = true;
-            setHydrating(false);
-            const changed = updated.some((u, i) => u.mediaUrl !== stimuli[i]?.mediaUrl || u.thumbnail !== stimuli[i]?.thumbnail);
-            if (changed) {
-                setStimuli(updated);
+                if (changed && !cancelled) {
+                    setStimuli((current) => current.map((item) => (
+                        item.id === s.id ? { ...item, mediaUrl, thumbnail } : item
+                    )));
+                }
             }
+            if (!cancelled) hydrationDoneRef.current = true;
         };
         hydrate();
         return () => {
@@ -763,7 +772,7 @@ function ExperimentContent() {
         );
     }
 
-    if (loadingSession || hydrating) {
+    if (loadingSession) {
         return (
             <div
                 style={{
@@ -1093,7 +1102,7 @@ function ExperimentContent() {
                     onSubmit={handleSubmit}
                     onMediaPlay={handleMediaPlay}
                     playedItems={playedItems}
-                    size={600}
+                    size={arenaSize}
                     trialIndex={trialIndex}
                     language={language}
                 />
@@ -1112,7 +1121,11 @@ function ExperimentContent() {
                     }}
                 >
                     <div>{copy.trial}: {trialIndex + 1}</div>
-                    <div>{copy.batch}: {subsetIndices.map((i) => i + 1).join(", ")}</div>
+                    <div>
+                        {copy.batch}: {subsetIndices.length > 16
+                            ? `${subsetIndices.length} items`
+                            : subsetIndices.map((i) => i + 1).join(", ")}
+                    </div>
                     <div>{allInside ? copy.allInside : copy.moveItems}</div>
                 </div>
             )}

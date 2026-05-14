@@ -35,9 +35,32 @@ interface ArenaProps {
   language?: "en" | "tr";
 }
 
-const ITEM_RADIUS = 55;
+const MAX_ITEM_RADIUS = 55;
+const MIN_ITEM_RADIUS = 16;
 const ARENA_PADDING = 20;
 const CIRCLE_THICKNESS = 3;
+const MIN_SEAT_GAP = 22;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+export function getTokenRadiusForStimulusCount(stimulusCount: number, arenaSize: number): number {
+  const maxRadius = arenaSize >= 560
+    ? MAX_ITEM_RADIUS
+    : clamp(Math.floor(arenaSize * 0.09), MIN_ITEM_RADIUS, MAX_ITEM_RADIUS);
+  if (stimulusCount <= 0) return maxRadius;
+  if (stimulusCount <= 14) return maxRadius;
+
+  const arenaRadius = Math.max(0, arenaSize / 2 - ARENA_PADDING);
+  let radius = maxRadius;
+  for (let i = 0; i < 4; i += 1) {
+    const seatRadius = arenaRadius + radius + MIN_SEAT_GAP;
+    const arcPerItem = (2 * Math.PI * seatRadius) / stimulusCount;
+    radius = clamp(Math.floor(arcPerItem * 0.45), MIN_ITEM_RADIUS, maxRadius);
+  }
+  return radius;
+}
 
 export default function DragArena({
   stimuli,
@@ -57,18 +80,20 @@ export default function DragArena({
 
   const arenaRadius = size / 2 - ARENA_PADDING;
   const center = size / 2;
+  const itemRadius = getTokenRadiusForStimulusCount(stimuli.length, size);
+  const seatGap = Math.max(MIN_SEAT_GAP, itemRadius * 0.8);
 
   // Calculate initial seating positions (outside the circle)
   const getInitialPositions = useCallback(() => {
     return stimuli.map((s, i) => {
       const angle = (2 * Math.PI * i) / stimuli.length - Math.PI / 2;
-      const seatRadius = arenaRadius + ITEM_RADIUS + 35;
+      const seatRadius = arenaRadius + itemRadius + seatGap;
       return {
         x: center + seatRadius * Math.cos(angle),
         y: center + seatRadius * Math.sin(angle),
       };
     });
-  }, [stimuli, center, arenaRadius]);
+  }, [stimuli, center, arenaRadius, itemRadius, seatGap]);
 
   // Stable key representing which stimuli are shown (IDs only, not metadata like thumbnails)
   const stimuliKey = useMemo(
@@ -120,9 +145,9 @@ export default function DragArena({
       const dx = pos.x - center;
       const dy = pos.y - center;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      return dist + ITEM_RADIUS * 0.6 <= arenaRadius;
+      return dist + itemRadius * 0.6 <= arenaRadius;
     },
-    [center, arenaRadius]
+    [center, arenaRadius, itemRadius]
   );
 
   // Update parent when positions change
@@ -250,9 +275,24 @@ export default function DragArena({
   const allPlayed = items.every((item) =>
     item.mediaType === "image" || playedItems.has(item.id)
   );
+  const playableItems = items.filter((item) => item.mediaType !== "image");
+  const playedPlayableCount = playableItems.filter((item) => playedItems.has(item.id)).length;
   const canSubmit = allInside && allPlayed;
+  const playProgressText =
+    playableItems.length > 0
+      ? language === "tr"
+        ? `${playedPlayableCount}/${playableItems.length} oynatildi`
+        : `Played ${playedPlayableCount}/${playableItems.length}`
+      : null;
+  const placementText = allInside
+    ? language === "tr"
+      ? "Yerlesim hazir"
+      : "Placement ready"
+    : language === "tr"
+      ? "Tum ogeleri cembere tasiyin"
+      : "Move all items into the circle";
 
-  const containerSize = size + ITEM_RADIUS * 2 + 70;
+  const containerSize = size + itemRadius * 2 + seatGap * 2;
 
   return (
     <div style={{ position: "relative" }}>
@@ -312,10 +352,10 @@ export default function DragArena({
               onDoubleClick={() => handleDoubleClick(item)}
               style={{
                 position: "absolute",
-                left: item.position.x - ITEM_RADIUS + offset,
-                top: item.position.y - ITEM_RADIUS + offset,
-                width: ITEM_RADIUS * 2,
-                height: ITEM_RADIUS * 2,
+                left: item.position.x - itemRadius + offset,
+                top: item.position.y - itemRadius + offset,
+                width: itemRadius * 2,
+                height: itemRadius * 2,
                 borderRadius: "50%",
                 overflow: "hidden",
                 border: `4px solid ${outlineColor}`,
@@ -325,6 +365,16 @@ export default function DragArena({
                 transform: item.isDragging ? "scale(1.08)" : "scale(1)",
                 transition: item.isDragging ? "none" : "transform 0.15s ease, box-shadow 0.15s ease",
                 zIndex: item.isDragging ? 1000 : 1,
+              }}
+              role="button"
+              tabIndex={0}
+              title={item.label}
+              aria-label={`${language === "tr" ? "Uyarani oynat" : "Play stimulus"} ${item.label}`}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  handleDoubleClick(item);
+                }
               }}
             >
               {/* Thumbnail or placeholder */}
@@ -346,7 +396,7 @@ export default function DragArena({
                     justifyContent: "center",
                     color: "#fff",
                     fontWeight: 700,
-                    fontSize: 20,
+                    fontSize: Math.max(10, Math.min(20, itemRadius * 0.55)),
                   }}
                 >
                   {item.ordinal + 1}
@@ -355,6 +405,44 @@ export default function DragArena({
             </div>
           );
         })}
+      </div>
+
+      <div
+        role="status"
+        aria-live="polite"
+        style={{
+          position: "absolute",
+          bottom: 52,
+          left: 8,
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          maxWidth: Math.min(360, containerSize - 16),
+          color: "#fff",
+          fontSize: 12,
+          fontWeight: 700,
+        }}
+      >
+        {playProgressText && (
+          <span
+            style={{
+              padding: "6px 10px",
+              borderRadius: 999,
+              background: allPlayed ? "rgba(0, 160, 0, 0.75)" : "rgba(200, 0, 0, 0.78)",
+            }}
+          >
+            {playProgressText}
+          </span>
+        )}
+        <span
+          style={{
+            padding: "6px 10px",
+            borderRadius: 999,
+            background: allInside ? "rgba(0, 160, 0, 0.75)" : "rgba(200, 0, 0, 0.78)",
+          }}
+        >
+          {placementText}
+        </span>
       </div>
 
       {/* Done button */}

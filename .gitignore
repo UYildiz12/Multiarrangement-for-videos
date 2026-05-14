@@ -47,6 +47,9 @@ results/*
 !results/.gitkeep
 *.sqlite3
 .npm_cache/
+output/
+web/.playwright-cli/
+server/ma_core/ljcr_cache/
 D.npm_cache/
 
 # Large media files (optional, uncomment if you want to exclude videos)
