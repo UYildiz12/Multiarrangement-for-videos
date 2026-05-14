@@ -227,9 +227,21 @@ class TrialResponse(BaseModel):
 
 
 # Results schemas
+class RdmScaleInfo(BaseModel):
+    """How the primary RDM was scaled for display/export."""
+    method: str
+    divisor: float
+    output_min: float = 0.0
+    output_max: float = 1.0
+    raw_units: str
+    description: str
+
+
 class ResultsResponse(BaseModel):
     """Response for computed results."""
     rdm: List[List[float]]
+    rdm_raw: Optional[List[List[float]]] = None
+    rdm_scale: RdmScaleInfo
     evidence: List[List[float]]
     evidence_raw: Optional[List[List[float]]] = None
     evidence_normalized: Optional[List[List[float]]] = None

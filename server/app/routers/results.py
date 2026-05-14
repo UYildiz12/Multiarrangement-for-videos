@@ -9,6 +9,7 @@ import io
 import json
 from uuid import UUID
 
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
@@ -19,6 +20,48 @@ from app.routers.studies import get_study, list_stimuli_for_study
 from app.schemas import ExportFormat, ResultsResponse
 
 router = APIRouter(tags=["results"])
+
+
+def _scale_rdm_for_output(D: np.ndarray, paradigm: str) -> tuple[list[list[float]], list[list[float]], dict[str, object]]:
+    raw = np.asarray(D, dtype=float)
+    raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
+    raw = (raw + raw.T) / 2.0
+    np.fill_diagonal(raw, 0.0)
+
+    if raw.size == 0:
+        return [], [], {
+            "method": "none",
+            "divisor": 1.0,
+            "raw_units": "none",
+            "description": "No RDM was available.",
+        }
+
+    if str(paradigm) == "pairwise":
+        scaled = np.clip(raw, 0.0, 1.0)
+        np.fill_diagonal(scaled, 0.0)
+        return scaled.tolist(), raw.tolist(), {
+            "method": "absolute_0_1",
+            "divisor": 1.0,
+            "raw_units": "rating-derived dissimilarity",
+            "description": "Pairwise ratings are already encoded as 0..1 dissimilarities.",
+        }
+
+    iu = np.triu_indices_from(raw, k=1)
+    finite = raw[iu][np.isfinite(raw[iu])] if iu[0].size else np.array([], dtype=float)
+    divisor = float(np.max(finite)) if finite.size else 0.0
+    if divisor > 1e-12:
+        scaled = raw / divisor
+    else:
+        divisor = 1.0
+        scaled = np.zeros_like(raw)
+    scaled = np.clip(scaled, 0.0, 1.0)
+    np.fill_diagonal(scaled, 0.0)
+    return scaled.tolist(), raw.tolist(), {
+        "method": "max_offdiag_0_1",
+        "divisor": divisor,
+        "raw_units": "reconstructed Euclidean dissimilarity",
+        "description": "Arrangement RDM divided by its maximum finite off-diagonal value; ratios and rank order are preserved.",
+    }
 
 
 def _labels_for_study(study_id: UUID | str) -> list[str]:
@@ -45,17 +88,26 @@ async def get_session_results(session_id: UUID, owner_id: UUID | None = Depends(
 
     if D is None:
         rdm = []
+        rdm_raw = None
+        rdm_scale = {
+            "method": "none",
+            "divisor": 1.0,
+            "raw_units": "none",
+            "description": "No RDM was available.",
+        }
         evidence = []
         evidence_raw = None
         evidence_normalized = None
     else:
-        rdm = D.tolist()
+        rdm, rdm_raw, rdm_scale = _scale_rdm_for_output(D, study["paradigm"].value)
         evidence_raw = W_raw.tolist() if W_raw is not None else None
         evidence_normalized = W_sched.tolist() if W_sched is not None else None
         evidence = evidence_normalized or evidence_raw or []
 
     return ResultsResponse(
         rdm=rdm,
+        rdm_raw=rdm_raw,
+        rdm_scale=rdm_scale,
         evidence=evidence,
         evidence_raw=evidence_raw,
         evidence_normalized=evidence_normalized,
@@ -107,6 +159,12 @@ async def export_study_results(
         D = session.get("D")
         W_raw = session.get("W_raw")
         W_sched = session.get("W_sched")
+        if D is None:
+            rdm = None
+            rdm_raw = None
+            rdm_scale = None
+        else:
+            rdm, rdm_raw, rdm_scale = _scale_rdm_for_output(D, study["paradigm"].value)
         export_data["sessions"].append(
             {
                 "id": str(session["id"]),
@@ -115,7 +173,9 @@ async def export_study_results(
                 "started_at": session["started_at"].isoformat() if session.get("started_at") else None,
                 "completed_at": session["completed_at"].isoformat() if session.get("completed_at") else None,
                 "n_trials": len(trials),
-                "rdm": D.tolist() if D is not None else None,
+                "rdm": rdm,
+                "rdm_raw": rdm_raw,
+                "rdm_scale": rdm_scale,
                 "evidence_raw": W_raw.tolist() if W_raw is not None else None,
                 "evidence_normalized": W_sched.tolist() if W_sched is not None else None,
                 "trials": [
@@ -149,6 +209,8 @@ async def export_study_results(
                 "subset_indices",
                 "rating",
                 "duration_seconds",
+                "started_at",
+                "completed_at",
                 "positions",
             ]
         )
@@ -163,6 +225,8 @@ async def export_study_results(
                         json.dumps(trial["subset_indices"]),
                         trial["rating"],
                         trial["duration_seconds"],
+                        trial["started_at"],
+                        trial["completed_at"],
                         json.dumps(trial["positions"]),
                     ]
                 )

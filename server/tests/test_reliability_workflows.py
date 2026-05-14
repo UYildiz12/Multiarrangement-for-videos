@@ -58,6 +58,15 @@ def _assert_rdm_is_valid(rdm: list[list[float]], n: int) -> None:
             assert value == rdm[j][i]
 
 
+def _max_off_diagonal(rdm: list[list[float]]) -> float:
+    return max(
+        value
+        for i, row in enumerate(rdm)
+        for j, value in enumerate(row)
+        if i != j
+    )
+
+
 def test_setcover_generates_complete_coverage_across_supported_batch_sizes():
     for batch_size in range(3, 13):
         n_items = batch_size + 5
@@ -118,6 +127,47 @@ def test_duplicate_arrangement_submit_is_idempotent(client):
     assert duplicate_submit.json()["trial_index"] == first_submit.json()["trial_index"]
     assert duplicate_submit.json()["id"] == first_submit.json()["id"]
     assert duplicate_submit.json()["next_trial"] == first_submit.json()["next_trial"]
+
+
+def test_arrangement_results_return_scaled_rdm_with_raw_audit_matrix(client):
+    n_stimuli = 8
+    study_id = _create_study_with_stimuli(
+        client,
+        name="scaled_rdm",
+        paradigm="adaptive",
+        n=n_stimuli,
+        config={
+            "min_subset_size": 4,
+            "max_subset_size": 6,
+            "evidence_threshold": 999,
+            "use_inverse_mds": False,
+        },
+    )
+    session_resp = client.post(f"/api/v1/studies/{study_id}/sessions", json={"participant_id": "p1"})
+    assert session_resp.status_code == 201
+    session_id = session_resp.json()["session_id"]
+    first_trial = client.get(f"/api/v1/sessions/{session_id}/next").json()
+
+    submit_resp = client.post(
+        f"/api/v1/sessions/{session_id}/trials",
+        json={
+            "trial_index": first_trial["trial_index"],
+            "subset_indices": first_trial["subset_indices"],
+            "positions": _circle_positions(first_trial["subset_indices"]),
+            "duration_seconds": 90.0,
+        },
+    )
+    assert submit_resp.status_code == 200
+
+    results_resp = client.get(f"/api/v1/sessions/{session_id}/results")
+    assert results_resp.status_code == 200
+    results = results_resp.json()
+    _assert_rdm_is_valid(results["rdm"], n_stimuli)
+    _assert_rdm_is_valid(results["rdm_raw"], n_stimuli)
+    assert results["rdm_scale"]["method"] == "max_offdiag_0_1"
+    assert results["rdm_scale"]["divisor"] > 0
+    assert _max_off_diagonal(results["rdm"]) == 1
+    assert _max_off_diagonal(results["rdm_raw"]) == results["rdm_scale"]["divisor"]
 
 
 def test_adaptive_first_trial_and_rdm_are_valid_for_large_video_sets(client):

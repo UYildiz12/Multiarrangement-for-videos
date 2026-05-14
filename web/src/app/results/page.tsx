@@ -9,6 +9,13 @@ import { apiFetch } from "../lib/api";
 
 interface ResultsResponse {
     rdm: number[][];
+    rdm_raw?: number[][] | null;
+    rdm_scale?: {
+        method: string;
+        divisor: number;
+        raw_units: string;
+        description: string;
+    };
     labels: string[];
     n_trials: number;
 }
@@ -148,6 +155,9 @@ function ResultsContent() {
         const rows = rdm.map((row, i) => [labels[i], ...row.map(v => v.toFixed(4))].join(","));
         const t = timeInfo();
         const metaLines = [
+            `# rdm_scale_method,${results.rdm_scale?.method ?? ""}`,
+            `# rdm_scale_divisor,${results.rdm_scale?.divisor ?? ""}`,
+            `# rdm_raw_units,${results.rdm_scale?.raw_units ?? ""}`,
             `# time_spent_seconds,${t.seconds ?? ""}`,
             `# time_spent_minutes,${t.seconds === null ? "" : (t.seconds / 60).toFixed(2)}`,
             `# time_started_at,${t.startIso ?? ""}`,
@@ -172,6 +182,9 @@ function ResultsContent() {
         const wb = XLSX.utils.book_new();
         const t = timeInfo();
         const metaData = [
+            ["rdm_scale_method", results.rdm_scale?.method ?? ""],
+            ["rdm_scale_divisor", results.rdm_scale?.divisor ?? ""],
+            ["rdm_raw_units", results.rdm_scale?.raw_units ?? ""],
             ["time_spent_seconds", t.seconds ?? ""],
             ["time_spent_minutes", t.seconds === null ? "" : (t.seconds / 60).toFixed(2)],
             ["time_started_at", t.startIso ?? ""],
@@ -238,6 +251,11 @@ function ResultsContent() {
                         scaleMode="auto"
                         language={language}
                     />
+                    {results.rdm_scale && (
+                        <p style={{ maxWidth: 620, margin: "-16px 0 0", color: "#777", fontSize: 12, textAlign: "center", lineHeight: 1.5 }}>
+                            RDM scale: {results.rdm_scale.description} Raw divisor: {results.rdm_scale.divisor.toFixed(4)}.
+                        </p>
+                    )}
 
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
                         <button

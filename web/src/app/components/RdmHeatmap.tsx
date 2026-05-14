@@ -46,26 +46,30 @@ export default function RdmHeatmap({
     const cellSize = Math.max(8, Math.min(50, Math.floor((targetSize - labelWidth) / n)));
     const gridSize = cellSize * n;
 
+    const finiteValues: number[] = [];
+    for (let i = 0; i < n; i += 1) {
+        for (let j = 0; j < n; j += 1) {
+            const v = rdm[i]?.[j];
+            if (Number.isFinite(v)) finiteValues.push(v);
+        }
+    }
 
-    const effectiveScaleMode = scaleMode === "auto" ? "minmax" : scaleMode;
+    const valuesAlready01 = finiteValues.length > 0
+        && finiteValues.every((value) => value >= -1e-12 && value <= 1 + 1e-12);
+    const effectiveScaleMode = scaleMode === "auto"
+        ? (valuesAlready01 ? "absolute01" : "minmax")
+        : scaleMode;
 
     let minVal = 0;
     let maxVal = 1;
     if (effectiveScaleMode === "minmax") {
-        const values: number[] = [];
-        for (let i = 0; i < n; i += 1) {
-            for (let j = 0; j < n; j += 1) {
-                const v = rdm[i]?.[j];
-                if (Number.isFinite(v)) values.push(v);
-            }
-        }
-        if (values.length === 0) {
+        if (finiteValues.length === 0) {
             minVal = 0;
             maxVal = 1;
         } else {
-            values.sort((a, b) => a - b);
-            minVal = values[0];
-            maxVal = values[values.length - 1];
+            finiteValues.sort((a, b) => a - b);
+            minVal = finiteValues[0];
+            maxVal = finiteValues[finiteValues.length - 1];
             if (!Number.isFinite(minVal) || !Number.isFinite(maxVal)) {
                 minVal = 0;
                 maxVal = 1;

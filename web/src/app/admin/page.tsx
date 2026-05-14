@@ -7,6 +7,7 @@ import { useKey } from "../lib/KeyContext";
 import ChainBuilder from "../components/ChainBuilder";
 import Link from "next/link";
 import { EyeIcon, EyeOffIcon } from "../components/EyeIcon";
+import TrialReconstruction, { TrialDetail } from "../components/TrialReconstruction";
 
 interface StudySummary {
     id: string;
@@ -91,6 +92,9 @@ function AdminContent() {
     const [loadingStudies, setLoadingStudies] = useState(false);
     const [loadingSessions, setLoadingSessions] = useState(false);
     const [loadingStimuli, setLoadingStimuli] = useState(false);
+    const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
+    const [sessionTrials, setSessionTrials] = useState<Record<string, TrialDetail[]>>({});
+    const [loadingTrialSessionId, setLoadingTrialSessionId] = useState<string | null>(null);
 
     // Chain sessions state
     const [selectedChainId, setSelectedChainId] = useState<string | null>(null);
@@ -212,6 +216,27 @@ function AdminContent() {
             setSessions(sessions.filter((s) => s.id !== sessionId));
         } catch (err) {
             setError(describeAuthError(err, "Failed to delete session"));
+        }
+    };
+
+    const toggleSessionTrials = async (sessionId: string) => {
+        if (expandedSessionId === sessionId) {
+            setExpandedSessionId(null);
+            return;
+        }
+        setExpandedSessionId(sessionId);
+        if (sessionTrials[sessionId]) return;
+        setLoadingTrialSessionId(sessionId);
+        setError(null);
+        try {
+            const data = await apiFetch<TrialDetail[]>(`/api/v1/admin/sessions/${sessionId}/trials`, {
+                headers: buildKeyHeaders(),
+            });
+            setSessionTrials((current) => ({ ...current, [sessionId]: data }));
+        } catch (err) {
+            setError(describeAuthError(err, "Failed to load trial reconstructions"));
+        } finally {
+            setLoadingTrialSessionId(null);
         }
     };
 
@@ -658,6 +683,22 @@ function AdminContent() {
                                                     </div>
                                                 </div>
                                                 <div style={{ display: "flex", gap: 8 }}>
+                                                    <button
+                                                        onClick={() => toggleSessionTrials(session.id)}
+                                                        style={{
+                                                            padding: "0 12px",
+                                                            height: 28,
+                                                            borderRadius: 4,
+                                                            border: "1px solid #444",
+                                                            background: expandedSessionId === session.id ? "#1a1a1a" : "#0a0a0a",
+                                                            color: "#ddd",
+                                                            cursor: "pointer",
+                                                            fontSize: 12,
+                                                            fontWeight: 500,
+                                                        }}
+                                                    >
+                                                        {expandedSessionId === session.id ? "Hide Trials" : "Trials"}
+                                                    </button>
                                                     <a
                                                         href={`/results?session=${session.id}`}
                                                         style={{
@@ -701,6 +742,18 @@ function AdminContent() {
                                             <div style={{ fontSize: 10, color: "#444", marginTop: 2, fontFamily: "monospace" }}>
                                                 ID: {session.id.slice(0, 8)}...
                                             </div>
+                                            {expandedSessionId === session.id && (
+                                                <div style={{ marginTop: 12 }}>
+                                                    {loadingTrialSessionId === session.id ? (
+                                                        <div style={{ color: "#666", fontSize: 12 }}>Loading exact trial reconstructions...</div>
+                                                    ) : (
+                                                        <TrialReconstruction
+                                                            trials={sessionTrials[session.id] || []}
+                                                            stimuli={selectedStudyStimuli}
+                                                        />
+                                                    )}
+                                                </div>
+                                            )}
                                         </div>
                                     ))}
                                 </div>
