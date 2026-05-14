@@ -5,7 +5,7 @@ Tests for API endpoints.
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import APP_VERSION, app
 
 
 @pytest.fixture
@@ -22,6 +22,7 @@ class TestHealthEndpoint:
         response = client.get("/health")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
+        assert response.json()["version"] == APP_VERSION
 
 
 class TestStudyEndpoints:

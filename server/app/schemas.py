@@ -260,7 +260,7 @@ class ExportFormat(str, Enum):
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str = "ok"
-    version: str = "0.1.10.2"
+    version: str
 
 # Chain schemas
 class ChainStatus(str, Enum):

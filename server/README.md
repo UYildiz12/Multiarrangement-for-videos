@@ -44,7 +44,7 @@ Useful environment variables:
 Once the server is running:
 
 - Open `http://127.0.0.1:8000/docs` for interactive API docs
-- `GET /health` should return `{"status":"ok","version":"0.1.10.2"}`
+- `GET /health` should return `{"status":"ok","version":"0.1.11"}`
 
 ## Test
 
