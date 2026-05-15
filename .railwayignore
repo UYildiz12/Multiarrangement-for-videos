@@ -1,6 +1,7 @@
 *
 
 !railway.toml
+!nixpacks.toml
 !server/
 !server/**
 !coverlib/

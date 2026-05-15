@@ -59,6 +59,6 @@ The API tests run against isolated SQLite databases and cover resume/restart beh
 ## Deployment notes
 
 - `/railway.toml` is the canonical Railway deployment config; it runs the API with `PYTHONPATH=server:.` so the backend can use the shared set-cover utilities and cached covering designs.
-- `/.railwayignore` keeps the Railway artifact focused on the API plus the shared cover-generation code and caches.
+- `/nixpacks.toml` installs the backend Python dependencies, and `/.railwayignore` keeps the Railway artifact focused on the API plus the shared cover-generation code and caches.
 - `supabase/migrations/` contains the schema files for the hosted storage/database path.
 - Supabase Storage remains optional for hosted media uploads; Postgres is used for durable hosted state.
