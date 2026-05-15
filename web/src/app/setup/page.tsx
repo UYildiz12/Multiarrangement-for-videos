@@ -928,8 +928,8 @@ export default function SetupPage() {
                             <div style={{ fontSize: 12, color: "#888" }}>Fixed batches</div>
                         </button>
                         <button onClick={() => setConfig({ ...config, paradigm: "adaptive" })} style={paradigmBtnStyle(config.paradigm === "adaptive")}>
-                            <div style={{ fontWeight: 600 }}>Adaptive LTW</div>
-                            <div style={{ fontSize: 12, color: "#888" }}>Lift-the-Weakest</div>
+                            <div style={{ fontWeight: 600 }}>Adaptive</div>
+                            <div style={{ fontSize: 12, color: "#888" }}>lift-the-weakest</div>
                         </button>
                         <button onClick={() => setConfig({ ...config, paradigm: "pairwise" })} style={paradigmBtnStyle(config.paradigm === "pairwise")}>
                             <div style={{ fontWeight: 600 }}>Pairwise</div>
