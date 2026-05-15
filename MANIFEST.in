@@ -2,7 +2,6 @@
 include README.md
 include LICENSE
 include pyproject.toml
-include results/.gitkeep
 
 # Include package data
 recursive-include multiarrangement/data *.txt
@@ -21,9 +20,6 @@ recursive-include multiarrangement/sample_audio *.mp3 *.wav *.ogg *.flac *.aac *
 
 # Include example data
 recursive-include multiarrangement/ExampleData *.xlsx *.csv
-
-# Include standalone scripts for backward compatibility
-include *.py
 
 # Exclude cache and build files
 global-exclude __pycache__

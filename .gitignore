@@ -44,7 +44,6 @@ Thumbs.db
 
 # Generated experiment outputs
 results/*
-!results/.gitkeep
 batches_*videos_batchsize*.txt
 *.sqlite3
 .npm_cache/
@@ -53,14 +52,13 @@ web/.playwright-cli/
 server/ma_core/ljcr_cache/
 
 # Local agent/research artifacts that should not be published
-AGENTS.md
-.desloppify/
-docs/
-scripts/
-58videos/
-MA_data/
-ma_data/
-D.npm_cache/
+/AGENTS.md
+/.desloppify/
+/docs/
+/scripts/
+/58videos/
+/MA_data/
+/ma_data/
 
 # Large media files (optional, uncomment if you want to exclude videos)
 # *.mp4
