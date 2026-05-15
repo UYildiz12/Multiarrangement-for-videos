@@ -25,10 +25,6 @@ recursive-include multiarrangement/ExampleData *.xlsx *.csv
 # Include standalone scripts for backward compatibility
 include *.py
 
-# Include C extension source files
-include src/greedy_module.c
-recursive-include src *.c *.h
-
 # Exclude cache and build files
 global-exclude __pycache__
 global-exclude *.py[co]

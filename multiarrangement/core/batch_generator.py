@@ -18,10 +18,9 @@ class BatchGenerator:
     """
     Generate optimized batches for multiarrangement experiments.
     
-    This class uses a hybrid algorithm approach that tries multiple optimization
-    techniques in order of quality: optimal solutions, C extensions, then Python
-    fallbacks. This ensures the best possible batch configurations that guarantee
-    all video pairs appear together at least once while minimizing batch count.
+    This class uses a balanced set-cover approach backed by packaged covering
+    caches and a pure-Python fallback. It guarantees all video pairs appear
+    together at least once while minimizing or preserving batch count.
     
     The default methods use the balanced approach: first get the minimum/near-
     minimum cover, then replace it with a validated same-trial balanced cache
@@ -123,28 +122,8 @@ class BatchGenerator:
         return self.optimize_batches(algorithm='balanced')
     
     def _generate_batches_optimized(self, restarts: int = 64, seed: int = 42) -> List[List[int]]:
-        """
-        Generate optimized batches using the proven algorithm from New_Greedy_1.py
-        """
-        try:
-            # Import and use the working New_Greedy_1 implementation
-            import New_Greedy_1
-            video_indices = list(range(self.n_videos))
-            batches = New_Greedy_1.generate_batches(
-                video_indices, 
-                self.batch_size,
-                restarts=restarts,
-                seed=seed,
-                prune=True,
-                grasp_passes=2,
-                repair=True,
-                reselect=True
-            )
-            return batches
-        except (ImportError, Exception) as e:
-            # Fallback implementation if New_Greedy_1.py not available
-            print(f"Warning: Failed to use New_Greedy_1.py: {e}, using fallback")
-            return self._fallback_greedy_implementation(restarts, seed)
+        """Generate batches with the internal pure-Python greedy fallback."""
+        return self._fallback_greedy_implementation(restarts, seed)
         
     def _fallback_greedy_implementation(self, restarts: int, seed: int) -> List[List[int]]:
         """Simplified fallback implementation"""
@@ -964,9 +943,8 @@ class BatchGenerator:
     def optimize_batches_hybrid(self, prefer_optimal: bool = True, **kwargs) -> List[List[int]]:
         """
         Generate optimized batches using the hybrid strategy:
-        1. Try optimize_cover_pure.py (optimal) first
-        2. Fall back to Greedy_gen.c (high-performance)
-        3. Fall back to Python greedy (always available)
+        1. Try the packaged optimize_cover_pure.py cache/optimizer first.
+        2. Fall back to the internal pure-Python greedy implementation.
         
         Args:
             prefer_optimal: Whether to try optimal solutions first
@@ -975,8 +953,6 @@ class BatchGenerator:
         Returns:
             List of optimized batches
         """
-        import subprocess
-        import os
         from pathlib import Path
         
         # Get project root directory
@@ -992,25 +968,6 @@ class BatchGenerator:
             except Exception as e:
                 print(f"Warning: optimize_cover_pure.py failed: {e}")
         
-        # Try pre-compiled C extension first (best performance)
-        try:
-            batches = self._try_greedy_c_extension(**kwargs)
-            if batches:
-                print(f"Used C extension (pre-compiled: {len(batches)} batches)")
-                return batches
-        except Exception as e:
-            print(f"Warning: C extension failed: {e}")
-        
-        # Try runtime-compiled C as fallback
-        try:
-            batches = self._try_greedy_c_runtime(project_root, **kwargs)
-            if batches:
-                print(f"Used Greedy_gen.c (runtime compiled: {len(batches)} batches)")
-                return batches
-        except Exception as e:
-            print(f"Warning: Runtime C compilation failed: {e}")
-        
-        # Final fallback to Python greedy
         print("Using Python greedy algorithm (fallback)")
         return self._try_new_greedy_python(**kwargs)
     
@@ -1105,88 +1062,6 @@ class BatchGenerator:
             # Clean up temporary file
             if os.path.exists(output_file):
                 os.unlink(output_file)
-    
-    def _try_greedy_c_extension(self, **kwargs) -> Optional[List[List[int]]]:
-        """Try to use pre-compiled C extension (preferred method)."""
-        try:
-            # Import the C extension module
-            from ..greedy_c import generate_batches as generate_batches_c
-            
-            # Call the C function directly
-            batches = generate_batches_c(self.n_videos, self.batch_size)
-            return batches
-            
-        except ImportError:
-            # C extension not available
-            return None
-        except Exception as e:
-            raise RuntimeError(f"C extension failed: {e}")
-    
-    def _try_greedy_c_runtime(self, project_root: Path, **kwargs) -> Optional[List[List[int]]]:
-        """Try to use compiled Greedy_gen.c for high-performance batch generation."""
-        import subprocess
-        import os
-        import platform
-        
-        # Check for C source file
-        c_source = project_root / "Greedy_gen.c"
-        if not c_source.exists():
-            raise FileNotFoundError("Greedy_gen.c not found")
-        
-        # Determine executable name based on platform
-        if platform.system() == "Windows":
-            exe_name = "greedy_gen.exe"
-            compile_cmd = ["gcc", "-std=c11", "-O3", "-march=native", "-pipe", "-Wall", "-Wextra", 
-                          str(c_source), "-o", exe_name]
-        else:
-            exe_name = "greedy_gen"
-            compile_cmd = ["gcc", "-std=c11", "-O3", "-march=native", "-pipe", "-Wall", "-Wextra",
-                          str(c_source), "-o", exe_name, "-lm"]
-        
-        exe_path = project_root / exe_name
-        
-        # Compile if executable doesn't exist or source is newer
-        if not exe_path.exists() or c_source.stat().st_mtime > exe_path.stat().st_mtime:
-            print(f"Compiling {c_source.name}...")
-            
-            # Check if gcc is available
-            try:
-                subprocess.run(["gcc", "--version"], capture_output=True, check=True)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                raise RuntimeError("GCC compiler not available")
-            
-            # Compile
-            result = subprocess.run(compile_cmd, cwd=project_root, capture_output=True, text=True)
-            if result.returncode != 0:
-                raise RuntimeError(f"Compilation failed: {result.stderr}")
-        
-        # Run the compiled executable
-        output_file = f"batches_{self.n_videos}videos_batchsize{self.batch_size}.txt"
-        output_path = project_root / output_file
-        
-        # Remove existing output file
-        if output_path.exists():
-            output_path.unlink()
-        
-        cmd = [str(exe_path), str(self.n_videos), str(self.batch_size)]
-        result = subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, timeout=300)
-        
-        if result.returncode == 0 and output_path.exists():
-            # Parse the output file
-            batches = []
-            with open(output_path, 'r') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#'):
-                        # Parse comma-separated integers
-                        parts = line.replace(',', ' ').split()
-                        batch = [int(x) for x in parts if x.isdigit()]
-                        if len(batch) == self.batch_size:
-                            batches.append(batch)
-            
-            return batches if batches else None
-        else:
-            raise RuntimeError(f"Greedy C program failed: {result.stderr}")
     
     def _try_new_greedy_python(self, **kwargs) -> List[List[int]]:
         """Use the integrated optimized greedy algorithm."""
