@@ -1,6 +1,7 @@
 import math
 from itertools import combinations
 
+from coverlib.balanced import normalized_balance_metrics
 from ma_core.batch_generator import generate_batches
 
 
@@ -67,6 +68,15 @@ def _max_off_diagonal(rdm: list[list[float]]) -> float:
     )
 
 
+def _pair_coverage_stats(batches: list[list[int]]) -> tuple[set[tuple[int, int]], dict[tuple[int, int], int]]:
+    counts: dict[tuple[int, int], int] = {}
+    for batch in batches:
+        for pair in combinations(batch, 2):
+            key = tuple(sorted(pair))
+            counts[key] = counts.get(key, 0) + 1
+    return set(counts), counts
+
+
 def test_setcover_generates_complete_coverage_across_supported_batch_sizes():
     for batch_size in range(3, 13):
         n_items = batch_size + 5
@@ -82,6 +92,50 @@ def test_setcover_generates_complete_coverage_across_supported_batch_sizes():
         }
         expected = set(combinations(range(n_items), 2))
         assert covered == expected
+
+
+def test_balanced_setcover_reduces_pathological_pair_repetition():
+    n_items = 40
+    batch_size = 6
+    minimal_batches = generate_batches(n_items, batch_size, seed=123, algorithm="hybrid")
+    balanced_batches = generate_batches(n_items, batch_size, seed=123, algorithm="balanced")
+
+    expected_pairs = set(combinations(range(n_items), 2))
+    minimal_covered, minimal_counts = _pair_coverage_stats(minimal_batches)
+    balanced_covered, balanced_counts = _pair_coverage_stats(balanced_batches)
+
+    assert minimal_covered == expected_pairs
+    assert balanced_covered == expected_pairs
+    assert len(balanced_batches) == len(minimal_batches)
+    assert max(minimal_counts.values()) >= 8
+    assert max(balanced_counts.values()) <= 6
+
+
+def test_balanced_setcover_common_sizes_have_normalized_diagnostics():
+    cases = [
+        (16, 6, 10, 2.0, 0.18),
+        (24, 6, 22, 2.5, 0.10),
+        (40, 6, 55, 3.0, 0.04),
+        (58, 6, 117, 1.5, 0.03),
+        (15, 8, 6, 1.5, 0.07),
+        (58, 8, 66, 1.0, 0.0),
+    ]
+
+    for n_items, batch_size, max_trials, max_ratio, max_sumsq_excess in cases:
+        batches = generate_batches(n_items, batch_size, seed=123, algorithm="balanced")
+        metrics = normalized_balance_metrics(n_items, batch_size, batches)
+
+        assert metrics.complete is True
+        assert len(batches) <= max_trials
+        assert metrics.lambda_max_ratio <= max_ratio
+        assert metrics.normalized_pair_sumsq_excess <= max_sumsq_excess
+
+
+def test_balanced_setcover_is_reproducible_for_same_seed():
+    first = generate_batches(40, 6, seed=123, algorithm="balanced")
+    second = generate_batches(40, 6, seed=123, algorithm="balanced")
+
+    assert second == first
 
 
 def test_setcover_session_caps_batch_size_to_available_stimuli(client):

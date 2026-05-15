@@ -1,10 +1,13 @@
 """Tests for batch generation functionality."""
 
+import math
 import subprocess
+from itertools import combinations
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from coverlib.balanced import balance_sort_key, improve_pair_balance
 from multiarrangement.core.batch_generator import BatchGenerator
 from multiarrangement.utils.file_utils import validate_batch_configuration
 
@@ -65,6 +68,89 @@ class TestBatchGenerator:
         validation = generator.validate_batches(incomplete_batches)
         assert not validation['coverage_complete']
         assert validation['pairs_missing'] > 0
+
+    def test_balanced_algorithm_reduces_worst_pair_repetition(self):
+        """Balanced mode should improve pair evidence without adding trials."""
+        generator = BatchGenerator(n_videos=24, batch_size=6, seed=123)
+        minimal_batches = generator.optimize_batches(algorithm="hybrid", seed=123)
+        balanced_batches = generator.optimize_batches(algorithm="balanced", seed=123)
+
+        def pair_counts(batches):
+            counts = {}
+            for batch in batches:
+                for pair in combinations(batch, 2):
+                    key = tuple(sorted(pair))
+                    counts[key] = counts.get(key, 0) + 1
+            return counts
+
+        minimal_counts = pair_counts(minimal_batches)
+        balanced_counts = pair_counts(balanced_batches)
+
+        assert set(minimal_counts) == set(combinations(range(24), 2))
+        assert set(balanced_counts) == set(combinations(range(24), 2))
+        assert len(balanced_batches) == len(minimal_batches)
+        assert max(minimal_counts.values()) >= 6
+        assert max(balanced_counts.values()) <= 5
+
+    def test_optimize_batches_defaults_to_balanced_algorithm(self):
+        """Direct package defaults should use same-trial balanced set-cover."""
+        generator = BatchGenerator(n_videos=24, batch_size=6, seed=123)
+
+        assert generator.optimize_batches(seed=123) == generator.optimize_batches(
+            algorithm="balanced",
+            seed=123,
+        )
+
+    def test_pair_balance_local_search_can_escape_coverage_preserving_trap(self):
+        """Temporary-violation local search should reduce avoidable pair hot spots."""
+        batches = [
+            [0, 1, 2],
+            [0, 1, 3],
+            [0, 1, 4],
+            [0, 1, 5],
+            [2, 3, 4],
+            [2, 3, 5],
+            [2, 4, 5],
+            [3, 4, 5],
+        ]
+
+        improved = improve_pair_balance(
+            6,
+            3,
+            batches,
+            seed=22,
+            target_lmax=2,
+            attempts=2,
+            iterations=5000,
+            seconds_per_attempt=2,
+        )
+
+        def pair_counts(batches):
+            counts = {}
+            for batch in batches:
+                for pair in combinations(batch, 2):
+                    key = tuple(sorted(pair))
+                    counts[key] = counts.get(key, 0) + 1
+            return counts
+
+        counts = pair_counts(improved)
+        assert set(counts) == set(combinations(range(6), 2))
+        assert max(counts.values()) <= 2
+
+    def test_balanced_cover_score_uses_normalized_metric(self):
+        """Package scoring should share the size-normalized cover metric."""
+        generator = BatchGenerator(n_videos=6, batch_size=2, seed=42)
+        all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
+        evenly_spread = all_pairs + [[0, 1], [0, 2], [0, 3]]
+
+        assert generator._balanced_cover_score(evenly_spread) == balance_sort_key(6, 2, evenly_spread)
+
+    def test_exact_pair_design_is_already_balanced_enough(self):
+        """An exact lambda-1 design should not be penalized because all pairs are at lambda_max."""
+        generator = BatchGenerator(n_videos=6, batch_size=2, seed=42)
+        all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
+
+        assert generator._is_already_balanced_enough(all_pairs) is True
 
     def test_optimal_script_prefers_packaged_copy(self, monkeypatch, tmp_path):
         """The packaged optimize script should win over a stale cwd copy."""

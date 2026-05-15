@@ -83,6 +83,7 @@ include = ["multiarrangement*", "coverlib*"]
   "test_audio_icon_new.png",
   "examples/*",
   "ljcr_cache/*.txt",
+  "balanced_cache/*.txt",
   "ExampleData/*"
 ]
 "*" = ["*.txt", "*.md"]

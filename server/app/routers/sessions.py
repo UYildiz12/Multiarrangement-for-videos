@@ -425,7 +425,7 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
     if study["paradigm"] == Paradigm.SETCOVER and n_stimuli >= 2:
         batch_size = study["config"].get("batch_size", 6)
         flex = bool(study["config"].get("flex", False))
-        setcover_algorithm = study["config"].get("setcover_algorithm", "hybrid")
+        setcover_algorithm = study["config"].get("setcover_algorithm", "balanced")
         effective_batch = min(batch_size, n_stimuli)
         batches = generate_batches(
             n_stimuli,

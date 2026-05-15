@@ -46,6 +46,7 @@ class SetCoverConfig(BaseModel):
     """Configuration for set-cover paradigm."""
     batch_size: int = Field(default=6, ge=3, le=12)
     flex: bool = False
+    setcover_algorithm: str = "balanced"
     weight_alpha: float = 2.0
     weight_mode: str = "max"
     use_inverse_mds: bool = False

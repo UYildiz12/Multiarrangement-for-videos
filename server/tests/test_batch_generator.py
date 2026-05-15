@@ -5,9 +5,11 @@ Tests for the batch generator core algorithms.
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from itertools import combinations
 
 import pytest
-from ma_core.batch_generator import BatchGenerator, generate_batches, _resolve_ljcr_cache_dir
+from coverlib.balanced import balance_sort_key
+from ma_core.batch_generator import BatchGenerator, generate_batches, _balanced_cover_score, _resolve_ljcr_cache_dir
 
 
 class TestBatchGenerator:
@@ -127,6 +129,45 @@ class TestGenerateBatchesFunction:
         # Should have all 45 pairs covered
         expected_pairs = 10 * 9 // 2
         assert len(covered) == expected_pairs
+
+    def test_balanced_generation_flattens_pair_hot_spots(self):
+        """Server balanced mode should improve balance without adding trials."""
+        batches = generate_batches(n_items=40, batch_size=6, seed=123, restarts=64, algorithm="balanced")
+
+        counts = {}
+        for batch in batches:
+            for pair in combinations(batch, 2):
+                key = tuple(sorted(pair))
+                counts[key] = counts.get(key, 0) + 1
+
+        assert set(counts) == set(combinations(range(40), 2))
+        assert len(batches) == 55
+        assert max(counts.values()) <= 6
+
+    def test_generate_batches_defaults_to_balanced_algorithm(self):
+        """Server defaults should use same-trial balanced set-cover."""
+        assert generate_batches(n_items=24, batch_size=6, seed=123, restarts=64) == generate_batches(
+            n_items=24,
+            batch_size=6,
+            seed=123,
+            restarts=64,
+            algorithm="balanced",
+        )
+
+    def test_balanced_cover_score_uses_normalized_metric(self):
+        """Server scoring should share the size-normalized cover metric."""
+        all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
+        evenly_spread = all_pairs + [[0, 1], [0, 2], [0, 3]]
+
+        assert _balanced_cover_score(6, 2, evenly_spread) == balance_sort_key(6, 2, evenly_spread)
+
+    def test_exact_pair_design_is_already_balanced_enough(self):
+        """An exact lambda-1 design should not be penalized because all pairs are at lambda_max."""
+        from ma_core.batch_generator import _is_already_balanced_enough
+
+        all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
+
+        assert _is_already_balanced_enough(6, 2, all_pairs) is True
 
 
 class TestEdgeCases:

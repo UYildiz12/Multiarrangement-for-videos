@@ -7,6 +7,8 @@ all pairs of videos appear together at least once while minimizing the total num
 
 import random
 import itertools
+import os
+from collections import Counter
 from typing import List, Tuple, Set, Dict, Optional
 from pathlib import Path
 import math
@@ -21,16 +23,18 @@ class BatchGenerator:
     fallbacks. This ensures the best possible batch configurations that guarantee
     all video pairs appear together at least once while minimizing batch count.
     
-    The default methods (greedy_algorithm, optimize_batches) now use the hybrid
-    approach for optimal results with robust fallback options.
+    The default methods use the balanced approach: first get the minimum/near-
+    minimum cover, then replace it with a validated same-trial balanced cache
+    when available. The raw hybrid minimum cover remains available explicitly.
     
     Example:
-        # Simple usage - automatically uses hybrid algorithm
+        # Simple usage - automatically uses balanced set-cover
         generator = BatchGenerator(n_videos=24, batch_size=8, seed=42)
-        batches = generator.greedy_algorithm()  # Uses hybrid (optimal -> C -> Python)
-        
+        batches = generator.greedy_algorithm()
+
         # Explicit algorithm selection
-        batches = generator.optimize_batches(algorithm='hybrid')  # Recommended
+        batches = generator.optimize_batches(algorithm='balanced')  # Recommended
+        batches = generator.optimize_batches(algorithm='hybrid')    # Raw minimum cover
         batches = generator.optimize_batches(algorithm='optimal') # Force optimal only
         batches = generator.optimize_batches(algorithm='greedy')  # Force greedy only
     """
@@ -105,11 +109,10 @@ class BatchGenerator:
         
     def greedy_algorithm(self, max_iterations: int = 1000) -> List[List[int]]:
         """
-        Generate batches using the hybrid algorithm (recommended default).
-        
-        This method now uses the hybrid approach which tries multiple algorithms
-        in order of quality: optimal solution, C extensions, then Python fallbacks.
-        This ensures the best possible results with robust fallback options.
+        Generate batches using the balanced algorithm (recommended default).
+
+        This method keeps the minimum/near-minimum trial budget and uses a
+        validated balanced cache when available.
         
         Args:
             max_iterations: Maximum iterations (used for compatibility, converted to restarts)
@@ -117,8 +120,7 @@ class BatchGenerator:
         Returns:
             List of batches (each batch is a list of video indices)
         """
-        # Use hybrid algorithm as the new default (best quality with fallbacks)
-        return self.optimize_batches(algorithm='hybrid')
+        return self.optimize_batches(algorithm='balanced')
     
     def _generate_batches_optimized(self, restarts: int = 64, seed: int = 42) -> List[List[int]]:
         """
@@ -141,7 +143,7 @@ class BatchGenerator:
             return batches
         except (ImportError, Exception) as e:
             # Fallback implementation if New_Greedy_1.py not available
-            print(f"⚠ Failed to use New_Greedy_1.py: {e}, using fallback")
+            print(f"Warning: Failed to use New_Greedy_1.py: {e}, using fallback")
             return self._fallback_greedy_implementation(restarts, seed)
         
     def _fallback_greedy_implementation(self, restarts: int, seed: int) -> List[List[int]]:
@@ -651,7 +653,294 @@ class BatchGenerator:
             'schonheim_lower_bound': self.calculate_schonheim_lower_bound(),
             'efficiency': self.calculate_schonheim_lower_bound() / len(batches) if batches else 0
         }
-        
+
+    def _coverage_counts(self, batches: List[List[int]]) -> Tuple[Counter, Counter]:
+        pair_counts = Counter()
+        video_usage = Counter()
+        for batch in batches:
+            video_usage.update(int(idx) for idx in batch)
+            for pair in itertools.combinations(sorted(int(idx) for idx in batch), 2):
+                pair_counts[pair] += 1
+        for idx in range(self.n_videos):
+            video_usage.setdefault(idx, 0)
+        return pair_counts, video_usage
+
+    def _augment_cover_for_balance(
+        self,
+        batches: List[List[int]],
+        extra_blocks: int,
+        seed: int,
+    ) -> List[List[int]]:
+        """Add a small number of targeted blocks around over-repeated pairs."""
+        if extra_blocks <= 0:
+            return [list(batch) for batch in batches]
+
+        rng = random.Random(seed)
+        augmented = [list(map(int, batch)) for batch in batches]
+        pair_counts, video_usage = self._coverage_counts(augmented)
+        if not pair_counts:
+            return augmented
+
+        max_count = max(pair_counts.values())
+        offender_pairs = {pair for pair, count in pair_counts.items() if count == max_count}
+        critical_pairs: Set[Tuple[int, int]] = set()
+        for batch in augmented:
+            batch_pairs = set(itertools.combinations(sorted(batch), 2))
+            if batch_pairs & offender_pairs:
+                critical_pairs.update(pair for pair in batch_pairs if pair_counts[pair] == 1)
+
+        all_pairs = list(itertools.combinations(range(self.n_videos), 2))
+        for _ in range(extra_blocks):
+            if critical_pairs:
+                anchor = rng.choice(sorted(critical_pairs))
+            else:
+                anchor = min(
+                    all_pairs,
+                    key=lambda pair: (
+                        pair_counts[pair],
+                        video_usage[pair[0]] + video_usage[pair[1]],
+                        rng.random(),
+                    ),
+                )
+
+            block = [anchor[0], anchor[1]]
+            block_set = set(block)
+            while len(block) < self.batch_size:
+                preferred = []
+                relaxed = []
+                for candidate in range(self.n_videos):
+                    if candidate in block_set:
+                        continue
+                    new_pairs = [tuple(sorted((candidate, existing))) for existing in block]
+                    critical_gain = sum(1 for pair in new_pairs if pair in critical_pairs)
+                    singleton_gain = sum(1 for pair in new_pairs if pair_counts[pair] == 1)
+                    duplicate_cost = sum(pair_counts[pair] for pair in new_pairs)
+                    score = (
+                        critical_gain * 100.0
+                        + singleton_gain * 15.0
+                        - duplicate_cost * 2.0
+                        - video_usage[candidate]
+                        + rng.random()
+                    )
+                    option = (score, candidate)
+                    if not offender_pairs.intersection(new_pairs):
+                        preferred.append(option)
+                    relaxed.append(option)
+
+                options = preferred if preferred else relaxed
+                if not options:
+                    break
+                options.sort(reverse=True)
+                top_options = options[:min(5, len(options))]
+                selected = top_options[0] if rng.random() > 0.3 else rng.choice(top_options)
+                block.append(selected[1])
+                block_set.add(selected[1])
+
+            if len(block) != self.batch_size:
+                continue
+
+            block = sorted(block)
+            augmented.append(block)
+            video_usage.update(block)
+            for pair in itertools.combinations(block, 2):
+                pair_counts[pair] += 1
+                critical_pairs.discard(pair)
+
+        return augmented
+
+    def _rebalance_fixed_cover(
+        self,
+        batches: List[List[int]],
+        seed: int,
+        passes: int = 40,
+        greedy_trials: int = 20,
+    ) -> List[List[int]]:
+        """Use the local block-design optimizer without changing the trial budget."""
+        try:
+            from multiarrangement import optimize_cover_pure as ocp
+        except Exception:
+            return batches
+
+        try:
+            blocks = [tuple(sorted(int(idx) for idx in batch)) for batch in batches]
+            optimizer = ocp.CoverOptimizer(self.n_videos, blocks, seed=seed)
+            optimizer.local_search(passes=passes, forbid_above=None, greedy_trials=greedy_trials)
+            return [list(block) for block in optimizer.blocks]
+        except Exception as exc:
+            print(f"Warning: fixed-budget balance optimization failed ({exc}); keeping candidate cover.")
+            return batches
+
+    def _balanced_cover_score(self, batches: List[List[int]]) -> tuple:
+        """Lexicographic score for complete coverage with balanced pair concurrence."""
+        try:
+            from coverlib.balanced import balance_sort_key
+
+            return balance_sort_key(self.n_videos, self.batch_size, batches)
+        except Exception:
+            pass
+
+        pair_counts, video_usage = self._coverage_counts(batches)
+        expected_pairs = self.n_videos * (self.n_videos - 1) // 2
+        if len(pair_counts) != expected_pairs or any(count < 1 for count in pair_counts.values()):
+            missing = expected_pairs - len(pair_counts)
+            return (1, missing, len(batches))
+
+        values = list(pair_counts.values())
+        lmax = max(values) if values else 0
+        count_at_lmax = sum(1 for value in values if value == lmax)
+        mean = sum(values) / len(values) if values else 0.0
+        variance = sum((value - mean) ** 2 for value in values) / len(values) if values else 0.0
+        usage_values = list(video_usage.values())
+        usage_range = (max(usage_values) - min(usage_values)) if usage_values else 0
+        return (0, lmax, count_at_lmax, round(variance, 12), usage_range, len(batches))
+
+    def _is_already_balanced_enough(self, batches: List[List[int]]) -> bool:
+        try:
+            from coverlib.balanced import normalized_balance_metrics
+
+            metrics = normalized_balance_metrics(self.n_videos, self.batch_size, batches)
+            return (
+                metrics.complete
+                and metrics.lambda_max_ratio <= 1.5
+                and metrics.normalized_pair_sumsq_excess <= 0.05
+            )
+        except Exception:
+            score = self._balanced_cover_score(batches)
+            if score[0] != 0:
+                return False
+            _, lmax, count_at_lmax, *_ = score
+            expected_pairs = self.n_videos * (self.n_videos - 1) // 2
+            return lmax <= 3 and count_at_lmax <= max(1, int(math.ceil(expected_pairs * 0.02)))
+
+    def optimize_batches_balanced(
+        self,
+        *,
+        seed: int = 42,
+        restarts: int = 64,
+        max_extra_fraction: float = 0.0,
+    ) -> List[List[int]]:
+        """Generate a complete cover while flattening pair counts without adding trials by default."""
+        candidates: List[List[List[int]]] = []
+        minimal = self.optimize_batches_hybrid(seed=seed)
+        if minimal:
+            if self._is_already_balanced_enough(minimal):
+                pair_counts, _ = self._coverage_counts(minimal)
+                hist = Counter(pair_counts.values())
+                print(
+                    f"Used near-minimal balanced set-cover ({len(minimal)} batches, "
+                    f"lambda_max={max(pair_counts.values()) if pair_counts else 0}, hist={dict(sorted(hist.items()))})"
+                )
+                return minimal
+            candidates.append(minimal)
+        else:
+            candidates.append(self._fallback_greedy_implementation(restarts, seed))
+
+        extra_budget = int(math.floor(len(candidates[0]) * max(0.0, float(max_extra_fraction))))
+        trial_limit = len(candidates[0]) + extra_budget
+        cached = self._load_balanced_cache_candidate(trial_limit)
+        if cached and self._balanced_cover_score(cached) < self._balanced_cover_score(candidates[0]):
+            pair_counts, _ = self._coverage_counts(cached)
+            hist = Counter(pair_counts.values())
+            print(
+                f"Loaded cached balanced cover for {self.n_videos} videos, k={self.batch_size} "
+                f"({len(cached)} batches, lambda_max={max(pair_counts.values()) if pair_counts else 0}, "
+                f"hist={dict(sorted(hist.items()))})"
+            )
+            return cached
+
+        extra_blocks = max(0, trial_limit - len(candidates[0]))
+        if extra_blocks:
+            augmentation_attempts = 8 if self.n_videos >= 32 else 12
+            for offset in range(augmentation_attempts):
+                augmented = self._augment_cover_for_balance(
+                    candidates[0],
+                    extra_blocks,
+                    seed + offset,
+                )
+                rebalanced = self._rebalance_fixed_cover(augmented, seed + offset)
+                if rebalanced and len(rebalanced) <= trial_limit:
+                    candidates.append(rebalanced)
+
+        greedy_restarts = max(24, min(96, int(restarts)))
+        for offset in (0, 1, 2, 3, 4, 5):
+            greedy = self._fallback_greedy_implementation(greedy_restarts, seed + offset)
+            if greedy and len(greedy) <= trial_limit:
+                candidates.append(greedy)
+
+        best = min(candidates, key=self._balanced_cover_score)
+        best = self._improve_balanced_cover_if_needed(best, seed=seed)
+        pair_counts, _ = self._coverage_counts(best)
+        hist = Counter(pair_counts.values())
+        print(
+            f"Used balanced set-cover ({len(best)} batches, "
+            f"lambda_max={max(pair_counts.values()) if pair_counts else 0}, hist={dict(sorted(hist.items()))})"
+        )
+        return best
+
+    def _improve_balanced_cover_if_needed(
+        self,
+        batches: List[List[int]],
+        *,
+        seed: int,
+    ) -> List[List[int]]:
+        """Run bounded temporary-violation local search for stubborn high-concurrence covers."""
+        score = self._balanced_cover_score(batches)
+        if os.getenv("MA_ENABLE_SLOW_BALANCE_SEARCH") != "1":
+            return batches
+
+        try:
+            from coverlib.balanced import normalized_balance_metrics
+
+            metrics = normalized_balance_metrics(self.n_videos, self.batch_size, batches)
+            if self.n_videos < 24 or not metrics.complete or metrics.lambda_max_ratio <= 1.5:
+                return batches
+            target_lmax = max(metrics.ideal_lambda_max, metrics.lambda_max - 1)
+        except Exception:
+            if self.n_videos < 24 or score[0] != 0 or score[1] <= 3:
+                return batches
+            target_lmax = max(2, score[1] - 1)
+
+        try:
+            from coverlib.balanced import improve_pair_balance
+        except Exception:
+            return batches
+
+        attempts = 2
+        iterations = min(70_000, max(24_000, self.n_videos * 1_500))
+        seconds_per_attempt = min(14.0, max(5.0, self.n_videos * 0.35))
+        improved = improve_pair_balance(
+            self.n_videos,
+            self.batch_size,
+            batches,
+            seed=seed,
+            target_lmax=target_lmax,
+            attempts=attempts,
+            iterations=iterations,
+            seconds_per_attempt=seconds_per_attempt,
+        )
+        if self._balanced_cover_score(improved) < score:
+            return improved
+        return batches
+
+    def _load_balanced_cache_candidate(self, trial_limit: int) -> Optional[List[List[int]]]:
+        try:
+            from coverlib.balanced import load_cached_balanced_cover
+            import multiarrangement as ma
+        except Exception:
+            return None
+
+        package_dir = Path(ma.__file__).resolve().parent
+        cache_dirs = [
+            package_dir / "balanced_cache",
+            Path.cwd() / "multiarrangement" / "balanced_cache",
+        ]
+        return load_cached_balanced_cover(
+            self.n_videos,
+            self.batch_size,
+            max_blocks=trial_limit,
+            cache_dirs=cache_dirs,
+        )
+
     def save_batches(self, batches: List[List[int]], output_file: Path) -> None:
         """
         Save batches to a file.
@@ -698,31 +987,31 @@ class BatchGenerator:
             try:
                 batches = self._try_optimize_cover_pure(project_root, **kwargs)
                 if batches:
-                    print(f"✓ Used optimize_cover_pure.py (optimal solution: {len(batches)} batches)")
+                    print(f"Used optimize_cover_pure.py (optimal solution: {len(batches)} batches)")
                     return batches
             except Exception as e:
-                print(f"⚠ optimize_cover_pure.py failed: {e}")
+                print(f"Warning: optimize_cover_pure.py failed: {e}")
         
         # Try pre-compiled C extension first (best performance)
         try:
             batches = self._try_greedy_c_extension(**kwargs)
             if batches:
-                print(f"✓ Used C extension (pre-compiled: {len(batches)} batches)")
+                print(f"Used C extension (pre-compiled: {len(batches)} batches)")
                 return batches
         except Exception as e:
-            print(f"⚠ C extension failed: {e}")
+            print(f"Warning: C extension failed: {e}")
         
         # Try runtime-compiled C as fallback
         try:
             batches = self._try_greedy_c_runtime(project_root, **kwargs)
             if batches:
-                print(f"✓ Used Greedy_gen.c (runtime compiled: {len(batches)} batches)")
+                print(f"Used Greedy_gen.c (runtime compiled: {len(batches)} batches)")
                 return batches
         except Exception as e:
-            print(f"⚠ Runtime C compilation failed: {e}")
+            print(f"Warning: Runtime C compilation failed: {e}")
         
         # Final fallback to Python greedy
-        print("ℹ Using Python greedy algorithm (fallback)")
+        print("Using Python greedy algorithm (fallback)")
         return self._try_new_greedy_python(**kwargs)
     
     def _try_optimize_cover_pure(self, project_root: Path, **kwargs) -> Optional[List[List[int]]]:
@@ -763,7 +1052,7 @@ class BatchGenerator:
                 optimize_script = cwd_script
         
         if optimize_script is None:
-            print("⚠ optimize_cover_pure.py not found - using fallback method")
+            print("Warning: optimize_cover_pure.py not found - using fallback method")
             return None
         
         # Create temporary output file
@@ -907,15 +1196,15 @@ class BatchGenerator:
             seed = kwargs.get('seed', 42)
             return self._generate_batches_optimized(restarts=restarts, seed=seed)
         except Exception as e:
-            print(f"⚠ Advanced Python algorithm failed: {e}, using simple greedy")
+            print(f"Warning: Advanced Python algorithm failed: {e}, using simple greedy")
             return self.greedy_algorithm()
     
-    def optimize_batches(self, algorithm: str = 'hybrid', **kwargs) -> List[List[int]]:
+    def optimize_batches(self, algorithm: str = 'balanced', **kwargs) -> List[List[int]]:
         """
         Generate optimized batches using the specified algorithm.
         
         Args:
-            algorithm: Algorithm to use ('hybrid', 'optimal', 'greedy', 'python', 'brute_force')
+            algorithm: Algorithm to use ('hybrid', 'balanced', 'optimal', 'greedy', 'python', 'brute_force')
             **kwargs: Additional arguments for the algorithm
             
         Returns:
@@ -923,6 +1212,8 @@ class BatchGenerator:
         """
         if algorithm == 'hybrid':
             return self.optimize_batches_hybrid(**kwargs)
+        elif algorithm == 'balanced':
+            return self.optimize_batches_balanced(**kwargs)
         elif algorithm == 'optimal':
             # Try only optimize_cover_pure.py
             return self.optimize_batches_hybrid(prefer_optimal=True, **kwargs)
@@ -932,16 +1223,16 @@ class BatchGenerator:
             try:
                 batches = self._try_greedy_c_runtime(project_root, **kwargs)
                 if batches:
-                    print(f"✓ Used runtime C compilation: {len(batches)} batches")
+                    print(f"Used runtime C compilation: {len(batches)} batches")
                     return batches
             except Exception as e:
-                print(f"⚠ Runtime C failed: {e}")
+                print(f"Warning: Runtime C failed: {e}")
             
-            print("ℹ Falling back to Python greedy")
+            print("Falling back to Python greedy")
             return self._try_new_greedy_python(**kwargs)
         elif algorithm == 'python':
             return self._try_new_greedy_python(**kwargs)
         elif algorithm == 'brute_force':
             return self.brute_force_algorithm(**kwargs)
         else:
-            raise ValueError(f"Unknown algorithm: {algorithm}. Use 'hybrid', 'optimal', 'greedy', 'python', or 'brute_force'.")
+            raise ValueError(f"Unknown algorithm: {algorithm}. Use 'hybrid', 'balanced', 'optimal', 'greedy', 'python', or 'brute_force'.")

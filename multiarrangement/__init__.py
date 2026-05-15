@@ -46,8 +46,13 @@ def __getattr__(name: str) -> Any:
     return getattr(module, name)
 
 # Main library functions
-def create_batches(n_videos_or_file, batch_size: int = None, seed: int = 42, algorithm: str = 'hybrid', 
-                   flex: bool = False):
+def create_batches(
+    n_videos_or_file,
+    batch_size: int = None,
+    seed: int = 42,
+    algorithm: str = 'balanced',
+    flex: bool = False,
+):
     """
     Create or load batches for multiarrangement experiments.
     
@@ -57,7 +62,7 @@ def create_batches(n_videos_or_file, batch_size: int = None, seed: int = 42, alg
             - str/Path: Path to existing batch file (loads from file)
         batch_size: Number of items per batch (only used when creating new batches)
         seed: Random seed for reproducibility (only used when creating new batches)
-        algorithm: Algorithm to use ('hybrid', 'optimal', 'greedy') (only used when creating new batches)
+        algorithm: Algorithm to use ('balanced', 'hybrid', 'optimal', 'greedy') (only used when creating new batches)
         flex: If True, use optimize_cover_flex.py for variable-size batch optimization
     
     Returns:

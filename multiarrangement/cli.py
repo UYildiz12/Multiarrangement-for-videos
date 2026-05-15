@@ -256,9 +256,9 @@ def batch_generator_cli():
     
     parser.add_argument(
         "--algorithm",
-        choices=["hybrid", "optimal", "greedy", "brute_force"],
-        default="hybrid",
-        help="Algorithm to use (default: hybrid - tries optimal then greedy C then Python greedy)"
+        choices=["balanced", "hybrid", "optimal", "greedy", "brute_force"],
+        default="balanced",
+        help="Algorithm to use (default: balanced - same-trial balanced set-cover when available)"
     )
     
     parser.add_argument(

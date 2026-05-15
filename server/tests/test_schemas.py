@@ -68,6 +68,7 @@ class TestConfigSchemas:
         config = SetCoverConfig()
         assert config.batch_size == 6
         assert config.flex is False
+        assert config.setcover_algorithm == "balanced"
         assert config.weight_alpha == 2.0
 
     def test_setcover_config_batch_size_bounds(self):

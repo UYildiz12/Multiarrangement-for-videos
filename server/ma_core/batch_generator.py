@@ -10,7 +10,9 @@ stripped of pygame/opencv dependencies for server-side use.
 
 import itertools
 import math
+import os
 import random
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -463,21 +465,349 @@ def _resolve_ljcr_cache_dir() -> Path:
     return Path(__file__).resolve().parent / "ljcr_cache"
 
 
+def _coverage_counts(n_items: int, batches: List[List[int]]) -> tuple[Counter[Tuple[int, int]], Counter[int]]:
+    pair_counts: Counter[Tuple[int, int]] = Counter()
+    item_counts: Counter[int] = Counter()
+    for batch in batches:
+        item_counts.update(int(idx) for idx in batch)
+        for pair in itertools.combinations(sorted(int(idx) for idx in batch), 2):
+            pair_counts[pair] += 1
+    for idx in range(n_items):
+        item_counts.setdefault(idx, 0)
+    return pair_counts, item_counts
+
+
+def _augment_cover_for_balance(
+    n_items: int,
+    batch_size: int,
+    batches: List[List[int]],
+    extra_blocks: int,
+    seed: int,
+) -> List[List[int]]:
+    """Add a small number of targeted blocks around over-repeated pairs."""
+    if extra_blocks <= 0:
+        return [list(batch) for batch in batches]
+
+    rng = random.Random(seed)
+    augmented = [list(map(int, batch)) for batch in batches]
+    pair_counts, item_counts = _coverage_counts(n_items, augmented)
+    if not pair_counts:
+        return augmented
+
+    max_count = max(pair_counts.values())
+    offender_pairs = {pair for pair, count in pair_counts.items() if count == max_count}
+    critical_pairs: Set[Tuple[int, int]] = set()
+    for batch in augmented:
+        batch_pairs = set(itertools.combinations(sorted(batch), 2))
+        if batch_pairs & offender_pairs:
+            critical_pairs.update(pair for pair in batch_pairs if pair_counts[pair] == 1)
+
+    all_pairs = list(itertools.combinations(range(n_items), 2))
+    for _ in range(extra_blocks):
+        if critical_pairs:
+            anchor = rng.choice(sorted(critical_pairs))
+        else:
+            anchor = min(
+                all_pairs,
+                key=lambda pair: (
+                    pair_counts[pair],
+                    item_counts[pair[0]] + item_counts[pair[1]],
+                    rng.random(),
+                ),
+            )
+
+        block = [anchor[0], anchor[1]]
+        block_set = set(block)
+        while len(block) < batch_size:
+            preferred: List[Tuple[float, int]] = []
+            relaxed: List[Tuple[float, int]] = []
+            for candidate in range(n_items):
+                if candidate in block_set:
+                    continue
+                new_pairs = [tuple(sorted((candidate, existing))) for existing in block]
+                critical_gain = sum(1 for pair in new_pairs if pair in critical_pairs)
+                singleton_gain = sum(1 for pair in new_pairs if pair_counts[pair] == 1)
+                duplicate_cost = sum(pair_counts[pair] for pair in new_pairs)
+                score = (
+                    critical_gain * 100.0
+                    + singleton_gain * 15.0
+                    - duplicate_cost * 2.0
+                    - item_counts[candidate]
+                    + rng.random()
+                )
+                option = (score, candidate)
+                if not offender_pairs.intersection(new_pairs):
+                    preferred.append(option)
+                relaxed.append(option)
+
+            options = preferred if preferred else relaxed
+            if not options:
+                break
+            options.sort(reverse=True)
+            top_options = options[:min(5, len(options))]
+            selected = top_options[0] if rng.random() > 0.3 else rng.choice(top_options)
+            block.append(selected[1])
+            block_set.add(selected[1])
+
+        if len(block) != batch_size:
+            continue
+
+        block = sorted(block)
+        augmented.append(block)
+        item_counts.update(block)
+        for pair in itertools.combinations(block, 2):
+            pair_counts[pair] += 1
+            critical_pairs.discard(pair)
+
+    return augmented
+
+
+def _rebalance_fixed_cover(
+    n_items: int,
+    batches: List[List[int]],
+    seed: int,
+    *,
+    passes: int = 40,
+    greedy_trials: int = 20,
+) -> List[List[int]]:
+    """Use the local block-design optimizer without changing the trial budget."""
+    try:
+        from . import optimize_cover_pure as ocp
+    except Exception:
+        return batches
+
+    try:
+        blocks = [tuple(sorted(int(idx) for idx in batch)) for batch in batches]
+        optimizer = ocp.CoverOptimizer(n_items, blocks, seed=seed)
+        optimizer.local_search(passes=passes, forbid_above=None, greedy_trials=greedy_trials)
+        return [list(block) for block in optimizer.blocks]
+    except Exception as exc:
+        print(f"Warning: fixed-budget balance optimization failed ({exc}); keeping candidate cover.")
+        return batches
+
+
+def _balanced_cover_score(n_items: int, batch_size: int, batches: List[List[int]]) -> tuple:
+    """Lexicographic quality score for a complete covering design.
+
+    The hard constraint is complete pair coverage. Among complete covers, prefer
+    a flatter size-normalized concurrence matrix before considering trial count.
+    """
+    try:
+        from coverlib.balanced import balance_sort_key
+
+        return balance_sort_key(n_items, batch_size, batches)
+    except Exception:
+        pass
+
+    pair_counts, item_counts = _coverage_counts(n_items, batches)
+    expected_pairs = n_items * (n_items - 1) // 2
+    if len(pair_counts) != expected_pairs or any(count < 1 for count in pair_counts.values()):
+        missing = expected_pairs - len(pair_counts)
+        return (1, missing, len(batches))
+
+    values = list(pair_counts.values())
+    lmax = max(values) if values else 0
+    count_at_lmax = sum(1 for value in values if value == lmax)
+    mean = sum(values) / len(values) if values else 0.0
+    variance = sum((value - mean) ** 2 for value in values) / len(values) if values else 0.0
+    item_values = list(item_counts.values())
+    item_range = (max(item_values) - min(item_values)) if item_values else 0
+    return (0, lmax, count_at_lmax, round(variance, 12), item_range, len(batches))
+
+
+def _is_already_balanced_enough(n_items: int, batch_size: int, batches: List[List[int]]) -> bool:
+    try:
+        from coverlib.balanced import normalized_balance_metrics
+
+        metrics = normalized_balance_metrics(n_items, batch_size, batches)
+        return (
+            metrics.complete
+            and metrics.lambda_max_ratio <= 1.5
+            and metrics.normalized_pair_sumsq_excess <= 0.05
+        )
+    except Exception:
+        score = _balanced_cover_score(n_items, batch_size, batches)
+        if score[0] != 0:
+            return False
+        _, lmax, count_at_lmax, *_ = score
+        expected_pairs = n_items * (n_items - 1) // 2
+        return lmax <= 3 and count_at_lmax <= max(1, int(math.ceil(expected_pairs * 0.02)))
+
+
+def _generate_balanced_batches(
+    n_items: int,
+    batch_size: int,
+    *,
+    seed: int,
+    restarts: int,
+    max_extra_fraction: float = 0.0,
+) -> List[List[int]]:
+    """Generate complete pair coverage with a balanced concurrence matrix.
+
+    The default is free balance only: keep the LJCR/minimal trial budget and
+    replace it with a validated same-trial cache when available. A caller may
+    explicitly pass a positive ``max_extra_fraction`` for offline experiments,
+    but production study setup does not spend extra trials by default.
+    """
+    candidates: List[List[List[int]]] = []
+
+    optimal = _generate_optimal_batches(n_items, batch_size, seed=seed)
+    if optimal:
+        if _is_already_balanced_enough(n_items, batch_size, optimal):
+            pair_counts, _ = _coverage_counts(n_items, optimal)
+            hist = Counter(pair_counts.values())
+            print(
+                f"[balanced] Using near-minimal cover for v={n_items} k={batch_size} "
+                f"(lambda_max={max(pair_counts.values()) if pair_counts else 0}, hist={dict(sorted(hist.items()))})"
+            )
+            return optimal
+        candidates.append(optimal)
+
+    fallback_seed = seed if optimal else seed + 1009
+    if not candidates:
+        candidates.append(BatchGenerator(n_items, batch_size, fallback_seed).generate_batches(restarts=restarts))
+
+    extra_budget = int(math.floor(len(candidates[0]) * max(0.0, float(max_extra_fraction))))
+    trial_limit = len(candidates[0]) + extra_budget
+    cached = _load_balanced_cache_candidate(n_items, batch_size, trial_limit)
+    if cached and _balanced_cover_score(n_items, batch_size, cached) < _balanced_cover_score(n_items, batch_size, candidates[0]):
+        pair_counts, _ = _coverage_counts(n_items, cached)
+        hist = Counter(pair_counts.values())
+        print(
+            f"[balanced] Loaded cached balanced cover for v={n_items} k={batch_size} "
+            f"({len(cached)} batches, lambda_max={max(pair_counts.values()) if pair_counts else 0}, "
+            f"hist={dict(sorted(hist.items()))})"
+        )
+        return cached
+
+    extra_blocks = max(0, trial_limit - len(candidates[0]))
+    if extra_blocks:
+        augmentation_attempts = 8 if n_items >= 32 else 12
+        for offset in range(augmentation_attempts):
+            augmented = _augment_cover_for_balance(
+                n_items,
+                batch_size,
+                candidates[0],
+                extra_blocks,
+                seed + offset,
+            )
+            rebalanced = _rebalance_fixed_cover(n_items, augmented, seed + offset)
+            if rebalanced and len(rebalanced) <= trial_limit:
+                candidates.append(rebalanced)
+
+    greedy_restarts = max(24, min(96, int(restarts)))
+    seed_offsets = (0, 1, 2, 3, 4, 5)
+    for offset in seed_offsets:
+        candidate_seed = seed + offset
+        greedy = BatchGenerator(n_items, batch_size, candidate_seed).generate_batches(restarts=greedy_restarts)
+        if greedy and len(greedy) <= trial_limit:
+            candidates.append(greedy)
+
+    best = min(candidates, key=lambda batches: _balanced_cover_score(n_items, batch_size, batches))
+    best = _improve_balanced_cover_if_needed(
+        n_items,
+        batch_size,
+        best,
+        seed=seed,
+    )
+    pair_counts, _ = _coverage_counts(n_items, best)
+    hist = Counter(pair_counts.values())
+    print(
+        f"[balanced] Generated {len(best)} batches for v={n_items} k={batch_size} "
+        f"(lambda_max={max(pair_counts.values()) if pair_counts else 0}, hist={dict(sorted(hist.items()))})"
+    )
+    return best
+
+
+def _improve_balanced_cover_if_needed(
+    n_items: int,
+    batch_size: int,
+    batches: List[List[int]],
+    *,
+    seed: int,
+) -> List[List[int]]:
+    """Run bounded temporary-violation local search for stubborn high-concurrence covers."""
+    score = _balanced_cover_score(n_items, batch_size, batches)
+    if os.getenv("MA_ENABLE_SLOW_BALANCE_SEARCH") != "1":
+        return batches
+
+    try:
+        from coverlib.balanced import normalized_balance_metrics
+
+        metrics = normalized_balance_metrics(n_items, batch_size, batches)
+        if n_items < 24 or not metrics.complete or metrics.lambda_max_ratio <= 1.5:
+            return batches
+        target_lmax = max(metrics.ideal_lambda_max, metrics.lambda_max - 1)
+    except Exception:
+        if n_items < 24 or score[0] != 0 or score[1] <= 3:
+            return batches
+        target_lmax = max(2, score[1] - 1)
+
+    try:
+        from coverlib.balanced import improve_pair_balance
+    except Exception:
+        return batches
+
+    attempts = 2
+    iterations = min(70_000, max(24_000, n_items * 1_500))
+    seconds_per_attempt = min(14.0, max(5.0, n_items * 0.35))
+    improved = improve_pair_balance(
+        n_items,
+        batch_size,
+        batches,
+        seed=seed,
+        target_lmax=target_lmax,
+        attempts=attempts,
+        iterations=iterations,
+        seconds_per_attempt=seconds_per_attempt,
+    )
+    if _balanced_cover_score(n_items, batch_size, improved) < score:
+        return improved
+    return batches
+
+
+def _load_balanced_cache_candidate(
+    n_items: int,
+    batch_size: int,
+    trial_limit: int,
+) -> Optional[List[List[int]]]:
+    try:
+        from coverlib.balanced import load_cached_balanced_cover
+    except Exception:
+        return None
+
+    cache_dirs: List[Path] = []
+    try:
+        import multiarrangement as ma
+
+        cache_dirs.append(Path(ma.__file__).resolve().parent / "balanced_cache")
+    except Exception:
+        pass
+    cache_dirs.append(Path(__file__).resolve().parent / "balanced_cache")
+    cache_dirs.append(Path.cwd() / "multiarrangement" / "balanced_cache")
+
+    return load_cached_balanced_cover(
+        n_items,
+        batch_size,
+        max_blocks=trial_limit,
+        cache_dirs=cache_dirs,
+    )
+
+
 def generate_batches(
     n_items: int,
     batch_size: int,
     seed: Optional[int] = None,
     restarts: int = 64,
     flex: bool = False,
-    algorithm: str = "server",
+    algorithm: str = "balanced",
 ) -> List[List[int]]:
     """
     Convenience function to generate batches.
     
-    Uses a hybrid strategy matching the desktop library:
-    1. Try LJCR-optimal covering designs (via bundled optimize_cover_pure)
-    2. Fall back to the library if installed (for flex mode)
-    3. Fall back to local greedy algorithm
+    Uses the same default as the desktop library: complete pair coverage with a
+    same-trial balanced cache when available. Pass ``algorithm="hybrid"`` or
+    ``algorithm="server"`` for the raw minimum-cover path.
     
     Args:
         n_items: Total number of stimuli
@@ -485,12 +815,20 @@ def generate_batches(
         seed: Random seed for reproducibility
         restarts: Number of algorithm restarts
         flex: Use variable-size batches (library flex mode)
-        algorithm: Algorithm hint ('hybrid', 'server', 'optimal', 'greedy')
+        algorithm: Algorithm hint ('balanced', 'hybrid', 'server', 'optimal', 'greedy')
         
     Returns:
         List of batches
     """
     seed_value = 42 if seed is None else seed
+
+    if algorithm == "balanced":
+        return _generate_balanced_batches(
+            n_items,
+            batch_size,
+            seed=seed_value,
+            restarts=restarts,
+        )
 
     # For flex mode, delegate to the library (flex requires optimize_cover_flex.py)
     if flex:
