@@ -35,13 +35,6 @@ From the repository root:
 python -m pip install .
 ```
 
-For development and test dependencies:
-
-```bash
-python -m pip install -e ".[dev]"
-python -m pip install -r server/requirements-dev.txt
-```
-
 Requirements:
 
 - Python 3.8 or newer
@@ -51,69 +44,6 @@ Requirements:
 - opencv-python 4.5+
 - matplotlib 3.4+
 - openpyxl 3.0+
-
-## Verify the repository
-
-Package tests:
-
-```bash
-pytest tests -q
-```
-
-Backend tests:
-
-```bash
-pytest server/tests -q
-```
-
-Frontend tests and build checks:
-
-```bash
-cd web
-npm ci
-npm run test
-npm run build
-npm run lint
-```
-
-## Local full-stack development
-
-Start the backend:
-
-```bash
-cd server
-LOCAL_DEV_BYPASS_AUTH=1 uvicorn app.main:app --reload --port 8000
-```
-
-In a second terminal, start the frontend:
-
-```bash
-cd web
-cp .env.example .env.local
-npm run dev
-```
-
-Set these values in `web/.env.local` for local development:
-
-```bash
-NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000
-NEXT_PUBLIC_LOCAL_DEV_BYPASS_AUTH=1
-```
-
-Optional Supabase media hosting:
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-NEXT_PUBLIC_SUPABASE_BUCKET=stimuli
-```
-
-Useful routes:
-
-- `/demo` for bundled hosted demos
-- `/setup` to create local or hosted studies
-- `/participate` to run participant sessions
-- `/admin`, `/dashboard`, and `/results` for experimenter workflows
 
 ## Python API quickstart
 
