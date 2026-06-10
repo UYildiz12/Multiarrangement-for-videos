@@ -545,6 +545,26 @@ def improve_pair_balance(
     return [list(block) for block in best_blocks]
 
 
+def _missing_change(st: _SwapState, bidx: int, x: int, y: int) -> int:
+    """Net change in the number of missing pairs if x is swapped for y in block bidx."""
+    breaks = 0
+    fixes = 0
+    for u in st.blocks[bidx]:
+        if u == x:
+            continue
+        if st.counts[pair_index(x, u, st.v)] == 1:
+            breaks += 1
+        if st.counts[pair_index(y, u, st.v)] == 0:
+            fixes += 1
+    return breaks - fixes
+
+
+_DIVE_MISSING_W = 60.0
+_REPAIR_MISSING_W = 4000.0
+_MISSING_CAP = 4
+_REPAIR_BUDGET = 3000
+
+
 def _anneal_once(
     v: int,
     k: int,
@@ -555,63 +575,111 @@ def _anneal_once(
     iterations: int,
     seconds: float,
 ) -> List[Block]:
-    """Single-item-swap annealing with a zero-temperature polish tail.
+    """Dive/repair/revert oscillation over single-item swaps.
 
-    Temporary coverage violations are allowed mid-search (phase-ramped missing
-    penalty); only complete states are ever recorded as best.
+    Each cycle dives with bounded temporary coverage violations (at most
+    ``_MISSING_CAP`` missing pairs), then repairs back to a complete cover with
+    moves that never increase the missing count; if repair fails, the state
+    reverts to the last complete cover, so a complete result is guaranteed.
+    Odd seeds run kick-ILS (one forced hot-pair eviction per cycle, short
+    dives); even seeds run plain SA dives. Cooling is per-cycle geometric with
+    reheat waves, so results are deterministic whenever the iteration cap binds
+    before the wall clock.
     """
     rng = random.Random(seed)
     if k >= v or not start_blocks:
         return [tuple(sorted(block)) for block in start_blocks]
     st = _init_state(v, k, start_blocks, target=target_lmax)
+    if st.missing:
+        # Engine contract: callers hand in complete covers only.
+        return [tuple(sorted(block)) for block in start_blocks]
     item_w = 0.05
 
+    use_kick = bool(seed & 1)
+    dive_len = 600 if use_kick else 3000
+
+    best_key = (st.lmax, st.sumsq, st.item_sumsq)
     best_blocks = list(st.blocks)
-    best_key = (st.lmax, st.sumsq, st.item_sumsq) if not st.missing else None
+    last_complete = list(st.blocks)
 
-    # Calibrate the starting temperature from sampled move deltas.
-    calibration: List[float] = []
-    for _ in range(64):
-        prop = _propose_swap(st, rng, missing_w=40.0, item_w=item_w)
-        if prop is not None and prop[3] > 0:
-            calibration.append(prop[3])
-    calibration.sort()
-    t_start = max(4.0, calibration[len(calibration) // 2] if calibration else 32.0)
-    t_end = max(0.05, t_start / 400.0)
+    if use_kick:
+        t_start = 10.0
+    else:
+        calibration: List[float] = []
+        for _ in range(64):
+            prop = _propose_swap(st, rng, missing_w=_DIVE_MISSING_W, item_w=item_w)
+            if prop is not None and prop[3] > 0:
+                calibration.append(prop[3])
+        calibration.sort()
+        t_start = max(4.0, calibration[len(calibration) // 2] if calibration else 32.0)
+    t_end = max(0.5, t_start / 50.0)
 
-    polish_at = 0.8
+    temperature = t_start
     started = time.time()
-    phase = 0.0
     iteration = 0
-    while iteration < iterations:
-        if (iteration & 127) == 0:
-            elapsed = time.time() - started
-            if elapsed >= seconds:
+    while iteration < iterations and (time.time() - started) < seconds:
+        # KICK (odd seeds): force one bounded hot-pair eviction to escape the basin.
+        if use_kick:
+            for _ in range(40):
+                iteration += 1
+                prop = _propose_swap(st, rng, missing_w=_DIVE_MISSING_W, item_w=item_w)
+                if prop is None:
+                    continue
+                bidx, x, y, _delta = prop
+                if len(st.missing) + _missing_change(st, bidx, x, y) > _MISSING_CAP:
+                    continue
+                _apply_swap(st, bidx, x, y)
                 break
-            phase = max(elapsed / seconds, iteration / iterations)
-        iteration += 1
 
-        polish = phase >= polish_at
-        if polish and not st.missing:
-            missing_w = 1e18
+        # DIVE: SA walk with bounded missing pairs.
+        for _ in range(dive_len):
+            iteration += 1
+            prop = _propose_swap(st, rng, missing_w=_DIVE_MISSING_W, item_w=item_w)
+            if prop is None:
+                continue
+            bidx, x, y, delta = prop
+            if len(st.missing) + _missing_change(st, bidx, x, y) > _MISSING_CAP:
+                continue
+            if delta > 0.0 and rng.random() >= math.exp(-delta / temperature):
+                continue
+            _apply_swap(st, bidx, x, y)
+            if not st.missing:
+                last_complete = list(st.blocks)
+                key = (st.lmax, st.sumsq, st.item_sumsq)
+                if key < best_key:
+                    best_key = key
+                    best_blocks = list(st.blocks)
+
+        # REPAIR: drive missing pairs to zero; never let the count grow.
+        t_repair = max(temperature, 4.0)
+        tries = 0
+        while st.missing and tries < _REPAIR_BUDGET:
+            tries += 1
+            iteration += 1
+            prop = _propose_swap(st, rng, missing_w=_REPAIR_MISSING_W, item_w=item_w)
+            if prop is None:
+                continue
+            bidx, x, y, delta = prop
+            mc = _missing_change(st, bidx, x, y)
+            if mc > 0:
+                continue
+            if delta > 0.0 and mc == 0 and rng.random() >= math.exp(
+                -min(delta, 50.0) / t_repair
+            ):
+                continue
+            _apply_swap(st, bidx, x, y)
+
+        if st.missing:
+            st = _init_state(v, k, last_complete, target=target_lmax)
         else:
-            missing_w = 16.0 + 600.0 * phase * phase
-
-        prop = _propose_swap(st, rng, missing_w=missing_w, item_w=item_w)
-        if prop is None:
-            continue
-        bidx, x, y, delta = prop
-        if delta > 0.0:
-            if polish:
-                continue
-            temperature = t_start * (t_end / t_start) ** min(1.0, phase / polish_at)
-            if rng.random() >= math.exp(-delta / temperature):
-                continue
-        _apply_swap(st, bidx, x, y)
-        if not st.missing:
+            last_complete = list(st.blocks)
             key = (st.lmax, st.sumsq, st.item_sumsq)
-            if best_key is None or key < best_key:
+            if key < best_key:
                 best_key = key
                 best_blocks = list(st.blocks)
+
+        temperature *= 0.95
+        if temperature < t_end:
+            temperature = t_start  # reheat wave
 
     return best_blocks

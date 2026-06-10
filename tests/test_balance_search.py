@@ -162,6 +162,28 @@ def test_improve_pair_balance_flattens_duplicated_blocks():
     assert after[0] == 0
 
 
+def test_improve_pair_balance_improves_tight_ljcr_cover():
+    """Regression: the engine must escape complete local optima on tight covers.
+
+    The v=24 k=6 LJCR cover (22 trials, lambda_max=6) needs temporary coverage
+    violations to flatten; a correct engine finds a strictly better cover fast.
+    """
+    from pathlib import Path
+
+    from coverlib.balanced import read_blocks_file
+
+    root = Path(__file__).resolve().parents[1]
+    base = read_blocks_file(root / "multiarrangement" / "ljcr_cache" / "v24_k6_t2.txt", 24, 6)
+    before = balance_score(24, base)
+    result = improve_pair_balance(
+        24, 6, base, seed=2026, target_lmax=2, attempts=2, seconds_per_attempt=8.0
+    )
+    after = balance_score(24, result)
+    assert len(result) == len(base)
+    assert after[0] == 0
+    assert after < before
+
+
 def test_improve_pair_balance_deterministic_for_seed():
     v, k = 11, 4
     blocks = _random_complete_cover(v, k, seed=14)
