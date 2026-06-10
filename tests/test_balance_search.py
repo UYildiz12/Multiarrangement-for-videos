@@ -14,6 +14,7 @@ from coverlib.balanced import (
     _total_cost,
     balance_score,
     coverage_counts,
+    improve_pair_balance,
     pair_index,
 )
 
@@ -128,3 +129,44 @@ def test_apply_swap_updates_item_blocks_index():
     for item in range(v):
         expected = {i for i, bs in enumerate(st.block_sets) if item in bs}
         assert st.item_blocks[item] == expected
+
+
+def test_improve_pair_balance_contract_small():
+    v, k = 12, 4
+    blocks = _random_complete_cover(v, k, seed=9)
+    blocks.append(list(blocks[0]))
+    blocks.append(list(blocks[1]))
+    before = balance_score(v, blocks)
+    result = improve_pair_balance(
+        v, k, blocks, seed=11, attempts=1, iterations=40_000, seconds_per_attempt=2.0
+    )
+    after = balance_score(v, result)
+    assert len(result) == len(blocks)
+    for block in result:
+        assert len(block) == k
+        assert len(set(block)) == k
+    assert after[0] == 0  # complete
+    assert after <= before  # never worse
+
+
+def test_improve_pair_balance_flattens_duplicated_blocks():
+    v, k = 12, 4
+    blocks = _random_complete_cover(v, k, seed=12)
+    blocks.extend([list(blocks[0]), list(blocks[0]), list(blocks[1])])
+    before = balance_score(v, blocks)
+    result = improve_pair_balance(
+        v, k, blocks, seed=13, attempts=1, iterations=80_000, seconds_per_attempt=3.0
+    )
+    after = balance_score(v, result)
+    assert after < before  # strictly better on an obviously unbalanced input
+    assert after[0] == 0
+
+
+def test_improve_pair_balance_deterministic_for_seed():
+    v, k = 11, 4
+    blocks = _random_complete_cover(v, k, seed=14)
+    blocks.append(list(blocks[0]))
+    kwargs = dict(attempts=1, iterations=30_000, seconds_per_attempt=30.0)
+    first = improve_pair_balance(v, k, blocks, seed=21, **kwargs)
+    second = improve_pair_balance(v, k, blocks, seed=21, **kwargs)
+    assert first == second

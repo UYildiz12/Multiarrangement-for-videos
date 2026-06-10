@@ -512,10 +512,10 @@ def improve_pair_balance(
 
     pair_budget = len(normalized) * math.comb(k, 2)
     ideal_lmax = max(1, math.ceil(pair_budget / max(1, v * (v - 1) // 2)))
-    target = target_lmax if target_lmax is not None else max(2, min(current_lmax - 1, ideal_lmax + 2))
+    target = target_lmax if target_lmax is not None else max(2, ideal_lmax)
 
     if iterations is None:
-        iterations = min(90_000, max(18_000, v * 1_500))
+        iterations = min(8_000_000, max(500_000, v * 60_000))
     if seconds_per_attempt is None:
         seconds_per_attempt = min(18.0, max(4.0, v * 0.35))
 
@@ -555,217 +555,63 @@ def _anneal_once(
     iterations: int,
     seconds: float,
 ) -> List[Block]:
+    """Single-item-swap annealing with a zero-temperature polish tail.
+
+    Temporary coverage violations are allowed mid-search (phase-ramped missing
+    penalty); only complete states are ever recorded as best.
+    """
     rng = random.Random(seed)
-    pairs = pair_list(v)
-    all_items = list(range(v))
-    blocks = [tuple(sorted(block)) for block in start_blocks]
-    block_pairs = [block_pair_indices(block, v) for block in blocks]
-    counts, item_counts = coverage_counts(v, blocks)
+    if k >= v or not start_blocks:
+        return [tuple(sorted(block)) for block in start_blocks]
+    st = _init_state(v, k, start_blocks, target=target_lmax)
+    item_w = 0.05
 
-    best_blocks = list(blocks)
-    best_score = _score_from_counts(counts, item_counts, len(blocks))
-    current_scalar = _scalar_score(counts, item_counts, target_lmax, phase=0.0)
+    best_blocks = list(st.blocks)
+    best_key = (st.lmax, st.sumsq, st.item_sumsq) if not st.missing else None
+
+    # Calibrate the starting temperature from sampled move deltas.
+    calibration: List[float] = []
+    for _ in range(64):
+        prop = _propose_swap(st, rng, missing_w=40.0, item_w=item_w)
+        if prop is not None and prop[3] > 0:
+            calibration.append(prop[3])
+    calibration.sort()
+    t_start = max(4.0, calibration[len(calibration) // 2] if calibration else 32.0)
+    t_end = max(0.05, t_start / 400.0)
+
+    polish_at = 0.8
     started = time.time()
+    phase = 0.0
+    iteration = 0
+    while iteration < iterations:
+        if (iteration & 127) == 0:
+            elapsed = time.time() - started
+            if elapsed >= seconds:
+                break
+            phase = max(elapsed / seconds, iteration / iterations)
+        iteration += 1
 
-    for iteration in range(1, iterations + 1):
-        if time.time() - started > seconds:
-            break
-
-        phase = iteration / iterations
-        missing = [idx for idx, count in enumerate(counts) if count == 0]
-        over_target = [idx for idx, count in enumerate(counts) if count > target_lmax]
-
-        if over_target and (not missing or rng.random() < 0.75):
-            pair_id = rng.choice(over_target)
-            touching = [idx for idx, pair_ids in enumerate(block_pairs) if pair_id in pair_ids]
-            block_idx = rng.choice(touching) if touching else rng.randrange(len(blocks))
-            anchor_pair = None
-            avoid_pair = pairs[pair_id]
-        elif missing:
-            pair_id = rng.choice(missing)
-            anchor_pair = pairs[pair_id]
-            avoid_pair = None
-            sample = rng.sample(range(len(blocks)), min(16, len(blocks)))
-            block_idx = min(sample, key=lambda idx: sum(counts[pair] == 1 for pair in block_pairs[idx]))
+        polish = phase >= polish_at
+        if polish and not st.missing:
+            missing_w = 1e18
         else:
-            block_idx = rng.randrange(len(blocks))
-            anchor_pair = None
-            avoid_pair = None
+            missing_w = 16.0 + 600.0 * phase * phase
 
-        old_block = blocks[block_idx]
-        old_pairs = set(block_pairs[block_idx])
-        base_counts = counts[:]
-        base_item_counts = item_counts[:]
-        for item in old_block:
-            base_item_counts[item] -= 1
-        for pair_id in old_pairs:
-            base_counts[pair_id] -= 1
-
-        required = _required_vertices(
-            old_pairs,
-            base_counts,
-            pairs,
-            k,
-            rng,
-            anchor_pair=anchor_pair,
-            avoid_pair=avoid_pair,
-        )
-        new_block = _build_candidate_block(
-            v,
-            k,
-            required,
-            base_counts,
-            base_item_counts,
-            all_items,
-            rng,
-            target_lmax,
-            avoid_pair=avoid_pair,
-        )
-        if len(new_block) != k or len(set(new_block)) != k or new_block == old_block:
+        prop = _propose_swap(st, rng, missing_w=missing_w, item_w=item_w)
+        if prop is None:
             continue
-
-        new_pair_ids = set(block_pair_indices(new_block, v))
-        new_counts = base_counts
-        new_item_counts = base_item_counts
-        for item in new_block:
-            new_item_counts[item] += 1
-        for pair_id in new_pair_ids:
-            new_counts[pair_id] += 1
-
-        new_scalar = _scalar_score(new_counts, new_item_counts, target_lmax, phase=phase)
-        delta = new_scalar - current_scalar
-        temperature = max(1.0, 10_000.0 * (1.0 - phase))
-        if delta <= 0 or rng.random() < math.exp(-delta / temperature):
-            blocks[block_idx] = new_block
-            block_pairs[block_idx] = tuple(new_pair_ids)
-            counts = new_counts
-            item_counts = new_item_counts
-            current_scalar = new_scalar
-
-            score = _score_from_counts(counts, item_counts, len(blocks))
-            if score < best_score:
-                best_score = score
-                best_blocks = list(blocks)
+        bidx, x, y, delta = prop
+        if delta > 0.0:
+            if polish:
+                continue
+            temperature = t_start * (t_end / t_start) ** min(1.0, phase / polish_at)
+            if rng.random() >= math.exp(-delta / temperature):
+                continue
+        _apply_swap(st, bidx, x, y)
+        if not st.missing:
+            key = (st.lmax, st.sumsq, st.item_sumsq)
+            if best_key is None or key < best_key:
+                best_key = key
+                best_blocks = list(st.blocks)
 
     return best_blocks
-
-
-def _required_vertices(
-    old_pairs: Iterable[int],
-    base_counts: Sequence[int],
-    pairs: Sequence[Tuple[int, int]],
-    k: int,
-    rng: random.Random,
-    *,
-    anchor_pair: Tuple[int, int] | None,
-    avoid_pair: Tuple[int, int] | None,
-) -> List[int]:
-    if anchor_pair is not None:
-        return list(anchor_pair)
-
-    required: List[int] = []
-    critical_pairs = [pair_id for pair_id in old_pairs if base_counts[pair_id] == 0]
-    rng.shuffle(critical_pairs)
-    for pair_id in critical_pairs[:2]:
-        for item in pairs[pair_id]:
-            if item not in required:
-                required.append(item)
-
-    if (
-        avoid_pair is not None
-        and avoid_pair[0] in required
-        and avoid_pair[1] in required
-        and len(required) > 2
-    ):
-        required.remove(rng.choice(list(avoid_pair)))
-
-    return required[:k]
-
-
-def _build_candidate_block(
-    v: int,
-    k: int,
-    required: Sequence[int],
-    base_counts: Sequence[int],
-    base_item_counts: Sequence[int],
-    all_items: Sequence[int],
-    rng: random.Random,
-    target_lmax: int,
-    *,
-    avoid_pair: Tuple[int, int] | None,
-) -> Block:
-    selected = list(dict.fromkeys(int(item) for item in required if 0 <= int(item) < v))
-
-    while len(selected) < k:
-        options: List[Tuple[float, int]] = []
-        for candidate in all_items:
-            if candidate in selected:
-                continue
-
-            cost = base_item_counts[candidate] * 3.0 + rng.random() * 0.5
-            for existing in selected:
-                pair_id = pair_index(candidate, existing, v)
-                new_count = base_counts[pair_id] + 1
-                if base_counts[pair_id] == 0:
-                    cost -= 1300.0
-                if new_count > target_lmax:
-                    cost += 2800.0 * (new_count - target_lmax) ** 2
-                cost += 18.0 * new_count * new_count
-                if avoid_pair is not None and {candidate, existing} == set(avoid_pair):
-                    cost += 10_000.0
-            options.append((cost, candidate))
-
-        if not options:
-            break
-        options.sort(key=lambda item: item[0])
-        top = options[: min(10, len(options))]
-        selected.append(top[0][1] if rng.random() < 0.86 else rng.choice(top)[1])
-
-    return tuple(sorted(selected))
-
-
-def _score_from_counts(
-    counts: Sequence[int],
-    item_counts: Sequence[int],
-    n_blocks: int,
-) -> Tuple[int, int, int, int, int, int]:
-    missing = sum(count == 0 for count in counts)
-    if missing:
-        return (
-            1,
-            missing,
-            max(counts) if counts else 0,
-            sum(count * count for count in counts),
-            max(item_counts) - min(item_counts) if item_counts else 0,
-            n_blocks,
-        )
-    lmax = max(counts) if counts else 0
-    return (
-        0,
-        lmax,
-        sum(count == lmax for count in counts),
-        sum(count * count for count in counts),
-        max(item_counts) - min(item_counts) if item_counts else 0,
-        n_blocks,
-    )
-
-
-def _scalar_score(
-    counts: Sequence[int],
-    item_counts: Sequence[int],
-    target_lmax: int,
-    *,
-    phase: float,
-) -> float:
-    missing = sum(count == 0 for count in counts)
-    over_target = sum((count - target_lmax) ** 2 for count in counts if count > target_lmax)
-    lmax = max(counts) if counts else 0
-    item_range = max(item_counts) - min(item_counts) if item_counts else 0
-    missing_penalty = 2000.0 + 250_000.0 * phase
-    return (
-        missing_penalty * missing
-        + 30_000.0 * over_target
-        + 3500.0 * lmax
-        + 20.0 * sum(count * count for count in counts)
-        + 50.0 * item_range
-    )
