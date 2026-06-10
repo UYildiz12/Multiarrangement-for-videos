@@ -521,7 +521,9 @@ def improve_pair_balance(
 
     best_blocks = normalized
     best_score = start_score
-    attempt_seeds = (seed, 22, 11, 33, 44, seed + 11, seed + 22, seed + 33)
+    # seed and seed + 11 always differ in parity, so two-attempt runs exercise
+    # both engine strategies (even = SA dive, odd = kick-ILS).
+    attempt_seeds = (seed, seed + 11, 22, 11, 33, 44, seed + 22, seed + 33)
     for attempt in range(max(1, attempts)):
         attempt_seed = attempt_seeds[attempt % len(attempt_seeds)]
         candidate = _anneal_once(

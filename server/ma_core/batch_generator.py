@@ -749,7 +749,7 @@ def _improve_balanced_cover_if_needed(
         return batches
 
     attempts = 2
-    iterations = min(70_000, max(24_000, n_items * 1_500))
+    iterations = min(6_000_000, max(600_000, n_items * 40_000))
     seconds_per_attempt = min(14.0, max(5.0, n_items * 0.35))
     improved = improve_pair_balance(
         n_items,
