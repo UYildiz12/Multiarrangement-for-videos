@@ -8,6 +8,10 @@ from coverlib.balanced import (
     _SwapState,
     _apply_swap,
     _init_state,
+    _pair_cost,
+    _propose_swap,
+    _swap_delta,
+    _total_cost,
     balance_score,
     coverage_counts,
     pair_index,
@@ -69,6 +73,48 @@ def test_apply_swap_keeps_state_consistent():
         assert len(set(st.blocks[bidx])) == k
         assert st.blocks[bidx] == tuple(sorted(st.blocks[bidx]))
     _assert_state_consistent(st)
+
+
+def test_swap_delta_matches_total_cost_difference():
+    v, k = 10, 4
+    blocks = _random_complete_cover(v, k, seed=5)
+    target = 2
+    st = _init_state(v, k, blocks, target=target)
+    rng = random.Random(6)
+    missing_w, item_w = 40.0, 0.05
+    checked = 0
+    while checked < 40:
+        bidx = rng.randrange(len(st.blocks))
+        x = st.blocks[bidx][rng.randrange(k)]
+        y = rng.randrange(v)
+        if y in st.block_sets[bidx]:
+            continue
+        before = _total_cost(st.counts, st.item_counts, target, missing_w, item_w)
+        delta = _swap_delta(st, bidx, x, y, missing_w, item_w)
+        _apply_swap(st, bidx, x, y)
+        after = _total_cost(st.counts, st.item_counts, target, missing_w, item_w)
+        assert delta == pytest.approx(after - before)
+        checked += 1
+
+
+def test_propose_swap_returns_valid_moves():
+    v, k = 12, 4
+    blocks = _random_complete_cover(v, k, seed=7)
+    blocks.append(list(blocks[0]))  # duplicate a block to create hot pairs
+    st = _init_state(v, k, blocks, target=1)
+    rng = random.Random(8)
+    seen_any = False
+    for _ in range(200):
+        prop = _propose_swap(st, rng, missing_w=40.0, item_w=0.05)
+        if prop is None:
+            continue
+        bidx, x, y, delta = prop
+        seen_any = True
+        assert x in st.block_sets[bidx]
+        assert y not in st.block_sets[bidx]
+        assert 0 <= y < v
+        assert isinstance(delta, float)
+    assert seen_any
 
 
 def test_apply_swap_updates_item_blocks_index():

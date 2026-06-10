@@ -291,6 +291,139 @@ def _apply_swap(st: _SwapState, bidx: int, x: int, y: int) -> None:
     st.block_sets[bidx] = set(new_block)
 
 
+_OVER_WEIGHT = 64.0
+
+
+def _pair_cost(count: int, target: int, missing_w: float) -> float:
+    cost = float(count * count)
+    if count == 0:
+        cost += missing_w
+    elif count > target:
+        excess = count - target
+        cost += _OVER_WEIGHT * excess * excess
+    return cost
+
+
+def _total_cost(
+    counts: Sequence[int],
+    item_counts: Sequence[int],
+    target: int,
+    missing_w: float,
+    item_w: float,
+) -> float:
+    """Reference objective; only used by tests and debugging."""
+    total = sum(_pair_cost(count, target, missing_w) for count in counts)
+    total += item_w * sum(count * count for count in item_counts)
+    return total
+
+
+def _swap_delta(st: _SwapState, bidx: int, x: int, y: int, missing_w: float, item_w: float) -> float:
+    delta = 0.0
+    target = st.target
+    for u in st.blocks[bidx]:
+        if u == x:
+            continue
+        pid = pair_index(x, u, st.v)
+        c = st.counts[pid]
+        delta += _pair_cost(c - 1, target, missing_w) - _pair_cost(c, target, missing_w)
+        pid = pair_index(y, u, st.v)
+        c = st.counts[pid]
+        delta += _pair_cost(c + 1, target, missing_w) - _pair_cost(c, target, missing_w)
+    cx = st.item_counts[x]
+    cy = st.item_counts[y]
+    delta += item_w * float((cx - 1) * (cx - 1) - cx * cx + (cy + 1) * (cy + 1) - cy * cy)
+    return delta
+
+
+def _random_hot_pair(st: _SwapState, rng: random.Random) -> int | None:
+    """Sample a pair id with count > target; rejection-sample via blocks, then exact."""
+    if not st.over:
+        return None
+    for _ in range(8):
+        block = st.blocks[rng.randrange(len(st.blocks))]
+        a = block[rng.randrange(len(block))]
+        b = block[rng.randrange(len(block))]
+        if a == b:
+            continue
+        pid = pair_index(a, b, st.v)
+        if st.counts[pid] > st.target:
+            return pid
+    return rng.choice(tuple(st.over))
+
+
+def _best_replacement(
+    st: _SwapState,
+    bidx: int,
+    x: int,
+    rng: random.Random,
+    missing_w: float,
+    item_w: float,
+    samples: int = 14,
+) -> Tuple[int, float] | None:
+    best_y = None
+    best_delta = 0.0
+    block_set = st.block_sets[bidx]
+    for _ in range(samples):
+        y = rng.randrange(st.v)
+        if y in block_set or y == x:
+            continue
+        delta = _swap_delta(st, bidx, x, y, missing_w, item_w)
+        if best_y is None or delta < best_delta:
+            best_y = y
+            best_delta = delta
+    if best_y is None:
+        return None
+    return best_y, best_delta
+
+
+def _propose_swap(
+    st: _SwapState,
+    rng: random.Random,
+    *,
+    missing_w: float,
+    item_w: float,
+) -> Tuple[int, int, int, float] | None:
+    """Return (block_idx, item_out, item_in, delta) or None."""
+    # Repair move: bring a missing pair's partner into a block holding one endpoint.
+    if st.missing and rng.random() < 0.9:
+        pid = rng.choice(tuple(st.missing))
+        a, b = st.pairs[pid]
+        if rng.random() < 0.5:
+            a, b = b, a
+        candidate_blocks = [i for i in st.item_blocks[a] if b not in st.block_sets[i]]
+        if candidate_blocks:
+            bidx = rng.choice(candidate_blocks)
+            best = None
+            for x in st.blocks[bidx]:
+                if x == a:
+                    continue
+                delta = _swap_delta(st, bidx, x, b, missing_w, item_w)
+                if best is None or delta < best[1]:
+                    best = (x, delta)
+            if best is not None:
+                return bidx, best[0], b, best[1]
+    # Flatten move: evict one endpoint of an over-target pair.
+    if st.over and rng.random() < 0.7:
+        pid = _random_hot_pair(st, rng)
+        if pid is not None:
+            a, b = st.pairs[pid]
+            shared = st.item_blocks[a] & st.item_blocks[b]
+            if shared:
+                bidx = rng.choice(tuple(shared))
+                x = a if rng.random() < 0.5 else b
+                found = _best_replacement(st, bidx, x, rng, missing_w, item_w)
+                if found is not None:
+                    return bidx, x, found[0], found[1]
+    # Generic move: random block/item with greedy-sampled replacement.
+    bidx = rng.randrange(len(st.blocks))
+    block = st.blocks[bidx]
+    x = block[rng.randrange(len(block))]
+    found = _best_replacement(st, bidx, x, rng, missing_w, item_w)
+    if found is None:
+        return None
+    return bidx, x, found[0], found[1]
+
+
 def read_blocks_file(path: str | Path, v: int, k: int) -> List[List[int]]:
     blocks: List[List[int]] = []
     with Path(path).open("r", encoding="utf-8") as handle:
