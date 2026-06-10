@@ -5,7 +5,7 @@ import math
 import random
 import time
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
 
@@ -196,6 +196,99 @@ def balance_score(v: int, blocks: Sequence[Sequence[int]]) -> Tuple[int, int, in
 def coverage_histogram(v: int, blocks: Sequence[Sequence[int]]) -> Counter[int]:
     counts, _ = coverage_counts(v, blocks)
     return Counter(counts)
+
+
+@dataclass
+class _SwapState:
+    """Incrementally-maintained covering state for single-item-swap search."""
+
+    v: int
+    k: int
+    target: int
+    blocks: List[Tuple[int, ...]]
+    block_sets: List[set]
+    pairs: List[Tuple[int, int]]
+    counts: List[int]
+    item_counts: List[int]
+    item_blocks: List[set]
+    count_hist: List[int]
+    missing: set = field(default_factory=set)
+    over: set = field(default_factory=set)
+    sumsq: int = 0
+    item_sumsq: int = 0
+    lmax: int = 0
+
+
+def _init_state(v: int, k: int, blocks: Sequence[Sequence[int]], *, target: int) -> _SwapState:
+    normalized = [tuple(sorted(int(x) for x in block)) for block in blocks]
+    counts, item_counts = coverage_counts(v, normalized)
+    count_hist = [0] * (len(normalized) + 2)
+    for count in counts:
+        count_hist[count] += 1
+    item_blocks: List[set] = [set() for _ in range(v)]
+    for bidx, block in enumerate(normalized):
+        for item in block:
+            item_blocks[item].add(bidx)
+    return _SwapState(
+        v=v,
+        k=k,
+        target=target,
+        blocks=normalized,
+        block_sets=[set(block) for block in normalized],
+        pairs=pair_list(v),
+        counts=counts,
+        item_counts=item_counts,
+        item_blocks=item_blocks,
+        count_hist=count_hist,
+        missing={pid for pid, count in enumerate(counts) if count == 0},
+        over={pid for pid, count in enumerate(counts) if count > target},
+        sumsq=sum(count * count for count in counts),
+        item_sumsq=sum(count * count for count in item_counts),
+        lmax=max(counts) if counts else 0,
+    )
+
+
+def _apply_swap(st: _SwapState, bidx: int, x: int, y: int) -> None:
+    """Replace item x with item y in block bidx, updating all state in O(k)."""
+    others = [u for u in st.blocks[bidx] if u != x]
+    for u in others:
+        pid = pair_index(x, u, st.v)
+        c = st.counts[pid]
+        st.counts[pid] = c - 1
+        st.sumsq += (c - 1) * (c - 1) - c * c
+        st.count_hist[c] -= 1
+        st.count_hist[c - 1] += 1
+        if c == 1:
+            st.missing.add(pid)
+        if c > st.target and c - 1 <= st.target:
+            st.over.discard(pid)
+        if c == st.lmax and st.count_hist[c] == 0:
+            while st.lmax > 0 and st.count_hist[st.lmax] == 0:
+                st.lmax -= 1
+    for u in others:
+        pid = pair_index(y, u, st.v)
+        c = st.counts[pid]
+        st.counts[pid] = c + 1
+        st.sumsq += (c + 1) * (c + 1) - c * c
+        st.count_hist[c] -= 1
+        st.count_hist[c + 1] += 1
+        if c == 0:
+            st.missing.discard(pid)
+        if c + 1 > st.target:
+            st.over.add(pid)
+        if c + 1 > st.lmax:
+            st.lmax = c + 1
+    cx = st.item_counts[x]
+    st.item_sumsq += (cx - 1) * (cx - 1) - cx * cx
+    st.item_counts[x] = cx - 1
+    cy = st.item_counts[y]
+    st.item_sumsq += (cy + 1) * (cy + 1) - cy * cy
+    st.item_counts[y] = cy + 1
+    st.item_blocks[x].discard(bidx)
+    st.item_blocks[y].add(bidx)
+    new_block = tuple(sorted(others + [y]))
+    st.blocks[bidx] = new_block
+    st.block_sets[bidx] = set(new_block)
 
 
 def read_blocks_file(path: str | Path, v: int, k: int) -> List[List[int]]:
