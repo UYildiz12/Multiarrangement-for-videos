@@ -786,7 +786,9 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         else:
             evidence_weight_mode = config.get("evidence_weight_mode", "k2012")
             evidence_alpha = float(config.get("evidence_alpha", 2.0))
-            use_inverse_mds = bool(config.get("use_inverse_mds", True))
+            # Off by default to match the desktop library and the published
+            # recommendation: use the direct fused RDM as the primary output.
+            use_inverse_mds = bool(config.get("use_inverse_mds", False))
             inverse_mds_max_iter = int(config.get("inverse_mds_max_iter", 15))
             inverse_mds_step_c = float(config.get("inverse_mds_step_c", 0.3))
             inverse_mds_tol = float(config.get("inverse_mds_tol", 1e-4))

@@ -69,3 +69,58 @@ class TestScheduleCache:
         sessions_module._get_or_create_schedule("study-y", 3, 2, flex=False, algorithm="balanced")
         sessions_module._get_or_create_schedule("study-y", 3, 2, flex=False, algorithm="optimal")
         assert calls["n"] == 2
+
+
+class TestAdaptiveInverseMdsDefault:
+    def test_hosted_adaptive_does_not_refine_by_default(self, client, monkeypatch):
+        """Hosted default must match the desktop library and the published
+        recommendation: inverse-MDS refinement is opt-in."""
+        calls = {"n": 0}
+
+        def spy(D_init, trials, **kwargs):
+            calls["n"] += 1
+            return D_init
+
+        monkeypatch.setattr(sessions_module, "refine_rdm_inverse_mds", spy)
+
+        study = client.post(
+            "/api/v1/studies",
+            json={
+                "name": "Adaptive Default",
+                "paradigm": "adaptive",
+                "config": {"min_subset_size": 2, "max_subset_size": 3},
+            },
+        ).json()
+        client.post(
+            f"/api/v1/studies/{study['id']}/stimuli",
+            json={
+                "stimuli": [
+                    {
+                        "ordinal": i,
+                        "filename": f"clip_{i}.mp4",
+                        "media_type": "video",
+                        "media_url": f"https://example.com/{i}.mp4",
+                    }
+                    for i in range(4)
+                ]
+            },
+        )
+        session_id = client.post(
+            f"/api/v1/studies/{study['id']}/sessions", json={"participant_id": "P1"}
+        ).json()["session_id"]
+        subset = client.get(f"/api/v1/sessions/{session_id}/next").json()["subset_indices"]
+        response = client.post(
+            f"/api/v1/sessions/{session_id}/trials",
+            json={
+                "trial_index": 0,
+                "subset_indices": subset,
+                "positions": {
+                    str(idx): {"x": 100.0 + 40.0 * n, "y": 150.0 + 20.0 * n}
+                    for n, idx in enumerate(subset)
+                },
+                "duration_seconds": 3.0,
+                "arena_size": 600,
+            },
+        )
+        assert response.status_code == 200
+        assert calls["n"] == 0
