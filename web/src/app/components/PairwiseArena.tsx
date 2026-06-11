@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 
 interface Stimulus {
     id: string;
@@ -38,12 +38,16 @@ export default function PairwiseArena({
     const [watchedB, setWatchedB] = useState(stimulusB.mediaType === "image");
 
     // Re-derive per trial: the component stays mounted across trials, and
-    // image stimuli never need playing before submission.
-    useEffect(() => {
+    // image stimuli never need playing before submission. State is adjusted
+    // during render (the React-documented pattern) rather than in an effect.
+    const trialKey = `${trialIndex}:${stimulusA.id}:${stimulusB.id}`;
+    const [prevTrialKey, setPrevTrialKey] = useState(trialKey);
+    if (prevTrialKey !== trialKey) {
+        setPrevTrialKey(trialKey);
         setRating(null);
         setWatchedA(stimulusA.mediaType === "image");
         setWatchedB(stimulusB.mediaType === "image");
-    }, [trialIndex, stimulusA.id, stimulusA.mediaType, stimulusB.id, stimulusB.mediaType]);
+    }
 
     const canSubmit = rating !== null && watchedA && watchedB && !submitting;
 
@@ -60,7 +64,7 @@ export default function PairwiseArena({
     const handleSubmit = useCallback(() => {
         if (rating !== null && !submitting) {
             onSubmit(rating);
-            // Per-trial state resets in the effect above when the next pair arrives.
+            // Per-trial state resets via the trialKey check above when the next pair arrives.
         }
     }, [rating, submitting, onSubmit]);
 
