@@ -1,0 +1,24 @@
+# dependencies
+node_modules
+
+# local build/test output
+.next
+out
+build
+coverage
+*.tsbuildinfo
+
+# local Vercel metadata
+.vercel
+
+# local env/secrets
+.env
+.env.*
+
+# logs and local system files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.DS_Store
+*.pem

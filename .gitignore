@@ -53,6 +53,7 @@ server/ma_core/ljcr_cache/
 
 # Local agent/research artifacts that should not be published
 /AGENTS.md
+/security_best_practices_report.md
 /.desloppify/
 /docs/
 /scripts/
