@@ -220,6 +220,21 @@ export default function RdmHeatmap({
                                     whiteSpace: "nowrap",
                                 }}
                             >
+                                <div style={{ color: "#888", marginBottom: 2 }}>
+                                    {hoveredCell.i + 1} × {hoveredCell.j + 1}
+                                    {labels[hoveredCell.i] && labels[hoveredCell.j] && (
+                                        <span>
+                                            {" "}
+                                            ({labels[hoveredCell.i].length > 14
+                                                ? labels[hoveredCell.i].slice(0, 14) + "…"
+                                                : labels[hoveredCell.i]}
+                                            {" vs "}
+                                            {labels[hoveredCell.j].length > 14
+                                                ? labels[hoveredCell.j].slice(0, 14) + "…"
+                                                : labels[hoveredCell.j]})
+                                        </span>
+                                    )}
+                                </div>
                                 Scaled: {(hoveredCell.scaled01 * 100).toFixed(1)}
                             </div>
                         )}

@@ -60,3 +60,49 @@ describe("PairwiseArena", () => {
     expect(screen.getByRole("button", { name: /Submit Rating/i })).toBeEnabled();
   });
 });
+
+describe("PairwiseArena per-trial reset", () => {
+  it("does not require re-viewing image stimuli on subsequent trials", () => {
+    const makeImage = (id: string, ordinal: number) => ({
+      id,
+      ordinal,
+      label: id,
+      mediaUrl: `https://example.com/${id}.png`,
+      thumbnail: `https://example.com/${id}.png`,
+      mediaType: "image" as const,
+    });
+    const onSubmit = vi.fn();
+
+    const { rerender } = render(
+      <PairwiseArena
+        stimulusA={makeImage("img-a", 0)}
+        stimulusB={makeImage("img-b", 1)}
+        onSubmit={onSubmit}
+        onMediaPlay={() => {}}
+        trialIndex={0}
+        totalTrials={3}
+      />
+    );
+
+    // Trial 1: images need no playing; rate and submit.
+    fireEvent.click(screen.getByText("4"));
+    const submitButton = screen.getByRole("button", { name: /Submit/i });
+    expect(submitButton).toBeEnabled();
+    fireEvent.click(submitButton);
+    expect(onSubmit).toHaveBeenCalledWith(4);
+
+    // Trial 2 with a fresh image pair: must be submittable after rating alone.
+    rerender(
+      <PairwiseArena
+        stimulusA={makeImage("img-c", 2)}
+        stimulusB={makeImage("img-d", 3)}
+        onSubmit={onSubmit}
+        onMediaPlay={() => {}}
+        trialIndex={1}
+        totalTrials={3}
+      />
+    );
+    fireEvent.click(screen.getByText("5"));
+    expect(screen.getByRole("button", { name: /Submit/i })).toBeEnabled();
+  });
+});
