@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useRef, useState, useCallback, useEffect, useMemo } from "react";
+import { useRef, useState, useCallback, useEffect, useMemo, type CSSProperties } from "react";
 
 interface Position {
   x: number;
@@ -23,12 +23,21 @@ interface DraggableItem extends Stimulus {
   isDragging: boolean;
 }
 
+export interface TraceSample {
+  ordinal: number;
+  x: number;
+  y: number;
+  /** 0 = pickup, 1 = move, 2 = drop */
+  phase: 0 | 1 | 2;
+}
+
 interface ArenaProps {
   stimuli: Stimulus[];
   onPositionsChange?: (positions: Record<string, Position>) => void;
   onAllInside?: (allInside: boolean) => void;
   onSubmit?: () => void;
   onMediaPlay?: (itemId: string, mediaUrl: string, mediaType: Stimulus["mediaType"]) => void;
+  onTraceSample?: (sample: TraceSample) => void;
   playedItems?: Set<string>;
   size?: number;
   trialIndex?: number;
@@ -38,29 +47,107 @@ interface ArenaProps {
 
 const MAX_ITEM_RADIUS = 55;
 const MIN_ITEM_RADIUS = 16;
+const COMFORTABLE_ITEM_RADIUS = 24;
 const ARENA_PADDING = 20;
 const CIRCLE_THICKNESS = 3;
 const MIN_SEAT_GAP = 22;
+const MAX_SEAT_RINGS = 3;
+const RING_ARC_GAP = 8;
+const MAX_CONTAINER_FACTOR = 1.7;
+const TRACE_MIN_INTERVAL_MS = 50;
+const TRACE_MIN_DISTANCE_PX = 2;
+const MIN_ZOOM = 0.5;
+const MAX_ZOOM = 2.5;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-export function getTokenRadiusForStimulusCount(stimulusCount: number, arenaSize: number): number {
+export interface SeatLayout {
+  radius: number;
+  seats: Position[];
+  containerSize: number;
+}
+
+function ringCapacity(seatRadius: number, itemRadius: number): number {
+  return Math.max(1, Math.floor((2 * Math.PI * seatRadius) / (2 * itemRadius + RING_ARC_GAP)));
+}
+
+/**
+ * Seat tokens on up to three concentric rings outside the arena so large
+ * adaptive batches keep usably large tokens instead of shrinking to dust.
+ */
+export function computeSeatLayout(count: number, arenaSize: number): SeatLayout {
   const maxRadius = arenaSize >= 560
     ? MAX_ITEM_RADIUS
     : clamp(Math.floor(arenaSize * 0.09), MIN_ITEM_RADIUS, MAX_ITEM_RADIUS);
-  if (stimulusCount <= 0) return maxRadius;
-  if (stimulusCount <= 14) return maxRadius;
-
   const arenaRadius = Math.max(0, arenaSize / 2 - ARENA_PADDING);
-  let radius = maxRadius;
-  for (let i = 0; i < 4; i += 1) {
-    const seatRadius = arenaRadius + radius + MIN_SEAT_GAP;
-    const arcPerItem = (2 * Math.PI * seatRadius) / stimulusCount;
-    radius = clamp(Math.floor(arcPerItem * 0.45), MIN_ITEM_RADIUS, maxRadius);
+  const center = arenaSize / 2;
+
+  const layoutFor = (radius: number, maxRings: number): number[] | null => {
+    const gap = Math.max(MIN_SEAT_GAP, radius * 0.8);
+    const ringCounts: number[] = [];
+    let remaining = count;
+    for (let ring = 0; ring < maxRings && remaining > 0; ring += 1) {
+      const seatRadius = arenaRadius + radius + gap + ring * (2 * radius + gap);
+      const capacity = ringCapacity(seatRadius, radius);
+      const take = Math.min(capacity, remaining);
+      ringCounts.push(take);
+      remaining -= take;
+    }
+    return remaining <= 0 ? ringCounts : null;
+  };
+
+  const buildSeats = (radius: number, ringCounts: number[]): SeatLayout => {
+    const gap = Math.max(MIN_SEAT_GAP, radius * 0.8);
+    const seats: Position[] = [];
+    let outermost = arenaRadius + radius + gap;
+    ringCounts.forEach((ringCount, ring) => {
+      const seatRadius = arenaRadius + radius + gap + ring * (2 * radius + gap);
+      outermost = Math.max(outermost, seatRadius);
+      const angleOffset = -Math.PI / 2 + (ring * Math.PI) / Math.max(1, ringCounts.length * 2);
+      for (let i = 0; i < ringCount; i += 1) {
+        const angle = angleOffset + (2 * Math.PI * i) / ringCount;
+        seats.push({
+          x: center + seatRadius * Math.cos(angle),
+          y: center + seatRadius * Math.sin(angle),
+        });
+      }
+    });
+    const containerSize = Math.ceil(2 * (outermost + radius));
+    return { radius, seats, containerSize };
+  };
+
+  if (count <= 0) {
+    return { radius: maxRadius, seats: [], containerSize: arenaSize };
   }
-  return radius;
+  if (count <= 14) {
+    const ringCounts = layoutFor(maxRadius, 1) ?? [count];
+    return buildSeats(maxRadius, ringCounts);
+  }
+
+  // Prefer the largest radius (>= comfortable floor) whose container stays
+  // reasonable; relax the floor only if even small tokens cannot be seated.
+  for (let radius = maxRadius; radius >= COMFORTABLE_ITEM_RADIUS; radius -= 1) {
+    const ringCounts = layoutFor(radius, MAX_SEAT_RINGS);
+    if (!ringCounts) continue;
+    const layout = buildSeats(radius, ringCounts);
+    if (layout.containerSize <= arenaSize * MAX_CONTAINER_FACTOR) {
+      return layout;
+    }
+  }
+  for (let radius = COMFORTABLE_ITEM_RADIUS - 1; radius >= MIN_ITEM_RADIUS; radius -= 1) {
+    const ringCounts = layoutFor(radius, MAX_SEAT_RINGS);
+    if (ringCounts) {
+      return buildSeats(radius, ringCounts);
+    }
+  }
+  const fallback = layoutFor(MIN_ITEM_RADIUS, 12) ?? [count];
+  return buildSeats(MIN_ITEM_RADIUS, fallback);
+}
+
+export function getTokenRadiusForStimulusCount(stimulusCount: number, arenaSize: number): number {
+  return computeSeatLayout(stimulusCount, arenaSize).radius;
 }
 
 export default function DragArena({
@@ -69,6 +156,7 @@ export default function DragArena({
   onAllInside,
   onSubmit,
   onMediaPlay,
+  onTraceSample,
   playedItems = new Set(),
   size = 600,
   trialIndex = 0,
@@ -79,23 +167,19 @@ export default function DragArena({
   const [items, setItems] = useState<DraggableItem[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const dragOffset = useRef<Position>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState<Position>({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
 
   const arenaRadius = size / 2 - ARENA_PADDING;
   const center = size / 2;
-  const itemRadius = getTokenRadiusForStimulusCount(stimuli.length, size);
-  const seatGap = Math.max(MIN_SEAT_GAP, itemRadius * 0.8);
-
-  // Calculate initial seating positions (outside the circle)
-  const getInitialPositions = useCallback(() => {
-    return stimuli.map((s, i) => {
-      const angle = (2 * Math.PI * i) / stimuli.length - Math.PI / 2;
-      const seatRadius = arenaRadius + itemRadius + seatGap;
-      return {
-        x: center + seatRadius * Math.cos(angle),
-        y: center + seatRadius * Math.sin(angle),
-      };
-    });
-  }, [stimuli, center, arenaRadius, itemRadius, seatGap]);
+  const seatLayout = useMemo(
+    () => computeSeatLayout(stimuli.length, size),
+    [stimuli.length, size]
+  );
+  const itemRadius = seatLayout.radius;
+  const containerSize = Math.max(seatLayout.containerSize, size + itemRadius * 2 + MIN_SEAT_GAP * 2);
 
   // Stable key representing which stimuli are shown (IDs only, not metadata like thumbnails)
   const stimuliKey = useMemo(
@@ -107,17 +191,19 @@ export default function DragArena({
   useEffect(() => {
     if (stimuli.length === 0) return;
 
-    const initialPositions = getInitialPositions();
+    const seats = computeSeatLayout(stimuli.length, size).seats;
     const newItems: DraggableItem[] = stimuli.map((s, i) => ({
       ...s,
-      position: initialPositions[i],
-      initialPosition: initialPositions[i],
+      position: seats[i] ?? { x: size / 2, y: size / 2 },
+      initialPosition: seats[i] ?? { x: size / 2, y: size / 2 },
       isDragging: false,
     }));
     setItems(newItems);
     setDraggedId(null);
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stimuliKey, trialIndex]);
+  }, [stimuliKey, trialIndex, size]);
 
   // Sync metadata changes (thumbnail, mediaUrl, label) to existing items WITHOUT resetting positions
   useEffect(() => {
@@ -165,7 +251,44 @@ export default function DragArena({
   }, [items, isInsideArena, onAllInside, onPositionsChange]);
 
   const draggedIdRef = useRef<string | null>(null);
+  const draggedOrdinalRef = useRef<number | null>(null);
+  const draggedPositionRef = useRef<Position | null>(null);
   const activePointerIdRef = useRef<number | null>(null);
+  const panPointerIdRef = useRef<number | null>(null);
+  const panStartRef = useRef<{ pointer: Position; pan: Position } | null>(null);
+  const pinchPointersRef = useRef<Map<number, Position>>(new Map());
+  const pinchStartRef = useRef<{ distance: number; zoom: number } | null>(null);
+  const lastTraceRef = useRef<{ time: number; x: number; y: number } | null>(null);
+
+  const toLogical = useCallback((clientX: number, clientY: number): Position | null => {
+    const rect = arenaRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const scale = zoomRef.current || 1;
+    return { x: (clientX - rect.left) / scale, y: (clientY - rect.top) / scale };
+  }, []);
+
+  const emitTrace = useCallback(
+    (ordinal: number, position: Position, phase: TraceSample["phase"]) => {
+      if (!onTraceSample) return;
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      if (phase === 1) {
+        const last = lastTraceRef.current;
+        if (last) {
+          const dx = position.x - last.x;
+          const dy = position.y - last.y;
+          if (
+            now - last.time < TRACE_MIN_INTERVAL_MS ||
+            Math.sqrt(dx * dx + dy * dy) < TRACE_MIN_DISTANCE_PX
+          ) {
+            return;
+          }
+        }
+      }
+      lastTraceRef.current = { time: now, x: position.x, y: position.y };
+      onTraceSample({ ordinal, x: position.x, y: position.y, phase });
+    },
+    [onTraceSample]
+  );
 
   const handlePointerDown = (e: React.PointerEvent, id: string) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -174,20 +297,26 @@ export default function DragArena({
     const item = items.find((i) => i.id === id);
     if (!item) return;
 
-    const rect = arenaRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    const logical = toLogical(e.clientX, e.clientY);
+    if (!logical) return;
 
     e.preventDefault();
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
 
     draggedIdRef.current = id;
+    draggedOrdinalRef.current = item.ordinal;
+    draggedPositionRef.current = item.position;
     activePointerIdRef.current = e.pointerId;
     setDraggedId(id);
 
     dragOffset.current = {
-      x: e.clientX - rect.left - item.position.x,
-      y: e.clientY - rect.top - item.position.y,
+      x: logical.x - item.position.x,
+      y: logical.y - item.position.y,
     };
+
+    lastTraceRef.current = null;
+    emitTrace(item.ordinal, item.position, 0);
 
     setItems((prev) =>
       prev.map((i) => ({ ...i, isDragging: i.id === id }))
@@ -202,29 +331,74 @@ export default function DragArena({
 
   const handlePointerMove = useCallback(
     (e: PointerEvent) => {
+      // Pinch zoom (two pointers on the stage background).
+      if (pinchPointersRef.current.has(e.pointerId)) {
+        pinchPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pinchPointersRef.current.size === 2 && pinchStartRef.current) {
+          const [a, b] = Array.from(pinchPointersRef.current.values());
+          const distance = Math.hypot(a.x - b.x, a.y - b.y);
+          if (pinchStartRef.current.distance > 0) {
+            const next = clamp(
+              pinchStartRef.current.zoom * (distance / pinchStartRef.current.distance),
+              MIN_ZOOM,
+              MAX_ZOOM
+            );
+            setZoom(next);
+          }
+          return;
+        }
+      }
+
+      if (panPointerIdRef.current === e.pointerId && panStartRef.current) {
+        const start = panStartRef.current;
+        setPan({
+          x: start.pan.x + (e.clientX - start.pointer.x),
+          y: start.pan.y + (e.clientY - start.pointer.y),
+        });
+        return;
+      }
+
       if (!draggedIdRef.current || !arenaRef.current) return;
       if (activePointerIdRef.current !== null && e.pointerId !== activePointerIdRef.current) return;
 
-      const rect = arenaRef.current.getBoundingClientRect();
-      const newX = e.clientX - rect.left - dragOffset.current.x;
-      const newY = e.clientY - rect.top - dragOffset.current.y;
+      const logical = toLogical(e.clientX, e.clientY);
+      if (!logical) return;
+      const newX = logical.x - dragOffset.current.x;
+      const newY = logical.y - dragOffset.current.y;
 
+      const id = draggedIdRef.current;
+      draggedPositionRef.current = { x: newX, y: newY };
       setItems((prev) =>
         prev.map((item) =>
-          item.id === draggedIdRef.current
+          item.id === id
             ? { ...item, position: { x: newX, y: newY } }
             : item
         )
       );
+      if (draggedOrdinalRef.current !== null) {
+        emitTrace(draggedOrdinalRef.current, { x: newX, y: newY }, 1);
+      }
     },
-    []
+    [emitTrace, toLogical]
   );
 
   const handlePointerUp = useCallback((e?: PointerEvent) => {
+    if (e && pinchPointersRef.current.has(e.pointerId)) {
+      pinchPointersRef.current.delete(e.pointerId);
+      if (pinchPointersRef.current.size < 2) pinchStartRef.current = null;
+    }
+    if (e && panPointerIdRef.current === e.pointerId) {
+      panPointerIdRef.current = null;
+      panStartRef.current = null;
+    }
     if (activePointerIdRef.current !== null && e && e.pointerId !== activePointerIdRef.current) return;
 
     if (draggedIdRef.current) {
       const id = draggedIdRef.current;
+      if (draggedOrdinalRef.current !== null && draggedPositionRef.current !== null) {
+        lastTraceRef.current = null;
+        emitTrace(draggedOrdinalRef.current, draggedPositionRef.current, 2);
+      }
       setItems((prev) =>
         prev.map((i) =>
           i.id === id ? { ...i, isDragging: false } : i
@@ -233,9 +407,11 @@ export default function DragArena({
     }
 
     draggedIdRef.current = null;
+    draggedOrdinalRef.current = null;
+    draggedPositionRef.current = null;
     activePointerIdRef.current = null;
     setDraggedId(null);
-  }, []);
+  }, [emitTrace]);
 
   useEffect(() => {
     window.addEventListener("pointermove", handlePointerMove);
@@ -247,6 +423,37 @@ export default function DragArena({
       window.removeEventListener("pointercancel", handlePointerUp);
     };
   }, [handlePointerMove, handlePointerUp]);
+
+  // Wheel zoom needs a non-passive listener to prevent page scroll.
+  useEffect(() => {
+    const node = arenaRef.current;
+    if (!node) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom((prev) => clamp(prev * (e.deltaY < 0 ? 1.1 : 1 / 1.1), MIN_ZOOM, MAX_ZOOM));
+    };
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const handleStagePointerDown = (e: React.PointerEvent) => {
+    // Background pointer: start panning (single) or pinch zoom (second pointer).
+    if (draggedIdRef.current !== null) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+
+    if (e.pointerType === "touch") {
+      pinchPointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pinchPointersRef.current.size === 2) {
+        const [a, b] = Array.from(pinchPointersRef.current.values());
+        pinchStartRef.current = { distance: Math.hypot(a.x - b.x, a.y - b.y), zoom: zoomRef.current };
+        panPointerIdRef.current = null;
+        panStartRef.current = null;
+        return;
+      }
+    }
+    panPointerIdRef.current = e.pointerId;
+    panStartRef.current = { pointer: { x: e.clientX, y: e.clientY }, pan };
+  };
 
   // Connection lines while dragging
   const draggedItem = items.find((i) => i.id === draggedId);
@@ -279,12 +486,13 @@ export default function DragArena({
   );
   const canSubmit = allInside && allPlayed && !submitting;
 
-  const containerSize = size + itemRadius * 2 + seatGap * 2;
+  const zoomLabel = `${Math.round(zoom * 100)}%`;
 
   return (
     <div style={{ position: "relative" }}>
       <div
         ref={arenaRef}
+        onPointerDown={handleStagePointerDown}
         style={{
           width: containerSize,
           height: containerSize,
@@ -293,6 +501,9 @@ export default function DragArena({
           touchAction: "none",
           userSelect: "none",
           WebkitUserSelect: "none",
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+          transformOrigin: "center center",
+          cursor: panPointerIdRef.current !== null ? "grabbing" : undefined,
         }}
       >
         {/* White circle */}
@@ -307,22 +518,6 @@ export default function DragArena({
             border: `${CIRCLE_THICKNESS}px solid #fff`,
           }}
         />
-
-        {/* SVG for connection lines */}
-        <svg width={containerSize} height={containerSize} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}>
-          {connectionLines.map((line, idx) => (
-            <line
-              key={idx}
-              x1={line.x1 + (containerSize - size) / 2}
-              y1={line.y1 + (containerSize - size) / 2}
-              x2={line.x2 + (containerSize - size) / 2}
-              y2={line.y2 + (containerSize - size) / 2}
-              stroke="#ff0000"
-              strokeWidth={line.thickness}
-              strokeOpacity={line.opacity}
-            />
-          ))}
-        </svg>
 
         {/* Draggable tokens with thumbnails */}
         {items.map((item) => {
@@ -392,6 +587,68 @@ export default function DragArena({
             </div>
           );
         })}
+
+        {/* SVG for connection lines — above tokens so distance cues stay visible */}
+        <svg
+          width={containerSize}
+          height={containerSize}
+          style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", zIndex: 2000 }}
+        >
+          {connectionLines.map((line, idx) => (
+            <line
+              key={idx}
+              x1={line.x1 + (containerSize - size) / 2}
+              y1={line.y1 + (containerSize - size) / 2}
+              x2={line.x2 + (containerSize - size) / 2}
+              y2={line.y2 + (containerSize - size) / 2}
+              stroke="#ff0000"
+              strokeWidth={line.thickness}
+              strokeOpacity={line.opacity}
+            />
+          ))}
+        </svg>
+      </div>
+
+      {/* Zoom controls */}
+      <div
+        style={{
+          position: "absolute",
+          top: 8,
+          right: 8,
+          display: "flex",
+          gap: 6,
+          alignItems: "center",
+          zIndex: 3000,
+        }}
+      >
+        <button
+          type="button"
+          aria-label={language === "tr" ? "Uzaklas" : "Zoom out"}
+          onClick={() => setZoom((prev) => clamp(prev / 1.2, MIN_ZOOM, MAX_ZOOM))}
+          style={zoomButtonStyle}
+        >
+          −
+        </button>
+        <span style={{ color: "#888", fontSize: 11, minWidth: 38, textAlign: "center" }}>{zoomLabel}</span>
+        <button
+          type="button"
+          aria-label={language === "tr" ? "Yakinlas" : "Zoom in"}
+          onClick={() => setZoom((prev) => clamp(prev * 1.2, MIN_ZOOM, MAX_ZOOM))}
+          style={zoomButtonStyle}
+        >
+          +
+        </button>
+        <button
+          type="button"
+          aria-label={language === "tr" ? "Gorunumu sifirla" : "Reset view"}
+          onClick={() => {
+            setZoom(1);
+            setPan({ x: 0, y: 0 });
+          }}
+          style={{ ...zoomButtonStyle, width: "auto", padding: "0 8px" }}
+        >
+          ⟲
+        </button>
       </div>
 
       {/* Done button */}
@@ -410,6 +667,7 @@ export default function DragArena({
           fontSize: 14,
           fontWeight: 700,
           cursor: canSubmit ? "pointer" : "not-allowed",
+          zIndex: 3000,
         }}
       >
         {language === "tr" ? "Bitir" : "Done"}
@@ -417,3 +675,16 @@ export default function DragArena({
     </div>
   );
 }
+
+const zoomButtonStyle: CSSProperties = {
+  width: 28,
+  height: 28,
+  borderRadius: 6,
+  border: "1px solid #333",
+  background: "#111",
+  color: "#fff",
+  fontSize: 15,
+  fontWeight: 700,
+  cursor: "pointer",
+  lineHeight: 1,
+};

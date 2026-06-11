@@ -1,6 +1,11 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
-import DragArena, { getTokenRadiusForStimulusCount } from "./DragArena";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
+import DragArena, {
+  computeSeatLayout,
+  getTokenRadiusForStimulusCount,
+  type TraceSample,
+} from "./DragArena";
 
 function makeStimuli(count: number, mediaType: "video" | "image" = "image") {
   return Array.from({ length: count }, (_, i) => ({
@@ -23,10 +28,28 @@ describe("DragArena", () => {
     expect(getTokenRadiusForStimulusCount(8, 280)).toBe(25);
   });
 
-  it("shrinks dense first-trial tokens enough for large adaptive studies", () => {
+  it("keeps dense first-trial tokens comfortably sized via multi-ring seating", () => {
     const radius = getTokenRadiusForStimulusCount(58, 750);
-    expect(radius).toBeGreaterThanOrEqual(16);
-    expect(radius).toBeLessThanOrEqual(24);
+    expect(radius).toBeGreaterThanOrEqual(24);
+  });
+
+  it("seats large batches without overlap", () => {
+    const layout = computeSeatLayout(58, 750);
+    expect(layout.seats).toHaveLength(58);
+    const minGap = 2 * layout.radius - 1; // allow subpixel rounding
+    for (let i = 0; i < layout.seats.length; i += 1) {
+      for (let j = i + 1; j < layout.seats.length; j += 1) {
+        const dx = layout.seats[i].x - layout.seats[j].x;
+        const dy = layout.seats[i].y - layout.seats[j].y;
+        expect(Math.hypot(dx, dy)).toBeGreaterThanOrEqual(minGap);
+      }
+    }
+    // Every seat sits outside the arena circle.
+    const center = 750 / 2;
+    const arenaRadius = 750 / 2 - 20;
+    for (const seat of layout.seats) {
+      expect(Math.hypot(seat.x - center, seat.y - center)).toBeGreaterThan(arenaRadius);
+    }
   });
 
   it("renders all dense first-trial tokens as playable controls", () => {
@@ -59,5 +82,83 @@ describe("DragArena", () => {
     render(<DragArena stimuli={makeStimuli(4)} size={600} trialIndex={0} />);
 
     expect(screen.getByRole("button", { name: "Done" })).toHaveStyle({ left: "-12px" });
+  });
+
+  it("renders zoom controls", () => {
+    render(<DragArena stimuli={makeStimuli(4)} size={600} trialIndex={0} />);
+    expect(screen.getByRole("button", { name: "Zoom in" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Zoom out" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reset view" })).toBeInTheDocument();
+  });
+
+  it("emits pickup, move, and drop trace samples in logical coordinates", () => {
+    let nowMs = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => nowMs);
+    const samples: TraceSample[] = [];
+
+    render(
+      <DragArena
+        stimuli={makeStimuli(1)}
+        size={600}
+        trialIndex={0}
+        onTraceSample={(sample) => samples.push(sample)}
+      />
+    );
+
+    const token = screen.getByLabelText("Play stimulus Stimulus 1");
+    fireEvent.pointerDown(token, { pointerId: 1, clientX: 100, clientY: 100, button: 0 });
+    expect(samples).toHaveLength(1);
+    expect(samples[0].phase).toBe(0);
+    const startX = samples[0].x;
+
+    nowMs += 100;
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 130, clientY: 100 });
+    expect(samples).toHaveLength(2);
+    expect(samples[1].phase).toBe(1);
+    expect(samples[1].x).toBeCloseTo(startX + 30, 5);
+
+    // Throttled: too soon AND too close emits nothing.
+    nowMs += 10;
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 130.5, clientY: 100 });
+    expect(samples).toHaveLength(2);
+
+    nowMs += 100;
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 130.5, clientY: 100 });
+    expect(samples).toHaveLength(3);
+    expect(samples[2].phase).toBe(2);
+
+    vi.restoreAllMocks();
+  });
+
+  it("keeps logical coordinates invariant under zoom", () => {
+    let nowMs = 1000;
+    vi.spyOn(performance, "now").mockImplementation(() => nowMs);
+    const samples: TraceSample[] = [];
+
+    render(
+      <DragArena
+        stimuli={makeStimuli(1)}
+        size={600}
+        trialIndex={0}
+        onTraceSample={(sample) => samples.push(sample)}
+      />
+    );
+
+    // Zoom to 144% (two clicks of x1.2).
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+    const token = screen.getByLabelText("Play stimulus Stimulus 1");
+    fireEvent.pointerDown(token, { pointerId: 7, clientX: 144, clientY: 0, button: 0 });
+    const startX = samples[samples.length - 1].x;
+
+    nowMs += 100;
+    // 144 client px at 1.44 zoom = 100 logical px.
+    fireEvent.pointerMove(window, { pointerId: 7, clientX: 288, clientY: 0 });
+    const moved = samples[samples.length - 1];
+    expect(moved.phase).toBe(1);
+    expect(moved.x).toBeCloseTo(startX + 100, 3);
+
+    vi.restoreAllMocks();
   });
 });
