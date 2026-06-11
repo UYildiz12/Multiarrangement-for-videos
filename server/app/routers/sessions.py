@@ -412,6 +412,33 @@ def _validate_and_sort_stimuli(study_id: UUID | str) -> list[dict[str, Any]]:
     return stimuli
 
 
+# Set-cover schedules are deterministic per (study, size, config), so cache
+# them: regenerating on every session start costs up to seconds per participant.
+_SCHEDULE_CACHE: dict[tuple, list[list[int]]] = {}
+
+
+def _get_or_create_schedule(
+    study_id: UUID | str,
+    n_stimuli: int,
+    batch_size: int,
+    *,
+    flex: bool,
+    algorithm: str,
+) -> list[list[int]]:
+    key = (str(study_id), n_stimuli, batch_size, flex, algorithm)
+    cached = _SCHEDULE_CACHE.get(key)
+    if cached is None:
+        cached = generate_batches(
+            n_stimuli,
+            batch_size,
+            seed=42,
+            flex=flex,
+            algorithm=algorithm,
+        )
+        _SCHEDULE_CACHE[key] = cached
+    return [list(batch) for batch in cached]
+
+
 def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
     study = get_study(study_id)
     if study is None:
@@ -427,10 +454,10 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
         flex = bool(study["config"].get("flex", False))
         setcover_algorithm = study["config"].get("setcover_algorithm", "balanced")
         effective_batch = min(batch_size, n_stimuli)
-        batches = generate_batches(
+        batches = _get_or_create_schedule(
+            study_id,
             n_stimuli,
             effective_batch,
-            seed=42,
             flex=flex,
             algorithm=str(setcover_algorithm),
         )

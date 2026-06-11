@@ -250,6 +250,7 @@ class ResultsResponse(BaseModel):
     evidence_normalized: Optional[List[List[float]]] = None
     n_trials: int
     labels: List[str]
+    schedule_diagnostics: Optional[Dict[str, Any]] = None
 
 
 class ExportFormat(str, Enum):

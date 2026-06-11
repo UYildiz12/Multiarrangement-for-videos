@@ -22,6 +22,41 @@ from app.schemas import ExportFormat, ResultsResponse
 router = APIRouter(tags=["results"])
 
 
+def schedule_diagnostics(n_items: int, batches: list[list[int]] | None) -> dict[str, object] | None:
+    """Summarize the evidence structure of a fixed schedule for experimenters.
+
+    Reports pair-concurrence balance (lambda) and item-use spread so the
+    experimenter can see how evenly the schedule samples stimulus pairs.
+    """
+    if not batches or n_items < 2:
+        return None
+    try:
+        from coverlib.balanced import coverage_histogram, normalized_balance_metrics
+    except Exception:
+        return None
+    batch_sizes = sorted({len(batch) for batch in batches})
+    k = max(batch_sizes)
+    metrics = normalized_balance_metrics(n_items, k, batches)
+    histogram = coverage_histogram(n_items, batches)
+    item_counts: dict[int, int] = {}
+    for batch in batches:
+        for item in batch:
+            item_counts[int(item)] = item_counts.get(int(item), 0) + 1
+    uses = [item_counts.get(i, 0) for i in range(n_items)]
+    return {
+        "n_trials": len(batches),
+        "batch_sizes": batch_sizes,
+        "complete_pair_coverage": metrics.complete,
+        "lambda_max": metrics.lambda_max,
+        "ideal_lambda_max": metrics.ideal_lambda_max,
+        "lambda_max_ratio": round(metrics.lambda_max_ratio, 4),
+        "normalized_pair_sumsq_excess": round(metrics.normalized_pair_sumsq_excess, 6),
+        "pair_coverage_histogram": {str(count): freq for count, freq in sorted(histogram.items())},
+        "item_use_min": min(uses),
+        "item_use_max": max(uses),
+    }
+
+
 def _scale_rdm_for_output(D: np.ndarray, paradigm: str) -> tuple[list[list[float]], list[list[float]], dict[str, object]]:
     raw = np.asarray(D, dtype=float)
     raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
@@ -104,6 +139,7 @@ async def get_session_results(session_id: UUID, owner_id: UUID | None = Depends(
         evidence_normalized = W_sched.tolist() if W_sched is not None else None
         evidence = evidence_normalized or evidence_raw or []
 
+    labels = _labels_for_study(session["study_id"])
     return ResultsResponse(
         rdm=rdm,
         rdm_raw=rdm_raw,
@@ -112,7 +148,8 @@ async def get_session_results(session_id: UUID, owner_id: UUID | None = Depends(
         evidence_raw=evidence_raw,
         evidence_normalized=evidence_normalized,
         n_trials=len(trials),
-        labels=_labels_for_study(session["study_id"]),
+        labels=labels,
+        schedule_diagnostics=schedule_diagnostics(len(labels), session.get("batches")),
     )
 
 
@@ -178,6 +215,7 @@ async def export_study_results(
                 "rdm_scale": rdm_scale,
                 "evidence_raw": W_raw.tolist() if W_raw is not None else None,
                 "evidence_normalized": W_sched.tolist() if W_sched is not None else None,
+                "schedule_diagnostics": schedule_diagnostics(len(stimuli), session.get("batches")),
                 "trials": [
                     {
                         "id": str(trial["id"]),
