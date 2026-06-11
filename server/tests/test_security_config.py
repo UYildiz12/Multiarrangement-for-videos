@@ -25,6 +25,16 @@ def test_production_cors_uses_explicit_origins(monkeypatch):
     assert cors_allow_origins() == ["https://example.com", "https://app.example.com"]
 
 
+def test_production_cors_defaults_to_vercel_origin(monkeypatch):
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.delenv("CORS_ALLOW_ORIGINS", raising=False)
+    monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
+    monkeypatch.delenv("FRONTEND_ORIGIN", raising=False)
+    monkeypatch.delenv("FRONTEND_URL", raising=False)
+
+    assert cors_allow_origins() == ["https://multiarrangement.vercel.app"]
+
+
 def test_production_cors_rejects_wildcard_origin(monkeypatch):
     monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
     monkeypatch.setenv("CORS_ALLOW_ORIGINS", "*")

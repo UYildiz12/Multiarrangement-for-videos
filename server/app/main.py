@@ -22,6 +22,9 @@ _LOCAL_CORS_ORIGINS = [
     "http://localhost:3210",
     "http://127.0.0.1:3210",
 ]
+_PRODUCTION_CORS_ORIGINS = [
+    "https://multiarrangement.vercel.app",
+]
 
 
 def _env(name: str) -> str:
@@ -66,7 +69,7 @@ def cors_allow_origins() -> list[str]:
 
     if "*" in configured:
         raise RuntimeError("CORS_ALLOW_ORIGINS must list explicit origins in production")
-    return configured
+    return configured or _PRODUCTION_CORS_ORIGINS
 
 
 _API_DOCS_ENABLED = api_docs_enabled()
