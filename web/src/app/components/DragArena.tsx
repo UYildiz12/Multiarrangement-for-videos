@@ -63,6 +63,15 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+/** Pan is only meaningful when zoomed in; bound it so the arena stays in view. */
+function clampPan(pan: Position, zoom: number, containerSize: number): Position {
+  const limit = Math.max(0, (containerSize * (zoom - 1)) / 2);
+  return {
+    x: clamp(pan.x, -limit, limit),
+    y: clamp(pan.y, -limit, limit),
+  };
+}
+
 export interface SeatLayout {
   radius: number;
   seats: Position[];
@@ -171,6 +180,16 @@ export default function DragArena({
   const [pan, setPan] = useState<Position>({ x: 0, y: 0 });
   const zoomRef = useRef(1);
   zoomRef.current = zoom;
+  const containerSizeRef = useRef(0);
+
+  // Single entry point for zoom changes: clamps zoom and re-clamps pan so the
+  // arena recenters as you zoom back out.
+  const applyZoom = useCallback((next: number) => {
+    const clamped = clamp(next, MIN_ZOOM, MAX_ZOOM);
+    zoomRef.current = clamped;
+    setZoom(clamped);
+    setPan((prev) => clampPan(prev, clamped, containerSizeRef.current));
+  }, []);
 
   const arenaRadius = size / 2 - ARENA_PADDING;
   const center = size / 2;
@@ -180,6 +199,7 @@ export default function DragArena({
   );
   const itemRadius = seatLayout.radius;
   const containerSize = Math.max(seatLayout.containerSize, size + itemRadius * 2 + MIN_SEAT_GAP * 2);
+  containerSizeRef.current = containerSize;
 
   // Stable key representing which stimuli are shown (IDs only, not metadata like thumbnails)
   const stimuliKey = useMemo(
@@ -338,12 +358,7 @@ export default function DragArena({
           const [a, b] = Array.from(pinchPointersRef.current.values());
           const distance = Math.hypot(a.x - b.x, a.y - b.y);
           if (pinchStartRef.current.distance > 0) {
-            const next = clamp(
-              pinchStartRef.current.zoom * (distance / pinchStartRef.current.distance),
-              MIN_ZOOM,
-              MAX_ZOOM
-            );
-            setZoom(next);
+            applyZoom(pinchStartRef.current.zoom * (distance / pinchStartRef.current.distance));
           }
           return;
         }
@@ -351,10 +366,16 @@ export default function DragArena({
 
       if (panPointerIdRef.current === e.pointerId && panStartRef.current) {
         const start = panStartRef.current;
-        setPan({
-          x: start.pan.x + (e.clientX - start.pointer.x),
-          y: start.pan.y + (e.clientY - start.pointer.y),
-        });
+        setPan(
+          clampPan(
+            {
+              x: start.pan.x + (e.clientX - start.pointer.x),
+              y: start.pan.y + (e.clientY - start.pointer.y),
+            },
+            zoomRef.current,
+            containerSizeRef.current
+          )
+        );
         return;
       }
 
@@ -379,7 +400,7 @@ export default function DragArena({
         emitTrace(draggedOrdinalRef.current, { x: newX, y: newY }, 1);
       }
     },
-    [emitTrace, toLogical]
+    [applyZoom, emitTrace, toLogical]
   );
 
   const handlePointerUp = useCallback((e?: PointerEvent) => {
@@ -430,11 +451,11 @@ export default function DragArena({
     if (!node) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      setZoom((prev) => clamp(prev * (e.deltaY < 0 ? 1.1 : 1 / 1.1), MIN_ZOOM, MAX_ZOOM));
+      applyZoom(zoomRef.current * (e.deltaY < 0 ? 1.1 : 1 / 1.1));
     };
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => node.removeEventListener("wheel", onWheel);
-  }, []);
+  }, [applyZoom]);
 
   const handleStagePointerDown = (e: React.PointerEvent) => {
     // Background pointer: start panning (single) or pinch zoom (second pointer).
@@ -451,6 +472,9 @@ export default function DragArena({
         return;
       }
     }
+    // The arena itself must stay put at default zoom: panning is only for
+    // navigating while zoomed in.
+    if (zoomRef.current <= 1.001) return;
     panPointerIdRef.current = e.pointerId;
     panStartRef.current = { pointer: { x: e.clientX, y: e.clientY }, pan };
   };
@@ -492,6 +516,7 @@ export default function DragArena({
     <div style={{ position: "relative" }}>
       <div
         ref={arenaRef}
+        data-testid="arena-stage"
         onPointerDown={handleStagePointerDown}
         style={{
           width: containerSize,
@@ -624,7 +649,7 @@ export default function DragArena({
         <button
           type="button"
           aria-label={language === "tr" ? "Uzaklas" : "Zoom out"}
-          onClick={() => setZoom((prev) => clamp(prev / 1.2, MIN_ZOOM, MAX_ZOOM))}
+          onClick={() => applyZoom(zoomRef.current / 1.2)}
           style={zoomButtonStyle}
         >
           −
@@ -633,7 +658,7 @@ export default function DragArena({
         <button
           type="button"
           aria-label={language === "tr" ? "Yakinlas" : "Zoom in"}
-          onClick={() => setZoom((prev) => clamp(prev * 1.2, MIN_ZOOM, MAX_ZOOM))}
+          onClick={() => applyZoom(zoomRef.current * 1.2)}
           style={zoomButtonStyle}
         >
           +

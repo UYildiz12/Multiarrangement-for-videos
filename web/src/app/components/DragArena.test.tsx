@@ -130,6 +130,41 @@ describe("DragArena", () => {
     vi.restoreAllMocks();
   });
 
+  it("does not pan the arena at default zoom", () => {
+    render(<DragArena stimuli={makeStimuli(4)} size={600} trialIndex={0} />);
+    const stage = screen.getByTestId("arena-stage");
+    expect(stage).toHaveStyle({ transform: "translate(0px, 0px) scale(1)" });
+
+    fireEvent.pointerDown(stage, { pointerId: 3, clientX: 50, clientY: 50, button: 0 });
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 250, clientY: 250 });
+    fireEvent.pointerUp(window, { pointerId: 3 });
+
+    expect(stage).toHaveStyle({ transform: "translate(0px, 0px) scale(1)" });
+  });
+
+  it("pans only while zoomed in, clamped so the arena stays in view", () => {
+    render(<DragArena stimuli={makeStimuli(4)} size={600} trialIndex={0} />);
+    const stage = screen.getByTestId("arena-stage");
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" })); // 1.2x
+
+    fireEvent.pointerDown(stage, { pointerId: 4, clientX: 0, clientY: 0, button: 0 });
+    fireEvent.pointerMove(window, { pointerId: 4, clientX: 99999, clientY: 99999 });
+    fireEvent.pointerUp(window, { pointerId: 4 });
+
+    const transform = stage.style.transform;
+    const match = transform.match(/translate\((-?[\d.]+)px, (-?[\d.]+)px\)/);
+    expect(match).not.toBeNull();
+    const panX = Number(match![1]);
+    // Clamped to containerSize * (zoom - 1) / 2, far less than the drag distance.
+    expect(panX).toBeGreaterThan(0);
+    expect(panX).toBeLessThan(200);
+
+    // Zooming back out recenters the arena.
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(stage).toHaveStyle({ transform: "translate(0px, 0px) scale(1)" });
+  });
+
   it("keeps logical coordinates invariant under zoom", () => {
     let nowMs = 1000;
     vi.spyOn(performance, "now").mockImplementation(() => nowMs);
