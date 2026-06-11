@@ -130,6 +130,14 @@ describe("DragArena", () => {
     vi.restoreAllMocks();
   });
 
+  it("clips the world behind a fixed camera viewport", () => {
+    render(<DragArena stimuli={makeStimuli(4)} size={600} trialIndex={0} />);
+    const viewport = screen.getByTestId("arena-viewport");
+    expect(viewport).toHaveStyle({ overflow: "hidden" });
+    // The transformed world lives inside the clipping window.
+    expect(viewport.contains(screen.getByTestId("arena-stage"))).toBe(true);
+  });
+
   it("does not pan the arena at default zoom", () => {
     render(<DragArena stimuli={makeStimuli(4)} size={600} trialIndex={0} />);
     const stage = screen.getByTestId("arena-stage");

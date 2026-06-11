@@ -173,6 +173,7 @@ export default function DragArena({
   submitting = false,
 }: ArenaProps) {
   const arenaRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<DraggableItem[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const dragOffset = useRef<Position>({ x: 0, y: 0 });
@@ -447,7 +448,7 @@ export default function DragArena({
 
   // Wheel zoom needs a non-passive listener to prevent page scroll.
   useEffect(() => {
-    const node = arenaRef.current;
+    const node = viewportRef.current;
     if (!node) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -513,22 +514,34 @@ export default function DragArena({
   const zoomLabel = `${Math.round(zoom * 100)}%`;
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", width: containerSize, height: containerSize }}>
+      {/* Camera viewport: a fixed window that clips the world. The arena never
+          moves on the page; pan/zoom move the camera behind this window. */}
+      <div
+        ref={viewportRef}
+        data-testid="arena-viewport"
+        onPointerDown={handleStagePointerDown}
+        style={{
+          position: "absolute",
+          inset: 0,
+          overflow: "hidden",
+          background: "#000",
+          touchAction: "none",
+          cursor: panPointerIdRef.current !== null ? "grabbing" : zoom > 1.001 ? "grab" : undefined,
+        }}
+      >
       <div
         ref={arenaRef}
         data-testid="arena-stage"
-        onPointerDown={handleStagePointerDown}
         style={{
           width: containerSize,
           height: containerSize,
           position: "relative",
-          background: "#000",
           touchAction: "none",
           userSelect: "none",
           WebkitUserSelect: "none",
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
           transformOrigin: "center center",
-          cursor: panPointerIdRef.current !== null ? "grabbing" : undefined,
         }}
       >
         {/* White circle */}
@@ -632,6 +645,7 @@ export default function DragArena({
             />
           ))}
         </svg>
+      </div>
       </div>
 
       {/* Zoom controls */}
