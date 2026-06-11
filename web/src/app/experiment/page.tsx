@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import * as XLSX from "xlsx";
-import DragArena from "../components/DragArena";
+import DragArena, { type TraceSample } from "../components/DragArena";
 import PairwiseArena from "../components/PairwiseArena";
 import RdmHeatmap from "../components/RdmHeatmap";
 import MediaModal from "../components/MediaModal";
@@ -187,6 +187,10 @@ function ExperimentContent() {
     const [positions, setPositions] = useState<Record<string, Position>>({});
     const [playedItems, setPlayedItems] = useState<Set<string>>(new Set());
     const [trialStartedAt, setTrialStartedAt] = useState<number | null>(null);
+    const trialStartedAtRef = useRef<number | null>(null);
+    trialStartedAtRef.current = trialStartedAt;
+    // Token movement recording for the current trial: [t_ms, ordinal, x, y, phase]
+    const traceSamplesRef = useRef<[number, number, number, number, number][]>([]);
 
     const [mediaModalOpen, setMediaModalOpen] = useState(false);
     const [currentMedia, setCurrentMedia] = useState<{ url: string; type: Stimulus["mediaType"] } | null>(null);
@@ -617,6 +621,23 @@ function ExperimentContent() {
 
     const hasInstructions = instructions.length > 0;
 
+    // Reset the movement recording whenever a new trial begins.
+    useEffect(() => {
+        traceSamplesRef.current = [];
+    }, [trialIndex]);
+
+    const handleTraceSample = useCallback((sample: TraceSample) => {
+        const startedAt = trialStartedAtRef.current;
+        const t = startedAt !== null ? Math.max(0, Date.now() - startedAt) : 0;
+        traceSamplesRef.current.push([
+            Math.round(t),
+            sample.ordinal,
+            Math.round(sample.x * 100) / 100,
+            Math.round(sample.y * 100) / 100,
+            sample.phase,
+        ]);
+    }, []);
+
     const handleMediaPlay = useCallback((itemId: string, mediaUrl: string, mediaType: Stimulus["mediaType"]) => {
         setCurrentMedia({ url: mediaUrl, type: mediaType });
         setMediaModalOpen(true);
@@ -645,6 +666,9 @@ function ExperimentContent() {
                     positions,
                     duration_seconds: durationSeconds,
                     arena_size: arenaSize,
+                    movement_trace: traceSamplesRef.current.length
+                        ? { version: 1, samples: traceSamplesRef.current }
+                        : undefined,
                 }),
             });
             if (response.next_trial) {
@@ -1137,6 +1161,7 @@ function ExperimentContent() {
                     onAllInside={setAllInside}
                     onSubmit={handleSubmit}
                     onMediaPlay={handleMediaPlay}
+                    onTraceSample={handleTraceSample}
                     playedItems={playedItems}
                     size={arenaSize}
                     trialIndex={trialIndex}
