@@ -75,7 +75,7 @@ def _rms(values: np.ndarray) -> float:
 
 
 def _scale_to_match_rms(A: np.ndarray, B: np.ndarray) -> float:
-    """Return scale factor s to make RMS(s*A) match RMS(B). If A has zero RMS, return 1.0.
+    """Return scale factor s to make RMS(s*A) match RMS(B). If A has zero RMS, return 0.0.
     Only upper triangle (excluding diagonal) contributes.
     """
     # Use off-diagonal entries
@@ -601,7 +601,6 @@ def select_next_subset_lift_weakest(
 
     nextISS: List[int] = [j, k]
     # Diagnostic
-    print(f"[debug] Weakest-evidence pair start: ({j}, {k}), min W={masked[j,k]:.6f}")
     curTE = 0.0
 
     available = set(range(n))
@@ -705,11 +704,10 @@ def select_next_subset_lift_weakest(
         nextISS.append(best_item)
         available.discard(best_item)
         curTE = best_te
-        print(f"[debug] Grow-> added {best_item}, size={len(nextISS)}, TE={curTE:.6f}")
 
     # Phase 2: continue greedily only if TE improves
     while len(nextISS) < max_size and available:
-        best_te = -1.0
+        best_te = -1e18
         best_item: Optional[int] = None
         for i in list(available):
             candidate = nextISS + [i]
@@ -760,13 +758,11 @@ def select_next_subset_lift_weakest(
             break
         # Termination if no improvement
         if best_te <= curTE:
-            print(f"[debug] Stop growth: best_te={best_te:.6f} <= curTE={curTE:.6f}")
             break
         # Otherwise, accept the item
         nextISS.append(best_item)
         available.discard(best_item)
         curTE = best_te
-        print(f"[debug] Add-> {best_item}, size={len(nextISS)}, TE={curTE:.6f}")
 
     # Final guard: ensure minimum size if somehow not met
     if len(nextISS) < min_size and available:
@@ -774,7 +770,6 @@ def select_next_subset_lift_weakest(
         for i in list(available)[:need]:
             nextISS.append(i)
             available.discard(i)
-        print(f"[debug] Fallback to reach min_size: size={len(nextISS)}")
 
     return nextISS
 
@@ -986,7 +981,7 @@ def _smacof_mds_2d(
         iu = np.triu_indices(n, 1)
         return float(np.sum((Dhat[iu] - D[iu]) ** 2))
 
-    prev = np.inf
+    prev = None
     for _ in range(max_iter):
         Dhat = _pairwise_dist(X)
         # Avoid division by zero
@@ -1005,7 +1000,7 @@ def _smacof_mds_2d(
         # Check convergence by stress
         Dhat_new = _pairwise_dist(X_new)
         cur = _stress(Dhat_new)
-        if prev - cur <= eps * prev:
+        if prev is not None and prev - cur <= eps * prev:
             X = X_new
             break
         X = X_new

@@ -10,9 +10,12 @@ Optional robust weighting and inverse-MDS refinement.
 
 from __future__ import annotations
 
+import logging
 from typing import Iterable, Optional, Tuple
 import math
 import numpy as np
+
+_logger = logging.getLogger(__name__)
 
 from .lift_weakest import (
     TrialArrangement,
@@ -153,7 +156,9 @@ def fuse_setcover(
                 step_c=float(inverse_mds_step_c),
             )
             np.fill_diagonal(D_hat, 0.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            _logger.warning(
+                "Inverse-MDS refinement failed (%r); returning the unrefined RDM.", exc
+            )
 
     return D_hat, W

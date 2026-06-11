@@ -5,6 +5,7 @@ This module provides algorithms to generate optimal batches of videos that ensur
 all pairs of videos appear together at least once while minimizing the total number of batches.
 """
 
+import logging
 import random
 import itertools
 import os
@@ -12,6 +13,16 @@ from collections import Counter
 from typing import List, Tuple, Set, Dict, Optional
 from pathlib import Path
 import math
+
+_logger = logging.getLogger(__name__)
+_warned_keys: Set[str] = set()
+
+
+def _warn_once(key: str, message: str) -> None:
+    """Warn once per process for degraded-math fallbacks (avoids log spam)."""
+    if key not in _warned_keys:
+        _warned_keys.add(key)
+        _logger.warning(message)
 
 
 class BatchGenerator:
@@ -755,8 +766,12 @@ class BatchGenerator:
             from coverlib.balanced import balance_sort_key
 
             return balance_sort_key(self.n_videos, self.batch_size, batches)
-        except Exception:
-            pass
+        except Exception as exc:
+            _warn_once(
+                "balance_sort_key_fallback",
+                f"coverlib.balanced unavailable ({exc!r}); using the simplified balance score. "
+                "Schedule balance selection is degraded.",
+            )
 
         pair_counts, video_usage = self._coverage_counts(batches)
         expected_pairs = self.n_videos * (self.n_videos - 1) // 2
@@ -873,7 +888,7 @@ class BatchGenerator:
             metrics = normalized_balance_metrics(self.n_videos, self.batch_size, batches)
             if self.n_videos < 24 or not metrics.complete or metrics.lambda_max_ratio <= 1.5:
                 return batches
-            target_lmax = max(metrics.ideal_lambda_max, metrics.lambda_max - 1)
+            target_lmax = metrics.ideal_lambda_max
         except Exception:
             if self.n_videos < 24 or score[0] != 0 or score[1] <= 3:
                 return batches
@@ -885,7 +900,7 @@ class BatchGenerator:
             return batches
 
         attempts = 2
-        iterations = min(70_000, max(24_000, self.n_videos * 1_500))
+        iterations = min(6_000_000, max(600_000, self.n_videos * 40_000))
         seconds_per_attempt = min(14.0, max(5.0, self.n_videos * 0.35))
         improved = improve_pair_balance(
             self.n_videos,
@@ -905,7 +920,12 @@ class BatchGenerator:
         try:
             from coverlib.balanced import load_cached_balanced_cover
             import multiarrangement as ma
-        except Exception:
+        except Exception as exc:
+            _warn_once(
+                "balanced_cache_loader_fallback",
+                f"Balanced cache unavailable ({exc!r}); balanced schedules may fall back "
+                "to unoptimized covers. Check the multiarrangement install.",
+            )
             return None
 
         package_dir = Path(ma.__file__).resolve().parent

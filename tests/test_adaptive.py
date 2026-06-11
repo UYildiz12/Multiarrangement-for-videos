@@ -100,3 +100,21 @@ def test_lift_the_weakest_basic():
     subset = select_next_subset_lift_weakest(D, W, min_size=3)
     assert len(subset) >= 3
     assert 0 in subset and 1 in subset
+
+
+def test_smacof_converges_beyond_first_iteration():
+    """Regression: SMACOF must iterate to convergence, not stop after one step."""
+    from multiarrangement.adaptive.lift_weakest import _smacof_mds_2d
+
+    rng = np.random.default_rng(7)
+    X_true = rng.standard_normal((12, 2))
+    D = np.sqrt(((X_true[:, None, :] - X_true[None, :, :]) ** 2).sum(axis=2))
+    D_noisy = D + rng.uniform(0, 0.8, size=D.shape)
+    D_noisy = (D_noisy + D_noisy.T) / 2
+    np.fill_diagonal(D_noisy, 0.0)
+
+    X = _smacof_mds_2d(D_noisy)
+    Dhat = np.sqrt(((X[:, None, :] - X[None, :, :]) ** 2).sum(axis=2))
+    iu = np.triu_indices(12, 1)
+    stress = float(np.sum((Dhat[iu] - D_noisy[iu]) ** 2))
+    assert stress < 5.4

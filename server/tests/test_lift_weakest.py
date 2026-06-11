@@ -15,6 +15,28 @@ from ma_core.lift_weakest import (
 )
 
 
+class TestSmacofConvergence:
+    """Regression: SMACOF must iterate to convergence, not stop after one step."""
+
+    def test_smacof_converges_beyond_first_iteration(self):
+        from ma_core.lift_weakest import _smacof_mds_2d
+
+        rng = np.random.default_rng(7)
+        X_true = rng.standard_normal((12, 2))
+        D = np.sqrt(((X_true[:, None, :] - X_true[None, :, :]) ** 2).sum(axis=2))
+        D_noisy = D + rng.uniform(0, 0.8, size=D.shape)
+        D_noisy = (D_noisy + D_noisy.T) / 2
+        np.fill_diagonal(D_noisy, 0.0)
+
+        X = _smacof_mds_2d(D_noisy)
+        Dhat = np.sqrt(((X[:, None, :] - X[None, :, :]) ** 2).sum(axis=2))
+        iu = np.triu_indices(12, 1)
+        stress = float(np.sum((Dhat[iu] - D_noisy[iu]) ** 2))
+        # A single Guttman step from the classical-MDS start scores ~5.52 on
+        # this instance; converged SMACOF reaches ~5.27.
+        assert stress < 5.4
+
+
 class TestTrialArrangement:
     """Tests for TrialArrangement dataclass."""
 

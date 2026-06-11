@@ -9,12 +9,23 @@ stripped of pygame/opencv dependencies for server-side use.
 """
 
 import itertools
+import logging
 import math
 import os
 import random
 from collections import Counter
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+
+_logger = logging.getLogger(__name__)
+_warned_keys: Set[str] = set()
+
+
+def _warn_once(key: str, message: str) -> None:
+    """Warn once per process for degraded-math fallbacks (avoids log spam)."""
+    if key not in _warned_keys:
+        _warned_keys.add(key)
+        _logger.warning(message)
 
 
 class BatchGenerator:
@@ -459,8 +470,12 @@ def _resolve_ljcr_cache_dir() -> Path:
         package_cache = Path(ma.__file__).resolve().parent / "ljcr_cache"
         if package_cache.exists():
             return package_cache
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_once(
+            "ljcr_cache_fallback",
+            f"Packaged LJCR cache unavailable ({exc!r}); falling back to the server-local cache. "
+            "Check the multiarrangement install if this is unexpected.",
+        )
 
     return Path(__file__).resolve().parent / "ljcr_cache"
 
@@ -596,8 +611,12 @@ def _balanced_cover_score(n_items: int, batch_size: int, batches: List[List[int]
         from coverlib.balanced import balance_sort_key
 
         return balance_sort_key(n_items, batch_size, batches)
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_once(
+            "balance_sort_key_fallback",
+            f"coverlib.balanced unavailable ({exc!r}); using the simplified balance score. "
+            "Schedule balance selection is degraded.",
+        )
 
     pair_counts, item_counts = _coverage_counts(n_items, batches)
     expected_pairs = n_items * (n_items - 1) // 2
@@ -737,7 +756,7 @@ def _improve_balanced_cover_if_needed(
         metrics = normalized_balance_metrics(n_items, batch_size, batches)
         if n_items < 24 or not metrics.complete or metrics.lambda_max_ratio <= 1.5:
             return batches
-        target_lmax = max(metrics.ideal_lambda_max, metrics.lambda_max - 1)
+        target_lmax = metrics.ideal_lambda_max
     except Exception:
         if n_items < 24 or score[0] != 0 or score[1] <= 3:
             return batches
@@ -773,7 +792,11 @@ def _load_balanced_cache_candidate(
 ) -> Optional[List[List[int]]]:
     try:
         from coverlib.balanced import load_cached_balanced_cover
-    except Exception:
+    except Exception as exc:
+        _warn_once(
+            "balanced_cache_loader_fallback",
+            f"coverlib.balanced unavailable ({exc!r}); cached balanced covers are disabled.",
+        )
         return None
 
     cache_dirs: List[Path] = []
@@ -781,8 +804,12 @@ def _load_balanced_cache_candidate(
         import multiarrangement as ma
 
         cache_dirs.append(Path(ma.__file__).resolve().parent / "balanced_cache")
-    except Exception:
-        pass
+    except Exception as exc:
+        _warn_once(
+            "balanced_cache_package_fallback",
+            f"Packaged balanced cache unavailable ({exc!r}); balanced schedules may fall back "
+            "to unoptimized covers. Check the multiarrangement install.",
+        )
     cache_dirs.append(Path(__file__).resolve().parent / "balanced_cache")
     cache_dirs.append(Path.cwd() / "multiarrangement" / "balanced_cache")
 
