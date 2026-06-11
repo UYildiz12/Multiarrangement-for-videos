@@ -143,6 +143,39 @@ def test_chain_invite_start_resume_and_next():
     assert status_resp.json()["current_position"] == 1
 
 
+def test_chain_rejects_study_owned_by_another_experimenter():
+    owner_a = client.post("/api/v1/experimenter/generate-key").json()["key"]
+    owner_b = client.post("/api/v1/experimenter/generate-key").json()["key"]
+
+    study_resp = client.post(
+        "/api/v1/studies",
+        headers={"x-experimenter-key": owner_a},
+        json={
+            "name": "Owner A Study",
+            "paradigm": "setcover",
+            "language": "en",
+            "config": {"batch_size": 3},
+        },
+    )
+    assert study_resp.status_code == 201
+    study_id = study_resp.json()["id"]
+
+    chain_resp = client.post(
+        "/api/v1/chains",
+        headers={"x-experimenter-key": owner_b},
+        json={"name": "Owner B Chain"},
+    )
+    assert chain_resp.status_code == 201
+    chain_id = chain_resp.json()["id"]
+
+    add_resp = client.post(
+        f"/api/v1/chains/{chain_id}/studies",
+        headers={"x-experimenter-key": owner_b},
+        json={"study_id": study_id, "position": 0},
+    )
+    assert add_resp.status_code == 403
+
+
 def test_regular_invite_resumes_same_session_after_module_reload():
     study_id = _create_study("Invite Reload")
     invite_resp = client.post(f"/api/v1/admin/studies/{study_id}/invites", json={"count": 1})

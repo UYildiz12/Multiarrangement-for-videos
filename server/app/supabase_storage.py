@@ -8,6 +8,10 @@ import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
+
+
+_LOCAL_SUPABASE_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def storage_bucket() -> str:
@@ -19,11 +23,20 @@ def storage_bucket() -> str:
 
 
 def _supabase_url() -> str:
-    return (
+    url = (
         os.getenv("SUPABASE_URL")
         or os.getenv("NEXT_PUBLIC_SUPABASE_URL")
         or ""
     ).rstrip("/")
+    if not url:
+        return ""
+
+    parsed = urlparse(url)
+    if parsed.scheme == "https" and parsed.netloc:
+        return url
+    if parsed.scheme == "http" and parsed.hostname in _LOCAL_SUPABASE_HOSTS:
+        return url
+    raise RuntimeError("SUPABASE_URL must be HTTPS, except for localhost development")
 
 
 def _service_role_key() -> str:

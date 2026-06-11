@@ -407,6 +407,24 @@ def _build_session_start_response(
     )
 
 
+def _expected_arrangement_subset(
+    session: dict[str, Any],
+    study: dict[str, Any],
+    n_stimuli: int,
+) -> list[int]:
+    trial_index = int(session["current_trial_index"])
+    if study["paradigm"] == Paradigm.SETCOVER:
+        batches = session.get("batches", [])
+        if trial_index >= len(batches):
+            return []
+        return [int(idx) for idx in batches[trial_index]]
+
+    next_trial, session_changed = _build_next_trial_response(session, study, n_stimuli)
+    if session_changed:
+        _save_session(session)
+    return [int(idx) for idx in next_trial.subset_indices]
+
+
 def get_session_start_payload(session_id: UUID | str) -> SessionStartResponse:
     session = get_session_record(session_id)
     if session is None:
@@ -711,6 +729,11 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         if duplicate is not None:
             return duplicate
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Trial index out of sequence")
+
+    expected_subset = _expected_arrangement_subset(session, study, n_stimuli)
+    submitted_subset = [int(idx) for idx in trial.subset_indices]
+    if submitted_subset != expected_subset:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Submitted subset does not match scheduled subset")
 
     trial_row = {
         "id": str(trial_id),

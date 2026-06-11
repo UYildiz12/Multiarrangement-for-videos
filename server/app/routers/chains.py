@@ -275,6 +275,8 @@ async def add_study_to_chain(
     study = get_study(payload.study_id)
     if study is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Study not found")
+    if study["owner_id"] != owner_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your study")
 
     with connect() as conn:
         rows = fetch_all(

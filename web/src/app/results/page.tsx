@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import * as XLSX from "xlsx";
 import RdmHeatmap from "../components/RdmHeatmap";
 import { apiFetch } from "../lib/api";
 
@@ -174,28 +173,6 @@ function ResultsContent() {
         URL.revokeObjectURL(url);
     }, [results, sessionId, timeInfo]);
 
-    const handleDownloadXLSX = useCallback(() => {
-        if (!results) return;
-        const { rdm, labels } = results;
-        const wsData = [["Video", ...labels], ...rdm.map((row, i) => [labels[i], ...row])];
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
-        const wb = XLSX.utils.book_new();
-        const t = timeInfo();
-        const metaData = [
-            ["rdm_scale_method", results.rdm_scale?.method ?? ""],
-            ["rdm_scale_divisor", results.rdm_scale?.divisor ?? ""],
-            ["rdm_raw_units", results.rdm_scale?.raw_units ?? ""],
-            ["time_spent_seconds", t.seconds ?? ""],
-            ["time_spent_minutes", t.seconds === null ? "" : (t.seconds / 60).toFixed(2)],
-            ["time_started_at", t.startIso ?? ""],
-            ["time_ended_at", t.endIso ?? ""],
-        ];
-        const metaWs = XLSX.utils.aoa_to_sheet(metaData);
-        XLSX.utils.book_append_sheet(wb, metaWs, "Meta");
-        XLSX.utils.book_append_sheet(wb, ws, "RDM");
-        XLSX.writeFile(wb, `session_${sessionId}_rdm.xlsx`);
-    }, [results, sessionId, timeInfo]);
-
     if (loading) {
         return <LoadingFallback />;
     }
@@ -285,20 +262,6 @@ function ResultsContent() {
                             }}
                         >
                             CSV
-                        </button>
-                        <button
-                            onClick={handleDownloadXLSX}
-                            style={{
-                                padding: "10px 16px",
-                                borderRadius: 8,
-                                border: "1px solid #444",
-                                background: "#1a1a1a",
-                                color: "#fff",
-                                fontSize: 13,
-                                cursor: "pointer",
-                            }}
-                        >
-                            Excel
                         </button>
                     </div>
 

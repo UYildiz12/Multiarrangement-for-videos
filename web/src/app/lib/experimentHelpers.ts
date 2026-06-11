@@ -12,6 +12,16 @@ export interface TrialAdvanceState {
   sessionStartAt: number | null;
 }
 
+export interface ExperimentResultsBackTargetInput {
+  chainToken?: string | null;
+}
+
+export function getExperimentResultsBackTarget({
+  chainToken,
+}: ExperimentResultsBackTargetInput): string {
+  return chainToken && chainToken.trim().length > 0 ? "/participate" : "/setup";
+}
+
 export function deriveTrialAdvanceState(
   next: NextTrialResponse,
   now: number,

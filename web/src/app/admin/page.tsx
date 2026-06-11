@@ -574,7 +574,7 @@ function AdminContent() {
                                     <div style={{ padding: 14, borderRadius: 8, background: "#0a0a0a", border: "1px solid #222" }}>
                                         <div style={{ fontWeight: 600, marginBottom: 4 }}>{selectedStudy.name}</div>
                                         <div style={{ fontSize: 12, color: "#666" }}>
-                                            {selectedStudy.paradigm} â€¢ {selectedStudy.n_stimuli} stimuli
+                                            {selectedStudy.paradigm}{" \u2022 "}{selectedStudy.n_stimuli} stimuli
                                         </div>
                                         <div style={{ fontSize: 11, color: "#444", marginTop: 6, fontFamily: "monospace", wordBreak: "break-all" }}>
                                             {selectedStudy.id}
@@ -642,7 +642,7 @@ function AdminContent() {
                                                                 {stimulus.filename}
                                                             </div>
                                                             <div style={{ fontSize: 11, color: "#666", marginBottom: 4 }}>
-                                                                #{stimulus.ordinal} â€¢ {storageLabel}
+                                                                #{stimulus.ordinal}{" \u2022 "}{storageLabel}
                                                             </div>
                                                             <div style={{ fontSize: 10, color: "#444", fontFamily: "monospace", wordBreak: "break-all" }}>
                                                                 {stimulus.media_storage_path || stimulus.media_url || "No media URL"}

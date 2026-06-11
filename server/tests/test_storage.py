@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from app.storage import _normalize_database_url
 from app.supabase_storage import delete_storage_paths, storage_bucket
 
@@ -88,3 +90,37 @@ def test_delete_storage_paths_calls_supabase_storage_api(monkeypatch):
         "owners/a/studies/s1/media/file.png",
         "owners/a/studies/s1/thumbs/file.jpg",
     ]
+
+
+def test_delete_storage_paths_rejects_non_https_supabase_url(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "http://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+
+    with pytest.raises(RuntimeError, match="HTTPS"):
+        delete_storage_paths(["owners/a/studies/s1/media/file.png"])
+
+
+def test_delete_storage_paths_allows_local_supabase_http(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"[]"
+
+    def fake_urlopen(request, timeout=30):
+        captured["url"] = request.full_url
+        return _Response()
+
+    monkeypatch.setenv("SUPABASE_URL", "http://127.0.0.1:54321")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "service-role-key")
+    monkeypatch.setattr("app.supabase_storage.urllib.request.urlopen", fake_urlopen)
+
+    delete_storage_paths(["owners/a/studies/s1/media/file.png"])
+
+    assert str(captured["url"]).startswith("http://127.0.0.1:54321/")

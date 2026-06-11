@@ -2,13 +2,12 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import * as XLSX from "xlsx";
 import DragArena, { type TraceSample } from "../components/DragArena";
 import PairwiseArena from "../components/PairwiseArena";
 import RdmHeatmap from "../components/RdmHeatmap";
 import MediaModal from "../components/MediaModal";
 import { apiFetch } from "../lib/api";
-import { deriveTrialAdvanceState } from "../lib/experimentHelpers";
+import { deriveTrialAdvanceState, getExperimentResultsBackTarget } from "../lib/experimentHelpers";
 import { getExperimentArenaSize } from "../lib/experimentDisplay";
 import { getCachedMedia } from "../lib/mediaCache";
 
@@ -215,6 +214,8 @@ function ExperimentContent() {
         return {
             noSession: tr ? "Oturum yüklenmedi." : "No session loaded.",
             goToSetup: tr ? "Kurulum'a git" : "Go to Setup",
+            backToSetup: tr ? "Kuruluma geri dön" : "Back to setup",
+            backToParticipation: tr ? "Katılım sayfasına geri dön" : "Back to participation",
             loadingNextTrial: tr ? "Sonraki aşama yükleniyor..." : "Loading next trial...",
             preparingTrial: tr ? "Aşama hazırlanıyor..." : "Preparing trial...",
             experimentComplete: tr ? "Deney tamamlandı" : "Experiment complete",
@@ -782,26 +783,9 @@ function ExperimentContent() {
         URL.revokeObjectURL(url);
     }, [results, sessionId, timeInfo]);
 
-    const handleDownloadXLSX = useCallback(() => {
-        if (!results) return;
-        const { rdm, labels } = results;
-        const wsData = [["Video", ...labels], ...rdm.map((row, i) => [labels[i], ...row])];
-        const ws = XLSX.utils.aoa_to_sheet(wsData);
-        const wb = XLSX.utils.book_new();
-        const metaData = [
-            ["rdm_scale_method", results.rdm_scale?.method ?? ""],
-            ["rdm_scale_divisor", results.rdm_scale?.divisor ?? ""],
-            ["rdm_raw_units", results.rdm_scale?.raw_units ?? ""],
-            ["time_spent_seconds", timeInfo.seconds ?? ""],
-            ["time_spent_minutes", timeInfo.seconds === null ? "" : (timeInfo.seconds / 60).toFixed(2)],
-            ["time_started_at", timeInfo.startIso ?? ""],
-            ["time_ended_at", timeInfo.endIso ?? ""],
-        ];
-        const metaWs = XLSX.utils.aoa_to_sheet(metaData);
-        XLSX.utils.book_append_sheet(wb, metaWs, "Meta");
-        XLSX.utils.book_append_sheet(wb, ws, "RDM");
-        XLSX.writeFile(wb, `session_${sessionId}_rdm.xlsx`);
-    }, [results, sessionId, timeInfo]);
+    const handleBackFromResults = useCallback(() => {
+        window.location.href = getExperimentResultsBackTarget({ chainToken });
+    }, [chainToken]);
 
     if (!sessionId) {
         return (
@@ -919,6 +903,32 @@ function ExperimentContent() {
                     fontFamily: "'Inter', -apple-system, sans-serif",
                 }}
             >
+                <button
+                    type="button"
+                    aria-label={chainToken ? copy.backToParticipation : copy.backToSetup}
+                    title={chainToken ? copy.backToParticipation : copy.backToSetup}
+                    onClick={handleBackFromResults}
+                    style={{
+                        position: "fixed",
+                        top: 20,
+                        left: 20,
+                        zIndex: 10,
+                        width: 44,
+                        height: 44,
+                        borderRadius: 8,
+                        border: "1px solid #333",
+                        background: "#101010",
+                        color: "#fff",
+                        fontSize: 26,
+                        lineHeight: 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                    }}
+                >
+                    ←
+                </button>
                 <div style={{ textAlign: "center" }}>
                     <h2 style={{ marginBottom: 12 }}>
                         {chainToken && chainCurrentPosition < chainTotalStudies - 1
@@ -1041,20 +1051,6 @@ function ExperimentContent() {
                                 }}
                             >
                                 CSV
-                            </button>
-                            <button
-                                onClick={handleDownloadXLSX}
-                                style={{
-                                    padding: "10px 16px",
-                                    borderRadius: 8,
-                                    border: "1px solid #444",
-                                    background: "#1a1a1a",
-                                    color: "#fff",
-                                    fontSize: 13,
-                                    cursor: "pointer",
-                                }}
-                            >
-                                Excel
                             </button>
                         </div>
                     </>

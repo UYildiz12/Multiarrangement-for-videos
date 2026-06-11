@@ -26,6 +26,7 @@ router = APIRouter(prefix="/experimenter", tags=["experimenter"])
 _NAMESPACE = uuid.UUID("a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 _LOCAL_DEV_OWNER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 _TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
+_PRODUCTION_ENV_VALUES = {"prod", "production"}
 
 # ── HMAC key signing ────────────────────────────────────────────────────
 
@@ -33,8 +34,21 @@ def _get_signing_secret() -> bytes:
     """Return the HMAC signing secret, preferring the env var."""
     secret = os.getenv("EXPERIMENTER_KEY_SECRET", "")
     if not secret:
+        if _is_production_environment() and not is_local_dev_bypass_auth_enabled():
+            raise RuntimeError("EXPERIMENTER_KEY_SECRET is required in production")
         secret = "local-dev-signing-secret"  # safe only for localhost
     return secret.encode()
+
+
+def _is_production_environment() -> bool:
+    """Return True when the API is running in a hosted production environment."""
+    candidates = (
+        os.getenv("APP_ENV", ""),
+        os.getenv("ENVIRONMENT", ""),
+        os.getenv("RAILWAY_ENVIRONMENT", ""),
+        os.getenv("VERCEL_ENV", ""),
+    )
+    return any(value.strip().lower() in _PRODUCTION_ENV_VALUES for value in candidates)
 
 
 def _sign_payload(payload: str) -> str:

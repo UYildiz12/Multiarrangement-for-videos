@@ -190,6 +190,44 @@ def test_duplicate_arrangement_submit_is_idempotent(client):
     assert trials_resp.json()[0]["arena_size"] == 600
 
 
+def test_arrangement_submit_rejects_unscheduled_subset(client):
+    study_id = _create_study_with_stimuli(
+        client,
+        name="tampered_subset",
+        paradigm="setcover",
+        n=5,
+        config={"batch_size": 3},
+    )
+    session_resp = client.post(f"/api/v1/studies/{study_id}/sessions", json={"participant_id": "p1"})
+    assert session_resp.status_code == 201
+    session_id = session_resp.json()["session_id"]
+    first_trial = client.get(f"/api/v1/sessions/{session_id}/next").json()
+    expected_subset = first_trial["subset_indices"]
+    replacement = next(idx for idx in range(5) if idx not in expected_subset)
+    tampered_subset = list(expected_subset)
+    tampered_subset[0] = replacement
+
+    submit_resp = client.post(
+        f"/api/v1/sessions/{session_id}/trials",
+        json={
+            "trial_index": first_trial["trial_index"],
+            "subset_indices": tampered_subset,
+            "positions": _circle_positions(tampered_subset),
+            "duration_seconds": 45.0,
+            "arena_size": 600,
+        },
+    )
+    assert submit_resp.status_code == 400
+    assert "scheduled subset" in submit_resp.json()["detail"]
+
+    session_status = client.get(f"/api/v1/sessions/{session_id}")
+    assert session_status.status_code == 200
+    assert session_status.json()["current_trial_index"] == 0
+    trials_resp = client.get(f"/api/v1/admin/sessions/{session_id}/trials")
+    assert trials_resp.status_code == 200
+    assert trials_resp.json() == []
+
+
 def test_arrangement_results_return_scaled_rdm_with_raw_audit_matrix(client):
     n_stimuli = 8
     study_id = _create_study_with_stimuli(

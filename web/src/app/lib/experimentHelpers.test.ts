@@ -1,4 +1,4 @@
-import { deriveTrialAdvanceState } from "./experimentHelpers";
+import { deriveTrialAdvanceState, getExperimentResultsBackTarget } from "./experimentHelpers";
 
 describe("deriveTrialAdvanceState", () => {
   it("starts a non-final trial immediately and seeds the session clock", () => {
@@ -55,5 +55,15 @@ describe("deriveTrialAdvanceState", () => {
       trialStartedAt: null,
       sessionStartAt: 222,
     });
+  });
+});
+
+describe("getExperimentResultsBackTarget", () => {
+  it("routes standalone completed experiments back to setup", () => {
+    expect(getExperimentResultsBackTarget({ chainToken: null })).toBe("/setup");
+  });
+
+  it("routes chain completed experiments back to participation", () => {
+    expect(getExperimentResultsBackTarget({ chainToken: "invite-token" })).toBe("/participate");
   });
 });

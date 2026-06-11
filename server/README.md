@@ -42,6 +42,8 @@ Useful environment variables:
 - `SUPABASE_DB_URL`: preferred Postgres connection string for the hosted deployment path
 - `EXPERIMENTER_KEY_SECRET`: signing secret for issued experimenter keys
 - `ADMIN_SECRET`: optional legacy super-admin override
+- `CORS_ALLOW_ORIGINS`: comma-separated browser origins allowed to call the API in production, for example `https://your-vercel-app.vercel.app`
+- `ENABLE_API_DOCS=1`: optional production override for `/docs`, `/redoc`, and `/openapi.json`
 
 Once the server is running:
 
@@ -62,3 +64,5 @@ The API tests run against isolated SQLite databases and cover resume/restart beh
 - `/nixpacks.toml` installs the backend Python dependencies, and `/.railwayignore` keeps the Railway artifact focused on the API plus the shared cover-generation code and caches.
 - `supabase/migrations/` contains the schema files for the hosted storage/database path.
 - Supabase Storage remains optional for hosted media uploads; Postgres is used for durable hosted state.
+- Railway sets `RAILWAY_ENVIRONMENT=production` for production deployments. In that mode the API hides OpenAPI docs by default, rejects wildcard CORS, and requires `EXPERIMENTER_KEY_SECRET`.
+- Set `CORS_ALLOW_ORIGINS` to the deployed Vercel origin before promoting a production frontend, otherwise browsers will correctly block cross-origin API calls.
