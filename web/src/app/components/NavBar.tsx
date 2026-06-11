@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useKey } from "../lib/KeyContext";
+import { prefetchOwnerData } from "../lib/ownerData";
 import Logo from "./Logo";
 
 const NAV_ITEMS = [
@@ -19,6 +20,7 @@ export default function NavBar() {
     const pathname = usePathname();
     const { adminKey, isAuthenticated, isLocalBypass, clearKey } = useKey();
     const hasKey = adminKey.trim().length > 0;
+    const warmOwnerCache = () => prefetchOwnerData(adminKey, isAuthenticated);
 
     // Hide nav on participant-facing pages
     if (HIDDEN_PATHS.some((p) => pathname.startsWith(p))) {
@@ -79,6 +81,8 @@ export default function NavBar() {
                             <Link
                                 key={item.href}
                                 href={item.href}
+                                onMouseEnter={warmOwnerCache}
+                                onFocus={warmOwnerCache}
                                 style={{
                                     display: "flex",
                                     alignItems: "center",

@@ -1,67 +1,24 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useKey } from "../lib/KeyContext";
-import { apiFetch } from "../lib/api";
-
-interface StudySummary {
-    id: string;
-    name: string;
-    description?: string | null;
-    paradigm: string;
-    language: string;
-    created_at: string;
-    n_stimuli: number;
-}
-
-interface Chain {
-    id: string;
-    name: string;
-    description: string | null;
-    studies: { id: string; study_name: string; paradigm: string; position: number }[];
-}
+import { useAdminStudies, useOwnerChains } from "../lib/ownerData";
 
 export default function DashboardPage() {
     const { adminKey, authReady, isLocalBypass } = useKey();
-    const [studies, setStudies] = useState<StudySummary[]>([]);
-    const [chains, setChains] = useState<Chain[]>([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
-    const [loaded, setLoaded] = useState(false);
-
-    const loadData = useCallback(async (key: string) => {
-        const trimmedKey = key.trim();
-        setError(null);
-        setLoading(true);
-        try {
-            const headers: Record<string, string> = trimmedKey
-                ? { "x-experimenter-key": trimmedKey }
-                : {};
-            const [studiesData, chainsData] = await Promise.all([
-                apiFetch<StudySummary[]>("/api/v1/admin/studies", { headers }),
-                apiFetch<Chain[]>("/api/v1/chains", { headers }).catch(() => [] as Chain[]),
-            ]);
-            setStudies(studiesData);
-            setChains(chainsData);
-            setLoaded(true);
-        } catch (err) {
-            const msg = err instanceof Error ? err.message : "Failed to load dashboard data";
-            setError(msg);
-            setLoaded(false);
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!authReady || loaded || loading) return;
-
-        // If we have a key (or bypass), load the data
-        if (adminKey || isLocalBypass) {
-            loadData(adminKey);
-        }
-    }, [authReady, adminKey, isLocalBypass, loaded, loading, loadData]);
+    const canFetchOwnerData = authReady && (adminKey.trim().length > 0 || isLocalBypass);
+    const {
+        data: studies = [],
+        error: studiesError,
+        isLoading: studiesLoading,
+    } = useAdminStudies(adminKey, canFetchOwnerData);
+    const {
+        data: chains = [],
+        error: chainsError,
+        isLoading: chainsLoading,
+    } = useOwnerChains(adminKey, canFetchOwnerData);
+    const loading = canFetchOwnerData && !studies.length && !chains.length && (studiesLoading || chainsLoading);
+    const error = studiesError ?? chainsError;
 
     if (!authReady) {
         return (
@@ -83,7 +40,7 @@ export default function DashboardPage() {
         );
     }
 
-    if (loading && !loaded) {
+    if (loading) {
         return (
             <div style={{ minHeight: "80vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#00ff88" }}>
                 Loading dashboard...
@@ -113,7 +70,7 @@ export default function DashboardPage() {
 
                 {error && (
                     <div style={{ marginBottom: 24, padding: 12, background: "rgba(255,0,0,0.1)", border: "1px solid #ff4444", borderRadius: 8, color: "#ff4444", fontSize: 14 }}>
-                        {error}
+                        {error instanceof Error ? error.message : "Failed to load dashboard data"}
                     </div>
                 )}
 
@@ -206,7 +163,7 @@ export default function DashboardPage() {
                                         )}
                                         {chain.studies.length > 0 && (
                                             <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
-                                                {chain.studies.sort((a, b) => a.position - b.position).map((s, i) => (
+                                                {[...chain.studies].sort((a, b) => a.position - b.position).map((s, i) => (
                                                     <span key={s.id} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: "#555" }}>
                                                         <span style={{ width: 16, height: 16, borderRadius: "50%", background: "#1a1a1a", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 9, color: "#00ff88" }}>
                                                             {i + 1}

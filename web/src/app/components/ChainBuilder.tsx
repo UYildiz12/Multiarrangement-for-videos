@@ -3,29 +3,17 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { apiFetch } from "../lib/api";
 import { useKey } from "../lib/KeyContext";
+import {
+    ownerHeaders,
+    refreshOwnerData,
+    setOwnerChains,
+    useOwnerChains,
+    useOwnerStudies,
+    type ChainStudy,
+    type OwnerChain,
+} from "../lib/ownerData";
 
-interface Study {
-    id: string;
-    name: string;
-    paradigm: "setcover" | "adaptive" | "pairwise";
-    n_stimuli: number;
-}
-
-interface ChainStudy {
-    id: string;
-    chain_id: string;
-    study_id: string;
-    study_name: string;
-    paradigm: string;
-    position: number;
-}
-
-interface Chain {
-    id: string;
-    name: string;
-    description: string | null;
-    studies: ChainStudy[];
-}
+type Chain = OwnerChain;
 
 interface ChainBuilderProps {
     onChainCreated?: (chain: Chain) => void;
@@ -34,20 +22,21 @@ interface ChainBuilderProps {
 }
 
 export default function ChainBuilder({ onChainCreated, onChainSelected, adminSecret }: ChainBuilderProps) {
-    const { adminKey } = useKey();
+    const { adminKey, isLocalBypass } = useKey();
     const expKey = adminSecret || adminKey;
-    const keyHeaders = useMemo<Record<string, string>>(() => {
-        const headers: Record<string, string> = {};
-        const key = expKey.trim();
-        if (key) {
-            headers["x-experimenter-key"] = key;
-        }
-        return headers;
-    }, [expKey]);
-
-    const [chains, setChains] = useState<Chain[]>([]);
-    const [studies, setStudies] = useState<Study[]>([]);
-    const [loading, setLoading] = useState(true);
+    const canFetchOwnerData = expKey.trim().length > 0 || isLocalBypass;
+    const keyHeaders = useMemo<Record<string, string>>(() => ownerHeaders(expKey), [expKey]);
+    const {
+        data: chains = [],
+        error: chainsError,
+        isLoading: chainsLoading,
+    } = useOwnerChains(expKey, canFetchOwnerData);
+    const {
+        data: studies = [],
+        error: studiesError,
+        isLoading: studiesLoading,
+    } = useOwnerStudies(expKey, canFetchOwnerData);
+    const loading = canFetchOwnerData && !chains.length && !studies.length && (chainsLoading || studiesLoading);
     const [error, setError] = useState<string | null>(null);
 
     // New chain form
@@ -75,38 +64,22 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
         return "Experimenter key required to log your experiments and share them online. We strongly recommend always immediately backing up your data.";
     }, [expKey]);
 
-    // Load chains and studies (skip when no key — server returns empty anyway)
+    // Surface shared-cache load errors without clearing local mutation errors.
     useEffect(() => {
-        if (!expKey.trim()) {
-            setChains([]);
-            setStudies([]);
-            setLoading(false);
+        const loadError = chainsError ?? studiesError;
+        if (!loadError) {
             return;
         }
-        let cancelled = false;
-        const loadData = async () => {
-            setLoading(true);
-            setError(null);
-            try {
-                const [chainsData, studiesData] = await Promise.all([
-                    apiFetch<Chain[]>("/api/v1/chains", { headers: keyHeaders }),
-                    apiFetch<Study[]>("/api/v1/studies", { headers: keyHeaders }),
-                ]);
-                if (!cancelled) {
-                    setChains(chainsData);
-                    setStudies(studiesData);
-                }
-            } catch (err) {
-                if (!cancelled) {
-                    setError(describeAuthError(err, "Failed to load data"));
-                }
-            } finally {
-                if (!cancelled) setLoading(false);
-            }
-        };
-        loadData();
-        return () => { cancelled = true; };
-    }, [expKey, keyHeaders, describeAuthError]);
+        setError(describeAuthError(loadError, "Failed to load data"));
+    }, [chainsError, studiesError, describeAuthError]);
+
+    useEffect(() => {
+        if (!selectedChain) return;
+        const current = chains.find((chain) => chain.id === selectedChain.id);
+        if (current && current !== selectedChain) {
+            setSelectedChain(current);
+        }
+    }, [chains, selectedChain]);
 
     const handleCreateChain = useCallback(async () => {
         if (!newChainName.trim()) return;
@@ -121,7 +94,8 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
                     description: newChainDescription || null,
                 }),
             });
-            setChains((prev) => [...prev, chain]);
+            setOwnerChains(expKey, (prev) => [...prev, chain]);
+            refreshOwnerData(expKey, canFetchOwnerData);
             setNewChainName("");
             setNewChainDescription("");
             setSelectedChain(chain);
@@ -131,7 +105,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
         } finally {
             setCreating(false);
         }
-    }, [newChainName, newChainDescription, onChainCreated, keyHeaders, describeAuthError]);
+    }, [newChainName, newChainDescription, onChainCreated, keyHeaders, describeAuthError, expKey, canFetchOwnerData]);
 
     const addStudyById = useCallback(async (studyId: string) => {
         if (!selectedChain) return;
@@ -148,7 +122,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
                 ...prev,
                 studies: [...prev.studies, chainStudy],
             }));
-            setChains((prev) => prev.map((c) =>
+            setOwnerChains(expKey, (prev) => prev.map((c) =>
                 c.id === selectedChain.id
                     ? { ...c, studies: [...c.studies, chainStudy] }
                     : c
@@ -157,7 +131,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
         } catch (err) {
             setError(describeAuthError(err, "Failed to add study"));
         }
-    }, [selectedChain, keyHeaders, describeAuthError]);
+    }, [selectedChain, keyHeaders, describeAuthError, expKey]);
 
     const handleRemoveStudy = useCallback(async (studyId: string) => {
         if (!selectedChain) return;
@@ -170,7 +144,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
                 ...prev,
                 studies: prev.studies.filter((s) => s.study_id !== studyId),
             }));
-            setChains((prev) => prev.map((c) =>
+            setOwnerChains(expKey, (prev) => prev.map((c) =>
                 c.id === selectedChain.id
                     ? { ...c, studies: c.studies.filter((s) => s.study_id !== studyId) }
                     : c
@@ -178,7 +152,7 @@ export default function ChainBuilder({ onChainCreated, onChainSelected, adminSec
         } catch (err) {
             setError(describeAuthError(err, "Failed to remove study"));
         }
-    }, [selectedChain, keyHeaders, describeAuthError]);
+    }, [selectedChain, keyHeaders, describeAuthError, expKey]);
 
     const handleGenerateInvite = useCallback(async () => {
         if (!selectedChain) return;

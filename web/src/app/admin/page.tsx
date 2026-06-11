@@ -4,6 +4,7 @@ import { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { apiFetch } from "../lib/api";
 import { useKey } from "../lib/KeyContext";
+import { refreshOwnerData, setAdminStudies, useAdminStudies } from "../lib/ownerData";
 import ChainBuilder from "../components/ChainBuilder";
 import Link from "next/link";
 import { EyeIcon, EyeOffIcon } from "../components/EyeIcon";
@@ -100,20 +101,30 @@ function AdminContent() {
     const [selectedChainId, setSelectedChainId] = useState<string | null>(null);
     const [chainSessions, setChainSessions] = useState<ChainSessionsData | null>(null);
     const [loadingChainSessions, setLoadingChainSessions] = useState(false);
+    const canFetchOwnerData = authReady && isAuthenticated;
+    const {
+        data: cachedStudies,
+        error: cachedStudiesError,
+        isLoading: cachedStudiesLoading,
+    } = useAdminStudies(adminKey, canFetchOwnerData);
+    const studiesBusy = loadingStudies || (canFetchOwnerData && cachedStudiesLoading && studies.length === 0);
 
     useEffect(() => {
         if (adminKey) setKeyInput(adminKey);
     }, [adminKey]);
 
-    // Auto-load studies if authenticated
     useEffect(() => {
-        if (!authReady) return;
-        if (!isAuthenticated) return;
-        if (studies.length === 0 && !loadingStudies) {
-            loadStudies(adminKey);
+        if (canFetchOwnerData && cachedStudies) {
+            setStudies(cachedStudies);
+        }
+    }, [cachedStudies, canFetchOwnerData]);
+
+    useEffect(() => {
+        if (cachedStudiesError) {
+            setError(describeAuthError(cachedStudiesError, "Failed to load studies"));
         }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isAuthenticated, authReady]);
+    }, [cachedStudiesError]);
 
     // Auto-select study from URL
     useEffect(() => {
@@ -173,6 +184,7 @@ function AdminContent() {
                 headers: buildKeyHeaders(key),
             });
             setStudies(data);
+            setAdminStudies(key ?? adminKey, () => data);
         } catch (err) {
             setError(describeAuthError(err, "Failed to load studies", key));
         } finally {
@@ -247,7 +259,10 @@ function AdminContent() {
                 method: "DELETE",
                 headers: buildKeyHeaders(),
             });
-            setStudies(studies.filter((s) => s.id !== studyId));
+            const nextStudies = studies.filter((s) => s.id !== studyId);
+            setStudies(nextStudies);
+            setAdminStudies(adminKey, () => nextStudies);
+            refreshOwnerData(adminKey, isAuthenticated);
             if (selectedStudyId === studyId) {
                 setSelectedStudyId(null);
                 setSessions([]);
@@ -367,7 +382,7 @@ function AdminContent() {
                             </button>
                             <button
                                 type="submit"
-                                disabled={loadingStudies}
+                                disabled={studiesBusy}
                                 style={{
                                     padding: "10px 20px",
                                     borderRadius: 8,
@@ -375,10 +390,10 @@ function AdminContent() {
                                     background: "linear-gradient(135deg, #00ff88 0%, #00cc66 100%)",
                                     color: "#000",
                                     fontWeight: 600,
-                                    cursor: loadingStudies ? "not-allowed" : "pointer",
+                                    cursor: studiesBusy ? "not-allowed" : "pointer",
                                 }}
                             >
-                                {loadingStudies ? "Loading..." : "Enter"}
+                                {studiesBusy ? "Loading..." : "Enter"}
                             </button>
                         </form>
 

@@ -514,9 +514,9 @@ export default function DragArena({
   const zoomLabel = `${Math.round(zoom * 100)}%`;
 
   return (
-    <div style={{ position: "relative", width: containerSize, height: containerSize }}>
-      {/* Camera viewport: a fixed window that clips the world. The arena never
-          moves on the page; pan/zoom move the camera behind this window. */}
+    <div style={{ position: "relative", width: containerSize, height: containerSize, overflow: "visible" }}>
+      {/* Camera viewport: the arena keeps the same coordinate system while
+          pan/zoom move the camera; overflow remains visible during zoom. */}
       <div
         ref={viewportRef}
         data-testid="arena-viewport"
@@ -524,7 +524,7 @@ export default function DragArena({
         style={{
           position: "absolute",
           inset: 0,
-          overflow: "hidden",
+          overflow: "visible",
           background: "#000",
           touchAction: "none",
           cursor: panPointerIdRef.current !== null ? "grabbing" : zoom > 1.001 ? "grab" : undefined,

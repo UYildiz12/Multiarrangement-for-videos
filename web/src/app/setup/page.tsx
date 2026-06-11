@@ -7,6 +7,7 @@ import Link from "next/link";
 import { apiFetch } from "../lib/api";
 import { useKey } from "../lib/KeyContext";
 import { cacheMedia } from "../lib/mediaCache";
+import { refreshOwnerData, useOwnerChains } from "../lib/ownerData";
 import { getSupabaseClient, SUPABASE_BUCKET } from "../lib/supabaseClient";
 import {
     IMAGE_DURATION_FALLBACK,
@@ -164,11 +165,13 @@ export default function SetupPage() {
     const supabaseAvailable = Boolean(getSupabaseClient());
 
     // Chain integration state
-    const [chains, setChains] = useState<{ id: string; name: string }[]>([]);
     const [selectedChainId, setSelectedChainId] = useState<string>("");
     const [addingToChain, setAddingToChain] = useState(false);
     const [addedToChain, setAddedToChain] = useState<string | null>(null);
     const [chainError, setChainError] = useState<string | null>(null);
+    const canFetchOwnerData = adminKey.trim().length > 0 || isLocalBypass;
+    const { data: chainOptions = [] } = useOwnerChains(adminKey, Boolean(publishedStudyId) && canFetchOwnerData);
+    const chains = chainOptions.map((chain) => ({ id: chain.id, name: chain.name }));
 
     useEffect(() => {
         let cancelled = false;
@@ -613,6 +616,7 @@ export default function SetupPage() {
             });
 
             setPublishedStudyId(study.id);
+            refreshOwnerData(adminKey, canFetchOwnerData);
         } catch (err) {
             setPublishError(describeAuthError(err, "Failed to publish study"));
         } finally {
@@ -652,17 +656,6 @@ export default function SetupPage() {
         }
     };
 
-    // Load chains when a study is published
-    useEffect(() => {
-        if (!publishedStudyId) return;
-        const headers: Record<string, string> = adminKey.trim()
-            ? { "x-experimenter-key": adminKey.trim() }
-            : {};
-        apiFetch<{ id: string; name: string }[]>("/api/v1/chains", { headers })
-            .then(setChains)
-            .catch(() => setChains([]));
-    }, [publishedStudyId, adminKey]);
-
     const handleAddToChain = async () => {
         if (!publishedStudyId || !selectedChainId) return;
         setAddingToChain(true);
@@ -678,6 +671,7 @@ export default function SetupPage() {
             );
             const chainName = chains.find(c => c.id === selectedChainId)?.name || "chain";
             setAddedToChain(chainName);
+            refreshOwnerData(adminKey, canFetchOwnerData);
         } catch (err) {
             setChainError(describeAuthError(err, "Failed to add study to chain"));
         } finally {
