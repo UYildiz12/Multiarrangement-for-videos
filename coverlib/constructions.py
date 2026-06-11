@@ -239,6 +239,26 @@ def affine_plane(q: int) -> List[Block]:
     return sorted(blocks)
 
 
+def exact_design(v: int, k: int) -> List[Block] | None:
+    """Return a perfect 2-(v, k, 1) design for (v, k) if one is constructible.
+
+    Returns None when no supported construction matches; never raises for
+    out-of-family parameters.
+    """
+    try:
+        if k == 3 and v >= 7 and v % 6 in (1, 3):
+            return steiner_triple_system(v)
+        q = k - 1
+        if q >= 2 and v == q * q + q + 1 and (_is_prime(q) or q in _IRREDUCIBLE):
+            return projective_plane(q)
+        q = k
+        if q >= 3 and v == q * q and (_is_prime(q) or q in _IRREDUCIBLE):
+            return affine_plane(q)
+    except Exception:
+        return None
+    return None
+
+
 def constructible_designs(
     max_v: int = 100,
     min_k: int = 3,

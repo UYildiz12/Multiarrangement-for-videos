@@ -393,6 +393,18 @@ def _generate_optimal_batches(
     Returns:
         List of batches (0-based), or None if LJCR data unavailable.
     """
+    # Exact constructions (Steiner systems, projective/affine planes) are
+    # provably optimal and perfectly balanced; use them when (v, k) admits one.
+    try:
+        from coverlib.constructions import exact_design
+
+        design = exact_design(v, k)
+        if design is not None:
+            print(f"[optimal] Using exact 2-({v},{k},1) design ({len(design)} blocks, lambda=1)")
+            return [list(block) for block in design]
+    except Exception:
+        pass
+
     try:
         from . import optimize_cover_pure as ocp
     except ImportError:

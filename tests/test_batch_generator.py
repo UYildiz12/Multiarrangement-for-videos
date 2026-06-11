@@ -210,3 +210,18 @@ class TestFileUtils:
         
         with pytest.raises(ValueError):
             validate_batch_configuration(batches, num_videos)
+
+
+class TestExactDesignFastPath:
+    """The hybrid path must use exact constructions when (v, k) admits one."""
+
+    def test_projective_plane_size_is_perfect(self):
+        generator = BatchGenerator(n_videos=13, batch_size=4)
+        batches = generator.optimize_batches_hybrid(prefer_optimal=True)
+        assert len(batches) == 13
+        counts = {}
+        for batch in batches:
+            for a, b in combinations(sorted(batch), 2):
+                counts[(a, b)] = counts.get((a, b), 0) + 1
+        assert len(counts) == 13 * 12 // 2
+        assert set(counts.values()) == {1}

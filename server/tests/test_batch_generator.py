@@ -195,3 +195,17 @@ class TestEdgeCases:
         
         validation = BatchGenerator(24, 8).validate_batches(batches)
         assert validation['coverage_complete'] is True
+
+
+class TestExactDesignFastPath:
+    """The optimal path must use exact constructions when (v, k) admits one."""
+
+    def test_projective_plane_size_is_perfect(self):
+        batches = generate_batches(57, 8, seed=1, algorithm="optimal")
+        assert len(batches) == 57
+        counts = {}
+        for batch in batches:
+            for a, b in combinations(sorted(batch), 2):
+                counts[(a, b)] = counts.get((a, b), 0) + 1
+        assert len(counts) == 57 * 56 // 2
+        assert set(counts.values()) == {1}

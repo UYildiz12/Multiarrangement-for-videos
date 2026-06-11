@@ -974,10 +974,26 @@ class BatchGenerator:
             List of optimized batches
         """
         from pathlib import Path
-        
+
         # Get project root directory
         project_root = Path(__file__).parent.parent.parent
-        
+
+        # Exact constructions (Steiner systems, projective/affine planes) are
+        # provably optimal and perfectly balanced; use them when available.
+        if prefer_optimal:
+            try:
+                from coverlib.constructions import exact_design
+
+                design = exact_design(self.n_videos, self.batch_size)
+                if design is not None:
+                    print(
+                        f"Used exact 2-({self.n_videos},{self.batch_size},1) design "
+                        f"({len(design)} batches, lambda=1)"
+                    )
+                    return [list(block) for block in design]
+            except Exception:
+                pass
+
         if prefer_optimal:
             # Try optimize_cover_pure.py first
             try:
