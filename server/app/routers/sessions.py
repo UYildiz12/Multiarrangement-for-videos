@@ -91,6 +91,7 @@ def _trial_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "rating": row.get("rating"),
         "duration_seconds": float(row["duration_seconds"]),
         "arena_size": float(row["arena_size"]) if row.get("arena_size") is not None else None,
+        "movement_trace": row.get("movement_trace_json"),
         "started_at": _parse_dt(row["started_at"]),
         "completed_at": _parse_dt(row.get("completed_at")),
     }
@@ -189,6 +190,27 @@ def _normalize_positions_payload(positions: dict[str, Any] | None) -> dict[str, 
             x, y = value.x, value.y
         normalized[str(key)] = [float(x), float(y)]
     return normalized
+
+
+_MAX_TRACE_SAMPLES = 50_000
+
+
+def _validated_movement_trace(trace: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Validate an optional token-movement recording before persisting it."""
+    if trace is None:
+        return None
+    samples = trace.get("samples") if isinstance(trace, dict) else None
+    if not isinstance(samples, list):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="movement_trace must be an object with a 'samples' list",
+        )
+    if len(samples) > _MAX_TRACE_SAMPLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"movement_trace exceeds the {_MAX_TRACE_SAMPLES}-sample limit",
+        )
+    return trace
 
 
 def _arena_geometry_from_size(arena_size: float | None) -> tuple[tuple[float, float] | None, float | None]:
@@ -623,6 +645,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
             "rating": trial.rating,
             "duration_seconds": float(trial.duration_seconds),
             "arena_size": None,
+            "movement_trace_json": None,
             "started_at": now.isoformat(),
             "completed_at": now.isoformat(),
         }
@@ -669,6 +692,8 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
     if trial.positions is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Positions are required for arrangement paradigms")
 
+    movement_trace = _validated_movement_trace(trial.movement_trace)
+
     missing = [idx for idx in trial.subset_indices if str(idx) not in trial.positions]
     if missing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Missing positions for indices: {missing}")
@@ -696,6 +721,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         "rating": None,
         "duration_seconds": float(trial.duration_seconds),
         "arena_size": float(trial.arena_size) if trial.arena_size is not None else None,
+        "movement_trace_json": movement_trace,
         "started_at": now.isoformat(),
         "completed_at": now.isoformat(),
     }

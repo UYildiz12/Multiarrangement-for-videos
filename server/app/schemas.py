@@ -213,6 +213,8 @@ class TrialSubmit(BaseModel):
     rating: Optional[int] = Field(default=None, ge=1, le=7)  # 1-7 scale (for pairwise)
     duration_seconds: float = Field(..., ge=0)
     arena_size: Optional[float] = Field(default=None, gt=0)
+    # Optional token-movement recording: {"version": 1, "samples": [[t_ms, ordinal, x, y, phase], ...]}
+    movement_trace: Optional[Dict[str, Any]] = None
 
 
 class TrialResponse(BaseModel):

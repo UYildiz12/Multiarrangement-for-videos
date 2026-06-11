@@ -225,6 +225,7 @@ async def export_study_results(
                         "rating": trial.get("rating"),
                         "duration_seconds": trial["duration_seconds"],
                         "arena_size": trial.get("arena_size"),
+                        "movement_trace": trial.get("movement_trace"),
                         "started_at": trial["started_at"].isoformat() if trial.get("started_at") else None,
                         "completed_at": trial["completed_at"].isoformat() if trial.get("completed_at") else None,
                     }
