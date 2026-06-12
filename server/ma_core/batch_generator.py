@@ -684,7 +684,10 @@ def _generate_balanced_batches(
 
     optimal = _generate_optimal_batches(n_items, batch_size, seed=seed)
     if optimal:
-        if _is_already_balanced_enough(n_items, batch_size, optimal):
+        # with a trial surplus allowed, always consult the cache: a certified
+        # balanced cover may exist just above the minimum trial count
+        if max_extra_fraction <= 0.0 and _is_already_balanced_enough(
+                n_items, batch_size, optimal):
             pair_counts, _ = _coverage_counts(n_items, optimal)
             hist = Counter(pair_counts.values())
             print(
@@ -840,6 +843,7 @@ def generate_batches(
     restarts: int = 64,
     flex: bool = False,
     algorithm: str = "balanced",
+    max_extra_fraction: float = 0.0,
 ) -> List[List[int]]:
     """
     Convenience function to generate batches.
@@ -855,7 +859,11 @@ def generate_batches(
         restarts: Number of algorithm restarts
         flex: Use variable-size batches (library flex mode)
         algorithm: Algorithm hint ('balanced', 'hybrid', 'server', 'optimal', 'greedy')
-        
+        max_extra_fraction: Trial-budget tolerance. 0.0 (compact mode) keeps
+            the minimum trial count; 0.20 (balanced mode) lets the cache
+            supply a certified low-concurrence schedule with up to 20%
+            more trials.
+
     Returns:
         List of batches
     """
@@ -867,6 +875,7 @@ def generate_batches(
             batch_size,
             seed=seed_value,
             restarts=restarts,
+            max_extra_fraction=max_extra_fraction,
         )
 
     # For flex mode, delegate to the library (flex requires optimize_cover_flex.py)

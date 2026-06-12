@@ -817,7 +817,10 @@ class BatchGenerator:
         candidates: List[List[List[int]]] = []
         minimal = self.optimize_batches_hybrid(seed=seed)
         if minimal:
-            if self._is_already_balanced_enough(minimal):
+            # with a trial surplus allowed, always consult the cache: a
+            # certified balanced cover may exist just above the minimum
+            if max_extra_fraction <= 0.0 and \
+                    self._is_already_balanced_enough(minimal):
                 pair_counts, _ = self._coverage_counts(minimal)
                 hist = Counter(pair_counts.values())
                 print(

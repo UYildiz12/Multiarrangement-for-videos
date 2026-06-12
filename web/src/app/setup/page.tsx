@@ -59,6 +59,7 @@ interface ExperimentConfig {
     customInstructions: string;
     videos: VideoFile[];
     batchSize: number;
+    scheduleMode: "compact" | "balanced";
     flex: boolean;
     setcoverWeightMode: WeightMode;
     setcoverWeightAlpha: number;
@@ -104,6 +105,7 @@ const defaultConfig: ExperimentConfig = {
     customInstructions: "",
     videos: [],
     batchSize: 6,
+    scheduleMode: "compact",
     flex: false,
     setcoverWeightMode: "max",
     setcoverWeightAlpha: 2.0,
@@ -399,6 +401,7 @@ export default function SetupPage() {
             }
             if (config.paradigm === "setcover") {
                 studyConfig.batch_size = config.batchSize;
+                studyConfig.schedule_mode = config.scheduleMode;
                 studyConfig.flex = config.flex;
                 studyConfig.setcover_weight_mode = config.setcoverWeightMode;
                 studyConfig.setcover_weight_alpha = config.setcoverWeightAlpha;
@@ -542,6 +545,7 @@ export default function SetupPage() {
             }
             if (config.paradigm === "setcover") {
                 studyConfig.batch_size = config.batchSize;
+                studyConfig.schedule_mode = config.scheduleMode;
                 studyConfig.flex = config.flex;
                 studyConfig.setcover_weight_mode = config.setcoverWeightMode;
                 studyConfig.setcover_weight_alpha = config.setcoverWeightAlpha;
@@ -1026,6 +1030,18 @@ export default function SetupPage() {
                             <div>
                                 <label style={labelStyle}>Batch Size (k)</label>
                                 <input type="number" min={3} max={12} value={config.batchSize} onChange={(e) => setConfig({ ...config, batchSize: parseInt(e.target.value) || 6 })} style={inputStyle} />
+                            </div>
+                            <div>
+                                <label style={labelStyle}>Trial Schedule</label>
+                                <select value={config.scheduleMode} onChange={(e) => setConfig({ ...config, scheduleMode: e.target.value as "compact" | "balanced" })} style={inputStyle}>
+                                    <option value="compact">Compact (fewest trials)</option>
+                                    <option value="balanced">Balanced (even pair coverage, up to 20% more trials)</option>
+                                </select>
+                                <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
+                                    {config.scheduleMode === "balanced"
+                                        ? "Every stimulus pair appears at most twice where a certified schedule exists."
+                                        : "Minimum session length; some pairs may repeat more often than others."}
+                                </div>
                             </div>
                             <div>
                                 <label style={labelStyle}>Weight Mode</label>

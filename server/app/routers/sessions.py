@@ -464,8 +464,10 @@ def _get_or_create_schedule(
     *,
     flex: bool,
     algorithm: str,
+    max_extra_fraction: float = 0.0,
 ) -> list[list[int]]:
-    key = (str(study_id), n_stimuli, batch_size, flex, algorithm)
+    key = (str(study_id), n_stimuli, batch_size, flex, algorithm,
+           round(max_extra_fraction, 3))
     cached = _SCHEDULE_CACHE.get(key)
     if cached is None:
         cached = generate_batches(
@@ -474,6 +476,7 @@ def _get_or_create_schedule(
             seed=42,
             flex=flex,
             algorithm=algorithm,
+            max_extra_fraction=max_extra_fraction,
         )
         _SCHEDULE_CACHE[key] = cached
     return [list(batch) for batch in cached]
@@ -493,6 +496,11 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
         batch_size = study["config"].get("batch_size", 6)
         flex = bool(study["config"].get("flex", False))
         setcover_algorithm = study["config"].get("setcover_algorithm", "balanced")
+        # schedule_mode: "compact" keeps the minimum trial count;
+        # "balanced" allows up to 20% more trials so a certified
+        # low-concurrence schedule can be served from the cache
+        schedule_mode = str(study["config"].get("schedule_mode", "compact"))
+        extra_fraction = 0.20 if schedule_mode == "balanced" else 0.0
         effective_batch = min(batch_size, n_stimuli)
         batches = _get_or_create_schedule(
             study_id,
@@ -500,6 +508,7 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
             effective_batch,
             flex=flex,
             algorithm=str(setcover_algorithm),
+            max_extra_fraction=extra_fraction,
         )
 
     seen = np.zeros((n_stimuli,), dtype=bool) if n_stimuli > 0 else None

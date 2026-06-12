@@ -34,7 +34,7 @@ class TestScheduleCache:
     def test_schedule_generated_once_per_study(self, monkeypatch):
         calls = {"n": 0}
 
-        def fake_generate(n_items, batch_size, seed=None, flex=False, algorithm="balanced"):
+        def fake_generate(n_items, batch_size, seed=None, flex=False, algorithm="balanced", max_extra_fraction=0.0):
             calls["n"] += 1
             return [[0, 1, 2], [1, 2, 3]]
 
@@ -59,7 +59,7 @@ class TestScheduleCache:
     def test_different_config_misses_cache(self, monkeypatch):
         calls = {"n": 0}
 
-        def fake_generate(n_items, batch_size, seed=None, flex=False, algorithm="balanced"):
+        def fake_generate(n_items, batch_size, seed=None, flex=False, algorithm="balanced", max_extra_fraction=0.0):
             calls["n"] += 1
             return [[0, 1], [1, 2], [0, 2]]
 
