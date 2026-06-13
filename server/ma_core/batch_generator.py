@@ -860,8 +860,8 @@ def generate_batches(
         flex: Use variable-size batches (library flex mode)
         algorithm: Algorithm hint ('balanced', 'hybrid', 'server', 'optimal', 'greedy')
         max_extra_fraction: Trial-budget tolerance. 0.0 (compact mode) keeps
-            the minimum trial count; 0.20 (balanced mode) lets the cache
-            supply a certified low-concurrence schedule with up to 20%
+            the minimum trial count; 0.25 (balanced mode) lets the cache
+            supply a certified low-concurrence schedule with up to 25%
             more trials.
 
     Returns:

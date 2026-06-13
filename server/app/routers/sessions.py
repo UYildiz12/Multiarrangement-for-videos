@@ -497,10 +497,10 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
         flex = bool(study["config"].get("flex", False))
         setcover_algorithm = study["config"].get("setcover_algorithm", "balanced")
         # schedule_mode: "compact" keeps the minimum trial count;
-        # "balanced" allows up to 20% more trials so a certified
+        # "balanced" allows up to 25% more trials so a certified
         # low-concurrence schedule can be served from the cache
         schedule_mode = str(study["config"].get("schedule_mode", "compact"))
-        extra_fraction = 0.20 if schedule_mode == "balanced" else 0.0
+        extra_fraction = 0.25 if schedule_mode == "balanced" else 0.0
         effective_batch = min(batch_size, n_stimuli)
         batches = _get_or_create_schedule(
             study_id,

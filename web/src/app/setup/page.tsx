@@ -1035,7 +1035,7 @@ export default function SetupPage() {
                                 <label style={labelStyle}>Trial Schedule</label>
                                 <select value={config.scheduleMode} onChange={(e) => setConfig({ ...config, scheduleMode: e.target.value as "compact" | "balanced" })} style={inputStyle}>
                                     <option value="compact">Compact (fewest trials)</option>
-                                    <option value="balanced">Balanced (even pair coverage, up to 20% more trials)</option>
+                                    <option value="balanced">Balanced (even pair coverage, up to 25% more trials)</option>
                                 </select>
                                 <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
                                     {config.scheduleMode === "balanced"

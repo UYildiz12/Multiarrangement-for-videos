@@ -12,7 +12,7 @@ for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. Brai
 13(1), 61. https://doi.org/10.3390/brainsci13010061
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __author__ = "Multiarrangement Team"
 
 from importlib import import_module
