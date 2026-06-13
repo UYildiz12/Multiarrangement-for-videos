@@ -22,6 +22,33 @@
   }
  },
  {
+  "v": 6,
+  "k": 5,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 3,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 3,
+    "2": 9,
+    "3": 3
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v6_k5_b3.txt",
+   "source": "orbit_anneal"
+  }
+ },
+ {
   "v": 7,
   "k": 4,
   "baseline_trials": 5,
@@ -104,6 +131,33 @@
  },
  {
   "v": 8,
+  "k": 5,
+  "baseline_trials": 4,
+  "impossibility": {
+   "cap": 2,
+   "b": 5,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 4,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 19,
+    "2": 6,
+    "3": 3
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v8_k5_b4.txt",
+   "source": "orbit_anneal"
+  }
+ },
+ {
+  "v": 8,
   "k": 6,
   "baseline_trials": 3,
   "balanced": {
@@ -161,6 +215,59 @@
    "file": "v9_k4_b9.txt",
    "source": "orbit_anneal",
    "extra_trials_pct": 12.5
+  }
+ },
+ {
+  "v": 9,
+  "k": 5,
+  "baseline_trials": 5,
+  "impossibility": {
+   "cap": 2,
+   "b": 6,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 5,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 27,
+    "2": 4,
+    "3": 5
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v9_k5_b5.txt",
+   "source": "orbit_anneal"
+  }
+ },
+ {
+  "v": 9,
+  "k": 6,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 2,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 2,
+   "lambda_star": 2,
+   "status": "IDEAL_COVER_CERTIFIED",
+   "pair_histogram": {
+    "1": 27,
+    "2": 9
+   },
+   "item_use": [
+    2,
+    2
+   ],
+   "file": "v9_k6_b3.txt",
+   "source": "orbit_anneal"
   }
  },
  {
@@ -265,6 +372,59 @@
    "file": "v10_k6_b5.txt",
    "source": "orbit_anneal",
    "extra_trials_pct": 25.0
+  }
+ },
+ {
+  "v": 10,
+  "k": 7,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 2,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 2,
+   "lambda_star": 2,
+   "status": "IDEAL_COVER_CERTIFIED",
+   "pair_histogram": {
+    "1": 27,
+    "2": 18
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v10_k7_b3.txt",
+   "source": "orbit_anneal"
+  }
+ },
+ {
+  "v": 10,
+  "k": 8,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 3,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 12,
+    "2": 27,
+    "3": 6
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v10_k8_b3.txt",
+   "source": "orbit_anneal"
   }
  },
  {
@@ -379,6 +539,33 @@
    ],
    "file": "v11_k7_b4.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 11,
+  "k": 9,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 3,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 12,
+    "2": 33,
+    "3": 10
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v11_k9_b3.txt",
+   "source": "orbit_anneal"
   }
  },
  {
@@ -507,6 +694,32 @@
  },
  {
   "v": 12,
+  "k": 8,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 2,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 2,
+   "lambda_star": 2,
+   "status": "IDEAL_COVER_CERTIFIED",
+   "pair_histogram": {
+    "1": 48,
+    "2": 18
+   },
+   "item_use": [
+    2,
+    2
+   ],
+   "file": "v12_k8_b3.txt",
+   "source": "orbit_anneal"
+  }
+ },
+ {
+  "v": 12,
   "k": 9,
   "baseline_trials": 3,
   "balanced": {
@@ -602,6 +815,60 @@
    ],
    "file": "v13_k7_b6.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 13,
+  "k": 8,
+  "baseline_trials": 4,
+  "impossibility": {
+   "cap": 2,
+   "b": 5,
+   "kind": "full"
+  },
+  "balanced": {
+   "trials": 5,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 22,
+    "2": 50,
+    "3": 6
+   },
+   "item_use": [
+    3,
+    4
+   ],
+   "file": "v13_k8_b5.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 25.0
+  }
+ },
+ {
+  "v": 13,
+  "k": 9,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 2,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 2,
+   "lambda_star": 2,
+   "status": "IDEAL_COVER_CERTIFIED",
+   "pair_histogram": {
+    "1": 48,
+    "2": 30
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v13_k9_b3.txt",
+   "source": "orbit_anneal"
   }
  },
  {
@@ -709,6 +976,32 @@
  },
  {
   "v": 14,
+  "k": 6,
+  "baseline_trials": 7,
+  "impossibility": {
+   "cap": 2,
+   "b": 9,
+   "kind": "orbit_exhausted"
+  },
+  "strict": {
+   "trials": 7,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 84,
+    "3": 7
+   },
+   "item_use": [
+    3,
+    3
+   ],
+   "file": "v14_k6_b7.txt",
+   "source": "orbit_anneal"
+  }
+ },
+ {
+  "v": 14,
   "k": 7,
   "baseline_trials": 6,
   "impossibility": {
@@ -786,6 +1079,33 @@
    ],
    "file": "v14_k9_b4.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 14,
+  "k": 10,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 2,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 48,
+    "2": 42,
+    "3": 1
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v14_k10_b3.txt",
+   "source": "orbit_anneal"
   }
  },
  {
@@ -921,6 +1241,60 @@
   }
  },
  {
+  "v": 15,
+  "k": 9,
+  "baseline_trials": 4,
+  "impossibility": {
+   "cap": 2,
+   "b": 5,
+   "kind": "full"
+  },
+  "balanced": {
+   "trials": 5,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 35,
+    "2": 65,
+    "3": 5
+   },
+   "item_use": [
+    3,
+    3
+   ],
+   "file": "v15_k9_b5.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 25.0
+  }
+ },
+ {
+  "v": 15,
+  "k": 10,
+  "baseline_trials": 3,
+  "impossibility": {
+   "cap": 2,
+   "b": 4,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 3,
+   "lambda_max": 2,
+   "lambda_star": 2,
+   "status": "IDEAL_COVER_CERTIFIED",
+   "pair_histogram": {
+    "1": 75,
+    "2": 30
+   },
+   "item_use": [
+    2,
+    2
+   ],
+   "file": "v15_k10_b3.txt",
+   "source": "orbit_anneal"
+  }
+ },
+ {
   "v": 16,
   "k": 3,
   "baseline_trials": 43,
@@ -982,6 +1356,34 @@
  },
  {
   "v": 16,
+  "k": 6,
+  "baseline_trials": 10,
+  "impossibility": {
+   "cap": 2,
+   "b": 12,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 11,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 79,
+    "2": 37,
+    "3": 4
+   },
+   "item_use": [
+    4,
+    5
+   ],
+   "file": "v16_k6_b11.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 10.0
+  }
+ },
+ {
+  "v": 16,
   "k": 7,
   "baseline_trials": 8,
   "impossibility": {
@@ -1033,6 +1435,33 @@
    ],
    "file": "v16_k8_b6.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 16,
+  "k": 9,
+  "baseline_trials": 5,
+  "impossibility": {
+   "cap": 2,
+   "b": 6,
+   "kind": "full"
+  },
+  "strict": {
+   "trials": 5,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 79,
+    "2": 22,
+    "3": 19
+   },
+   "item_use": [
+    2,
+    3
+   ],
+   "file": "v16_k9_b5.txt",
+   "source": "orbit_anneal"
   }
  },
  {
@@ -1396,6 +1825,34 @@
  },
  {
   "v": 18,
+  "k": 8,
+  "baseline_trials": 7,
+  "impossibility": {
+   "cap": 2,
+   "b": 9,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 8,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 100,
+    "2": 35,
+    "3": 18
+   },
+   "item_use": [
+    3,
+    4
+   ],
+   "file": "v18_k8_b8.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 14.3
+  }
+ },
+ {
+  "v": 18,
   "k": 9,
   "baseline_trials": 6,
   "impossibility": {
@@ -1419,6 +1876,34 @@
    ],
    "file": "v18_k9_b6.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 18,
+  "k": 10,
+  "baseline_trials": 5,
+  "impossibility": {
+   "cap": 2,
+   "b": 6,
+   "kind": "full"
+  },
+  "balanced": {
+   "trials": 6,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 57,
+    "2": 75,
+    "3": 21
+   },
+   "item_use": [
+    3,
+    4
+   ],
+   "file": "v18_k10_b6.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 20.0
   }
  },
  {
@@ -1915,6 +2400,34 @@
    ],
    "file": "v21_k8_b11.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 21,
+  "k": 9,
+  "baseline_trials": 7,
+  "impossibility": {
+   "cap": 2,
+   "b": 9,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 9,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 117,
+    "2": 72,
+    "3": 21
+   },
+   "item_use": [
+    3,
+    4
+   ],
+   "file": "v21_k9_b9.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 28.6
   }
  },
  {
@@ -2492,6 +3005,35 @@
  },
  {
   "v": 24,
+  "k": 8,
+  "baseline_trials": 12,
+  "impossibility": {
+   "cap": 2,
+   "b": 15,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 14,
+   "lambda_max": 4,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 187,
+    "2": 64,
+    "3": 23,
+    "4": 2
+   },
+   "item_use": [
+    4,
+    5
+   ],
+   "file": "v24_k8_b14.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 16.7
+  }
+ },
+ {
+  "v": 24,
   "k": 9,
   "baseline_trials": 11,
   "impossibility": {
@@ -2516,6 +3058,34 @@
    ],
    "file": "v24_k9_b11.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 24,
+  "k": 10,
+  "baseline_trials": 8,
+  "impossibility": {
+   "cap": 2,
+   "b": 10,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 10,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 138,
+    "2": 102,
+    "3": 36
+   },
+   "item_use": [
+    4,
+    5
+   ],
+   "file": "v24_k10_b10.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 25.0
   }
  },
  {
@@ -2601,6 +3171,35 @@
    ],
    "file": "v25_k7_b18.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 25,
+  "k": 9,
+  "baseline_trials": 11,
+  "impossibility": {
+   "cap": 2,
+   "b": 14,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 12,
+   "lambda_max": 4,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 202,
+    "2": 68,
+    "3": 26,
+    "4": 4
+   },
+   "item_use": [
+    4,
+    5
+   ],
+   "file": "v25_k9_b12.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 9.1
   }
  },
  {
@@ -2917,6 +3516,34 @@
    ],
    "file": "v27_k8_b17.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 27,
+  "k": 9,
+  "baseline_trials": 12,
+  "impossibility": {
+   "cap": 2,
+   "b": 15,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 15,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 203,
+    "2": 107,
+    "3": 41
+   },
+   "item_use": [
+    4,
+    6
+   ],
+   "file": "v27_k9_b15.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 25.0
   }
  },
  {
@@ -3539,7 +4166,7 @@
     7
    ],
    "file": "v31_k7_b31.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 19.2
   }
  },
@@ -4030,6 +4657,63 @@
   }
  },
  {
+  "v": 34,
+  "k": 9,
+  "baseline_trials": 19,
+  "impossibility": {
+   "cap": 2,
+   "b": 23,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 23,
+   "lambda_max": 4,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 357,
+    "2": 143,
+    "3": 59,
+    "4": 2
+   },
+   "item_use": [
+    5,
+    7
+   ],
+   "file": "v34_k9_b23.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 21.1
+  }
+ },
+ {
+  "v": 34,
+  "k": 10,
+  "baseline_trials": 16,
+  "impossibility": {
+   "cap": 2,
+   "b": 20,
+   "kind": "orbit_exhausted"
+  },
+  "balanced": {
+   "trials": 20,
+   "lambda_max": 3,
+   "lambda_star": 2,
+   "status": "LOWER_BOUND_GAP",
+   "pair_histogram": {
+    "1": 302,
+    "2": 179,
+    "3": 80
+   },
+   "item_use": [
+    5,
+    7
+   ],
+   "file": "v34_k10_b20.txt",
+   "source": "orbit_anneal",
+   "extra_trials_pct": 25.0
+  }
+ },
+ {
   "v": 35,
   "k": 3,
   "baseline_trials": 199,
@@ -4376,7 +5060,7 @@
     5
    ],
    "file": "v36_k10_b18.txt",
-   "source": "orbit_anneal"
+   "source": "swap_sweep"
   }
  },
  {
@@ -4692,6 +5376,16 @@
    ],
    "file": "v38_k9_b25.txt",
    "source": "swap_sweep"
+  }
+ },
+ {
+  "v": 38,
+  "k": 10,
+  "baseline_trials": 19,
+  "impossibility": {
+   "cap": 2,
+   "b": 23,
+   "kind": "orbit_exhausted"
   }
  },
  {
@@ -5223,7 +5917,7 @@
     8
    ],
    "file": "v41_k8_b41.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 20.6
   }
  },
@@ -5355,7 +6049,7 @@
     9
    ],
    "file": "v42_k7_b49.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 16.7
   }
  },
@@ -5547,7 +6241,7 @@
     8
    ],
    "file": "v43_k8_b43.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 16.2
   }
  },
@@ -6450,7 +7144,7 @@
     10
    ],
    "file": "v48_k7_b64.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 16.4
   }
  },
@@ -7110,7 +7804,7 @@
     11
    ],
    "file": "v52_k7_b78.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 14.7
   }
  },
@@ -7525,7 +8219,7 @@
     11
    ],
    "file": "v54_k7_b81.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 11.0
   }
  },
@@ -7718,7 +8412,7 @@
     12
    ],
    "file": "v55_k7_b88.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 15.8
   }
  },
@@ -7917,7 +8611,7 @@
     11
    ],
    "file": "v56_k7_b84.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 5.0
   }
  },
@@ -7939,7 +8633,7 @@
     10
    ],
    "file": "v56_k8_b63.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 12.5
   }
  },
@@ -7961,7 +8655,7 @@
     9
    ],
    "file": "v56_k9_b56.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 14.3
   }
  },
@@ -8251,7 +8945,7 @@
     19
    ],
    "file": "v58_k7_b95.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 14.5
   }
  },
@@ -8273,7 +8967,7 @@
     10
    ],
    "file": "v58_k8_b67.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 1.5
   }
  },
@@ -8427,7 +9121,7 @@
     15
    ],
    "file": "v59_k6_b131.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 10.1
   }
  },
@@ -8697,7 +9391,7 @@
     12
    ],
    "file": "v60_k7_b100.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 9.9
   }
  },
@@ -8801,7 +9495,7 @@
     16
    ],
    "file": "v61_k6_b139.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 5.3
   }
  },
@@ -8936,7 +9630,7 @@
     13
    ],
    "file": "v62_k7_b108.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 10.2
   }
  },
@@ -8997,7 +9691,7 @@
     9
    ],
    "file": "v62_k9_b62.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 6.9
   }
  },
@@ -9088,7 +9782,7 @@
     14
    ],
    "file": "v63_k6_b147.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 7.3
   }
  },
@@ -9132,7 +9826,7 @@
     9
    ],
    "file": "v63_k9_b63.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 6.8
   }
  },
@@ -9309,7 +10003,7 @@
     9
    ],
    "file": "v64_k9_b64.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 6.7
   }
  },
@@ -9427,7 +10121,7 @@
     16
    ],
    "file": "v65_k8_b96.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 17.1
   }
  },
@@ -9468,7 +10162,7 @@
     9
    ],
    "file": "v65_k9_b65.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 6.6
   }
  },
@@ -9773,7 +10467,7 @@
     16
    ],
    "file": "v67_k6_b166.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 5.7
   }
  },
@@ -9875,7 +10569,7 @@
     12
    ],
    "file": "v67_k9_b83.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 20.3
   }
  },
@@ -9918,7 +10612,7 @@
     10
    ],
    "file": "v67_k10_b67.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 17.5
   }
  },
@@ -10088,7 +10782,7 @@
     12
    ],
    "file": "v68_k8_b102.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 15.9
   }
  },
@@ -10130,7 +10824,7 @@
     12
    ],
    "file": "v68_k9_b80.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 12.7
   }
  },
@@ -10172,7 +10866,7 @@
     10
    ],
    "file": "v68_k10_b68.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 17.2
   }
  },
@@ -10570,7 +11264,7 @@
     12
    ],
    "file": "v70_k8_b105.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 14.1
   }
  },
@@ -10635,7 +11329,7 @@
     10
    ],
    "file": "v70_k10_b70.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 16.7
   }
  },
@@ -10811,7 +11505,7 @@
     10
    ],
    "file": "v71_k10_b71.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 16.4
   }
  },
@@ -10961,7 +11655,7 @@
     10
    ],
    "file": "v72_k10_b72.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 16.1
   }
  },
@@ -11258,7 +11952,7 @@
     13
    ],
    "file": "v74_k9_b100.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 20.5
   }
  },
@@ -11388,7 +12082,7 @@
     14
    ],
    "file": "v75_k7_b150.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 7.1
   }
  },
@@ -11450,7 +12144,7 @@
     12
    ],
    "file": "v75_k9_b100.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 19.0
   }
  },
@@ -11493,7 +12187,7 @@
     10
    ],
    "file": "v75_k10_b75.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 5.6
   }
  },
@@ -11603,7 +12297,7 @@
     14
    ],
    "file": "v76_k7_b152.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 7.0
   }
  },
@@ -11695,7 +12389,7 @@
     10
    ],
    "file": "v76_k10_b76.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 5.6
   }
  },
@@ -11805,7 +12499,7 @@
     19
    ],
    "file": "v77_k7_b171.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 19.6
   }
  },
@@ -11847,7 +12541,7 @@
     19
    ],
    "file": "v77_k8_b133.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 15.7
   }
  },
@@ -11911,7 +12605,7 @@
     10
    ],
    "file": "v77_k10_b77.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 5.5
   }
  },
@@ -12364,7 +13058,7 @@
     16
    ],
    "file": "v80_k7_b180.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 11.8
   }
  },
@@ -12437,7 +13131,7 @@
     20
    ],
    "file": "v81_k5_b324.txt",
-   "source": "orbit_anneal"
+   "source": "swap_sweep"
   }
  },
  {
@@ -12653,7 +13347,7 @@
     27
    ],
    "file": "v82_k7_b189.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 11.8
   }
  },
@@ -12861,7 +13555,7 @@
     18
    ],
    "file": "v83_k7_b191.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 10.4
   }
  },
@@ -12930,7 +13624,7 @@
     14
    ],
    "file": "v83_k10_b102.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 20.0
   }
  },
@@ -13172,7 +13866,7 @@
     18
    ],
    "file": "v85_k6_b255.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 1.2
   }
  },
@@ -13369,7 +14063,7 @@
     18
    ],
    "file": "v86_k7_b215.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 15.6
   }
  },
@@ -13480,7 +14174,7 @@
     18
    ],
    "file": "v87_k6_b261.txt",
-   "source": "orbit_anneal"
+   "source": "swap_sweep"
   }
  },
  {
@@ -13518,7 +14212,7 @@
     18
    ],
    "file": "v87_k7_b207.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 10.7
   }
  },
@@ -13652,7 +14346,7 @@
     18
    ],
    "file": "v88_k7_b220.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 16.4
   }
  },
@@ -13941,7 +14635,7 @@
     18
    ],
    "file": "v90_k7_b225.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 16.6
   }
  },
@@ -14436,7 +15130,7 @@
     16
    ],
    "file": "v93_k8_b186.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 12.7
   }
  },
@@ -14610,7 +15304,7 @@
     16
    ],
    "file": "v94_k8_b188.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 12.6
   }
  },
@@ -14719,7 +15413,7 @@
     23
    ],
    "file": "v95_k6_b333.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 10.6
   }
  },
@@ -14791,7 +15485,7 @@
     16
    ],
    "file": "v95_k8_b190.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 11.8
   }
  },
@@ -14964,7 +15658,7 @@
     19
    ],
    "file": "v96_k7_b256.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 12.8
   }
  },
@@ -15274,7 +15968,7 @@
     16
    ],
    "file": "v98_k8_b196.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 5.9
   }
  },
@@ -15563,7 +16257,7 @@
     20
    ],
    "file": "v100_k7_b275.txt",
-   "source": "orbit_anneal",
+   "source": "swap_sweep",
    "extra_trials_pct": 13.2
   }
  },
