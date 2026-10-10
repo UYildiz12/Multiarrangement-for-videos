@@ -9,7 +9,9 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.r2_storage import REF_PREFIX, resolve_ref
 
 
 # Enums
@@ -121,6 +123,16 @@ class StimulusResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    @model_validator(mode="after")
+    def _resolve_r2_refs(self) -> "StimulusResponse":
+        """Files in R2 are stored as references and served as fresh presigned links."""
+        self.media_url = resolve_ref(self.media_url)
+        self.thumbnail_url = resolve_ref(self.thumbnail_url)
+        return self
+
+
+_MEDIA_URL_PREFIXES = ("https://", "http://", "blob:", "data:image/", REF_PREFIX)
+
 
 class StimulusUploadResponse(BaseModel):
     """Response after initiating stimulus upload."""
@@ -139,6 +151,17 @@ class StimulusCreate(BaseModel):
     media_storage_path: Optional[str] = None
     thumbnail_storage_path: Optional[str] = None
     duration_seconds: Optional[float] = None
+
+    @field_validator("media_url", "thumbnail_url")
+    @classmethod
+    def _check_url(cls, value: Optional[str]) -> Optional[str]:
+        """Links to files hosted elsewhere must be web addresses (no javascript: or file: URLs)."""
+        if not value:
+            return value
+        value = value.strip()
+        if value.startswith(_MEDIA_URL_PREFIXES) or (value.startswith("/") and not value.startswith("//")):
+            return value
+        raise ValueError("media links must start with https:// (or be a path on this site)")
 
 
 class StimulusBatchCreate(BaseModel):
@@ -161,11 +184,19 @@ class SignedUploadRequest(BaseModel):
 
 
 class SignedUploadResponse(BaseModel):
-    """Where the browser uploads the file (supabase-js ``uploadToSignedUrl``)."""
+    """Where the browser uploads the file.
+
+    ``provider`` "supabase": supabase-js ``uploadToSignedUrl`` with ``path`` and
+    ``token``. ``provider`` "r2": a plain PUT of the file to ``signed_url`` with
+    its declared Content-Type; register ``media_url`` and play ``read_url``.
+    """
+    provider: str = "supabase"
     path: str
-    token: str
+    token: str = ""
     signed_url: str
     bucket: str
+    media_url: Optional[str] = None
+    read_url: Optional[str] = None
 
 
 # Session schemas

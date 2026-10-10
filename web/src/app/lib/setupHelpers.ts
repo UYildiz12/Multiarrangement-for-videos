@@ -19,6 +19,8 @@ export interface SetupVideoFileLike {
   thumbnailDataUrl?: string;
   mediaStoragePath?: string;
   thumbnailStoragePath?: string;
+  registerUrl?: string;
+  thumbnailRegisterUrl?: string;
 }
 
 export const IMAGE_DURATION_FALLBACK = 0.5;
@@ -92,6 +94,52 @@ export function detectUploadedMediaType(file: Pick<File, "name" | "type">): Setu
   if (AUDIO_UPLOAD_EXTENSIONS.has(ext)) return "audio";
   if (IMAGE_UPLOAD_EXTENSIONS.has(ext)) return "image";
   return null;
+}
+
+export interface MediaLink {
+  url: string;
+  name: string;
+  mediaType: SetupMediaType;
+}
+
+/**
+ * Parse pasted links, one per line: a web address, optionally followed by a label.
+ * The media type comes from the file extension; links without one get *fallbackType*.
+ */
+export function parseMediaLinks(
+  text: string,
+  fallbackType: SetupMediaType = "video"
+): { links: MediaLink[]; errors: string[] } {
+  const links: MediaLink[] = [];
+  const errors: string[] = [];
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) return;
+    const [address, ...rest] = line.split(/\s+/);
+    let parsed: URL;
+    try {
+      parsed = new URL(address);
+    } catch {
+      errors.push(`Line ${i + 1}: not a web address`);
+      return;
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      errors.push(`Line ${i + 1}: links must start with https://`);
+      return;
+    }
+    const lastSegment = decodeURIComponent(parsed.pathname.split("/").filter(Boolean).pop() || "");
+    const ext = getFileExtension(lastSegment);
+    const mediaType: SetupMediaType = VIDEO_UPLOAD_EXTENSIONS.has(ext)
+      ? "video"
+      : AUDIO_UPLOAD_EXTENSIONS.has(ext)
+        ? "audio"
+        : IMAGE_UPLOAD_EXTENSIONS.has(ext)
+          ? "image"
+          : fallbackType;
+    const label = rest.join(" ").trim() || lastSegment.replace(/\.[^/.]+$/, "") || `item ${links.length + 1}`;
+    links.push({ url: parsed.toString(), name: label, mediaType });
+  });
+  return { links, errors };
 }
 
 export function coalesceDuration(value: number | null | undefined, mediaType: SetupMediaType): number {

@@ -18,6 +18,7 @@ import {
     getFileExtension,
     hasUnhostableCustomMedia,
     serializeVideosForSession,
+    parseMediaLinks,
 } from "../lib/setupHelpers";
 
 type Paradigm = "setcover" | "adaptive" | "pairwise";
@@ -44,6 +45,8 @@ interface VideoFile {
     thumbnailDataUrl?: string;
     mediaStoragePath?: string;
     thumbnailStoragePath?: string;
+    registerUrl?: string;
+    thumbnailRegisterUrl?: string;
 }
 
 interface HostedStudyIdentity {
@@ -162,7 +165,10 @@ export default function SetupPage() {
     const [inviteLink, setInviteLink] = useState<string | null>(null);
     const [inviteError, setInviteError] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const [uploadMode, setUploadMode] = useState<"local" | "supabase">("local");
+    const [uploadMode, setUploadMode] = useState<"local" | "supabase" | "links">("local");
+    const [linksText, setLinksText] = useState("");
+    const [linksFallbackType, setLinksFallbackType] = useState<"video" | "audio" | "image">("video");
+    const [linksError, setLinksError] = useState<string | null>(null);
     const supabaseAvailable = Boolean(getSupabaseClient());
 
     // Chain integration state
@@ -337,6 +343,36 @@ export default function SetupPage() {
         setProcessingUploads(false);
     };
 
+    // Links to files the experimenter hosts elsewhere (OSF, a university server, ...): nothing is uploaded.
+    const handleAddLinks = async () => {
+        const { links, errors } = parseMediaLinks(linksText, linksFallbackType);
+        setLinksError(errors.length ? errors.join("; ") : null);
+        if (links.length === 0) return;
+        setProcessingUploads(true);
+        const added: VideoFile[] = [];
+        for (const link of links) {
+            const durationSeconds = link.mediaType === "image"
+                ? null
+                : await getDurationFromUrl(link.url, link.mediaType === "audio" ? "audio" : "video", false);
+            const thumbnail = link.mediaType === "image"
+                ? link.url
+                : link.mediaType === "audio"
+                    ? "/audio.png"
+                    : (await captureLinkedThumbnail(link.url)) ?? undefined;
+            added.push({
+                name: link.name,
+                url: link.url,
+                thumbnail,
+                selected: true,
+                mediaType: link.mediaType,
+                durationSeconds: coalesceDuration(durationSeconds, link.mediaType),
+            });
+        }
+        setConfig((prev) => ({ ...prev, videos: [...prev.videos, ...added] }));
+        setLinksText("");
+        setProcessingUploads(false);
+    };
+
     const selectedCount = videoSource === "preset"
         ? classicVideos.filter((v) => v.selected).length
         : config.videos.length;
@@ -460,8 +496,8 @@ export default function SetupPage() {
                     ordinal: i,
                     filename: v.name,
                     media_type: v.mediaType,
-                    media_url: v.url,
-                    thumbnail_url: v.thumbnail ?? null,
+                    media_url: v.registerUrl ?? v.url,
+                    thumbnail_url: v.thumbnailRegisterUrl ?? v.thumbnail ?? null,
                     media_storage_path: v.mediaStoragePath ?? null,
                     thumbnail_storage_path: v.thumbnailStoragePath ?? null,
                     duration_seconds: v.durationSeconds ?? null,
@@ -516,8 +552,8 @@ export default function SetupPage() {
             setPublishError(`Please select at least ${minItemsRequired} items.`);
             return;
         }
-        if (videoSource === "upload" && uploadMode !== "supabase") {
-            setPublishError("Custom uploads are local to your browser. Use preset media or upload to hosted storage first.");
+        if (videoSource === "upload" && uploadMode === "local") {
+            setPublishError("Custom uploads are local to your browser. Use preset media, upload to hosted storage, or paste links to your files.");
             return;
         }
 
@@ -605,8 +641,8 @@ export default function SetupPage() {
                     ordinal: i,
                     filename: v.name,
                     media_type: v.mediaType,
-                    media_url: v.url,
-                    thumbnail_url: v.thumbnail ?? null,
+                    media_url: v.registerUrl ?? v.url,
+                    thumbnail_url: v.thumbnailRegisterUrl ?? v.thumbnail ?? null,
                     media_storage_path: v.mediaStoragePath ?? null,
                     thumbnail_storage_path: v.thumbnailStoragePath ?? null,
                     duration_seconds: v.durationSeconds ?? null,
@@ -859,7 +895,19 @@ export default function SetupPage() {
                                         disabled={!supabaseAvailable}
                                     />
                                     <label htmlFor="upload-supabase" style={{ color: supabaseAvailable ? "#aaa" : "#555", fontSize: 12 }}>
-                                        Hosted (Supabase)
+                                        Hosted upload
+                                    </label>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                    <input
+                                        id="upload-links"
+                                        type="radio"
+                                        name="upload-mode"
+                                        checked={uploadMode === "links"}
+                                        onChange={() => setUploadMode("links")}
+                                    />
+                                    <label htmlFor="upload-links" style={{ color: "#aaa", fontSize: 12 }}>
+                                        Links to my files
                                     </label>
                                 </div>
                                 {!supabaseAvailable && (
@@ -868,6 +916,43 @@ export default function SetupPage() {
                                     </span>
                                 )}
                             </div>
+                            {uploadMode === "links" && (
+                                <div style={{ marginBottom: 12 }}>
+                                    <p style={{ color: "#888", fontSize: 12, margin: "0 0 8px" }}>
+                                        Paste one link per line, optionally followed by a label. The files stay where you host
+                                        them (OSF, a university web server, GitHub Pages, ...); participants&apos; browsers load
+                                        them from there. Thumbnails appear if the host allows cross-site requests.
+                                    </p>
+                                    <textarea
+                                        value={linksText}
+                                        onChange={(e) => setLinksText(e.target.value)}
+                                        placeholder={"https://example.org/stimuli/clip01.mp4\nhttps://osf.io/abc12/download  Clip 2"}
+                                        rows={5}
+                                        style={{ width: "100%", background: "#111", color: "#ddd", border: "1px solid #444", borderRadius: 6, padding: 8, fontFamily: "monospace", fontSize: 12 }}
+                                    />
+                                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                                        <label htmlFor="links-type" style={{ color: "#888", fontSize: 12 }}>Links without a file extension are</label>
+                                        <select
+                                            id="links-type"
+                                            value={linksFallbackType}
+                                            onChange={(e) => setLinksFallbackType(e.target.value as "video" | "audio" | "image")}
+                                            style={{ background: "#111", color: "#ddd", border: "1px solid #444", borderRadius: 4, fontSize: 12 }}
+                                        >
+                                            <option value="video">video</option>
+                                            <option value="audio">audio</option>
+                                            <option value="image">image</option>
+                                        </select>
+                                        <button
+                                            onClick={handleAddLinks}
+                                            disabled={processingUploads || !linksText.trim()}
+                                            style={{ marginLeft: "auto", padding: "6px 14px", borderRadius: 6, border: "1px solid #00ff88", background: "transparent", color: "#00ff88", fontSize: 12, cursor: "pointer" }}
+                                        >
+                                            {processingUploads ? "Checking..." : "Add links"}
+                                        </button>
+                                    </div>
+                                    {linksError && <p style={{ color: "#ff6b6b", fontSize: 12, marginTop: 6 }}>{linksError}</p>}
+                                </div>
+                            )}
                             <input
                                 ref={fileInputRef}
                                 type="file"
@@ -876,7 +961,7 @@ export default function SetupPage() {
                                 onChange={handleFileSelect}
                                 style={{ display: "none" }}
                             />
-                            <button
+                            {uploadMode !== "links" && <button
                                 onClick={() => fileInputRef.current?.click()}
                                 disabled={processingUploads}
                                 style={{
@@ -891,7 +976,7 @@ export default function SetupPage() {
                                 }}
                             >
                                 {processingUploads ? "Processing..." : "+ Click to add media"}
-                            </button>
+                            </button>}
 
                             {config.videos.length > 0 && (
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 16 }}>
@@ -1513,7 +1598,7 @@ const paradigmBtnStyle = (active: boolean) => ({
     cursor: "pointer" as const,
 });
 
-function getDurationFromUrl(url: string, mediaType: "video" | "audio"): Promise<number | null> {
+function getDurationFromUrl(url: string, mediaType: "video" | "audio", corsMode = true): Promise<number | null> {
     return new Promise((resolve) => {
         const el = document.createElement(mediaType === "audio" ? "audio" : "video");
         let settled = false;
@@ -1525,7 +1610,7 @@ function getDurationFromUrl(url: string, mediaType: "video" | "audio"): Promise<
             el.remove();
         };
         el.preload = "metadata";
-        el.crossOrigin = "anonymous";
+        if (corsMode) el.crossOrigin = "anonymous";
         el.onloadedmetadata = () => {
             const dur = Number.isFinite(el.duration) ? el.duration : null;
             cleanup();
@@ -1597,8 +1682,47 @@ function publicUrlForPath(path: string, supabase: ReturnType<typeof getSupabaseC
 }
 
 interface SignedUpload {
+    provider?: "supabase" | "r2";
     path: string;
     token: string;
+    signed_url: string;
+    media_url?: string | null;
+    read_url?: string | null;
+}
+
+// A thumbnail for a linked video, if its host allows cross-site reads (otherwise the canvas is tainted).
+function captureLinkedThumbnail(url: string): Promise<string | null> {
+    return new Promise((resolve) => {
+        const video = document.createElement("video");
+        let settled = false;
+        const finish = (value: string | null) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            video.removeAttribute("src");
+            video.load();
+            resolve(value);
+        };
+        const timer = window.setTimeout(() => finish(null), 4000);
+        video.preload = "metadata";
+        video.muted = true;
+        video.crossOrigin = "anonymous";
+        video.onloadeddata = () => { video.currentTime = 0.1; };
+        video.onseeked = () => {
+            try {
+                const canvas = document.createElement("canvas");
+                canvas.width = 100; canvas.height = 75;
+                const ctx = canvas.getContext("2d");
+                if (!ctx) return finish(null);
+                ctx.drawImage(video, 0, 0, 100, 75);
+                finish(canvas.toDataURL("image/jpeg", 0.7));
+            } catch {
+                finish(null);
+            }
+        };
+        video.onerror = () => finish(null);
+        video.src = url;
+    });
 }
 
 // The API checks file size, type, stimulus count and the storage quota, then
@@ -1609,14 +1733,21 @@ async function uploadViaSignedUrl(
     kind: "media" | "thumbnail",
     index: number,
     study: HostedStudyIdentity,
-    keyHeaders: Record<string, string>,
-    supabase: NonNullable<ReturnType<typeof getSupabaseClient>>
-): Promise<{ path: string; publicUrl: string }> {
+    keyHeaders: Record<string, string>
+): Promise<{ path: string; publicUrl: string; registerUrl?: string }> {
     const signed = await apiFetch<SignedUpload>(`/api/v1/studies/${study.id}/uploads`, {
         method: "POST",
         headers: keyHeaders,
         body: JSON.stringify({ filename, content_type: body.type, size_bytes: body.size, kind, index }),
     });
+    if (signed.provider === "r2") {
+        // Presigned PUT bound to the declared type and size; the stimulus is registered as an r2: reference.
+        const res = await fetch(signed.signed_url, { method: "PUT", headers: { "Content-Type": body.type }, body });
+        if (!res.ok) throw new Error(`Upload of ${filename} failed (HTTP ${res.status})`);
+        return { path: signed.path, publicUrl: signed.read_url || "", registerUrl: signed.media_url || undefined };
+    }
+    const supabase = getSupabaseClient();
+    if (!supabase) throw new Error("Supabase client not configured");
     const { error } = await supabase.storage
         .from(SUPABASE_BUCKET)
         .uploadToSignedUrl(signed.path, signed.token, body, { cacheControl: "3600", contentType: body.type });
@@ -1641,11 +1772,6 @@ async function materializeStudyVideos(
         return videos;
     }
 
-    const supabase = getSupabaseClient();
-    if (!supabase) {
-        throw new Error("Supabase client not configured");
-    }
-
     const uploaded: VideoFile[] = [];
     for (const [index, video] of videos.entries()) {
         if (!video.sourceFile) {
@@ -1659,12 +1785,12 @@ async function materializeStudyVideos(
             "media",
             index,
             study,
-            keyHeaders,
-            supabase
+            keyHeaders
         );
 
         let thumbnailUrl = video.thumbnail;
         let thumbnailStoragePath = video.thumbnailStoragePath;
+        let thumbnailRegisterUrl: string | undefined;
         if (video.mediaType === "video" && video.thumbnailDataUrl) {
             const thumb = await uploadViaSignedUrl(
                 dataUrlToBlob(video.thumbnailDataUrl),
@@ -1672,14 +1798,15 @@ async function materializeStudyVideos(
                 "thumbnail",
                 index,
                 study,
-                keyHeaders,
-                supabase
+                keyHeaders
             );
             thumbnailUrl = thumb.publicUrl;
             thumbnailStoragePath = thumb.path;
+            thumbnailRegisterUrl = thumb.registerUrl;
         } else if (video.mediaType === "image") {
             thumbnailUrl = media.publicUrl;
             thumbnailStoragePath = media.path;
+            thumbnailRegisterUrl = media.registerUrl;
         }
 
         uploaded.push({
@@ -1688,6 +1815,8 @@ async function materializeStudyVideos(
             thumbnail: thumbnailUrl,
             mediaStoragePath: media.path,
             thumbnailStoragePath,
+            registerUrl: media.registerUrl,
+            thumbnailRegisterUrl,
         });
     }
 

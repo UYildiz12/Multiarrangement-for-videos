@@ -10,8 +10,29 @@ import {
   getFileExtension,
   hasUnhostableCustomMedia,
   parseCustomInstructions,
+  parseMediaLinks,
   serializeVideosForSession,
 } from "./setupHelpers";
+
+describe("parseMediaLinks", () => {
+  it("reads one link per line with optional labels and types from extensions", () => {
+    const { links, errors } = parseMediaLinks(
+      "https://osf.io/x/clip%20one.MP4\n\n  https://example.org/a/sound.wav  Dog barking \nhttps://example.org/pic.png?raw=1\n"
+    );
+    expect(errors).toEqual([]);
+    expect(links).toEqual([
+      { url: "https://osf.io/x/clip%20one.MP4", name: "clip one", mediaType: "video" },
+      { url: "https://example.org/a/sound.wav", name: "Dog barking", mediaType: "audio" },
+      { url: "https://example.org/pic.png?raw=1", name: "pic", mediaType: "image" },
+    ]);
+  });
+
+  it("uses the fallback type for links without an extension and rejects other schemes", () => {
+    const { links, errors } = parseMediaLinks("https://osf.io/abc12/download\njavascript:alert(1)\nnot a link", "audio");
+    expect(links).toEqual([{ url: "https://osf.io/abc12/download", name: "download", mediaType: "audio" }]);
+    expect(errors).toEqual(["Line 2: links must start with https://", "Line 3: not a web address"]);
+  });
+});
 
 describe("setupHelpers", () => {
   it("parses custom instruction blocks", () => {

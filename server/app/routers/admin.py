@@ -24,7 +24,7 @@ from app.routers.studies import (
     list_stimuli_for_study,
     list_storage_paths_for_study,
 )
-from app.supabase_storage import delete_storage_paths
+from app.object_storage import delete_storage_paths
 
 router = APIRouter(tags=["admin"])
 

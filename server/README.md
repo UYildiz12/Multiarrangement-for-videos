@@ -84,8 +84,9 @@ All limits are environment variables read on each request, so they can be change
 | `MAX_REQUEST_BYTES` | `5242880` (5 MB) | request body size; larger bodies get HTTP 413 |
 | `MAX_STUDIES_PER_OWNER` | `100` | studies per experimenter key (HTTP 409) |
 | `MAX_STIMULI_PER_STUDY` | `300` | stimuli per study, and media uploads issued per study (HTTP 409); also caps `n_stimuli` of the public demo |
-| `MAX_UPLOAD_BYTES` | `52428800` (50 MB) | declared size of one uploaded file (HTTP 413) |
-| `MAX_STORAGE_BYTES_PER_OWNER` | `1073741824` (1 GB) | total size of the uploads issued to one experimenter key (HTTP 409) |
+| `MAX_UPLOAD_BYTES` | `20971520` (20 MB) | declared size of one uploaded file (HTTP 413) |
+| `MAX_STORAGE_BYTES_PER_OWNER` | `157286400` (150 MB) | total size of the uploads issued to one experimenter key (HTTP 409) |
+| `MAX_STORAGE_BYTES_TOTAL` | `838860800` (800 MB) | total size of the uploads issued to all keys together (HTTP 507), below the 1 GB of Supabase's free plan; raise it with R2 (below) |
 
 - Rate limiting is an in-memory sliding window (`app/ratelimit.py`). Exceeding a limit returns HTTP 429 with a `Retry-After` header. Counters live in the API process, reset on restart and are per instance, which matches the single Railway instance.
 - The client IP is taken from `X-Forwarded-For`, counting `TRUSTED_PROXY_HOPS` entries from the right (default `1`: the rightmost entry, which Railway's proxy appends and a client cannot forge; entries further left are client-supplied). Set it to the number of proxies you control in front of the API, or to `0` to ignore the header and use the TCP peer address. The TCP peer is also used when the header is missing or has fewer entries than `TRUSTED_PROXY_HOPS`. Users behind one university NAT share a budget; raise the limits if that becomes a problem.
@@ -98,10 +99,10 @@ All limits are environment variables read on each request, so they can be change
 
 ## Hosted media uploads
 
-Media goes from the browser straight to Supabase Storage; the API only sees small JSON requests.
+Media goes from the browser straight to storage (Supabase Storage, or Cloudflare R2 when it is configured); the API only sees small JSON requests.
 
 1. The web app asks `POST /api/v1/studies/{study_id}/uploads` (experimenter key required, caller must own the study) for one file, sending `filename`, `content_type`, `size_bytes`, `kind` (`media` or `thumbnail`) and `index`.
-2. The API checks the declared size against `MAX_UPLOAD_BYTES`, the type against `video/*`, `audio/*` and `image/*`, the number of uploads in the study against `MAX_STIMULI_PER_STUDY` (thumbnails are counted separately) and the owner's total against `MAX_STORAGE_BYTES_PER_OWNER`. It then asks Supabase Storage for a signed upload URL with the service-role key, for a path it chooses under `owners/{owner_id}/studies/{study_id}/`.
+2. The API checks the declared size against `MAX_UPLOAD_BYTES`, the type against `video/*`, `audio/*` and `image/*`, the number of uploads in the study against `MAX_STIMULI_PER_STUDY` (thumbnails are counted separately) the owner's total against `MAX_STORAGE_BYTES_PER_OWNER` and everyone's total against `MAX_STORAGE_BYTES_TOTAL`. It then asks Supabase Storage for a signed upload URL with the service-role key, for a path it chooses under `owners/{owner_id}/studies/{study_id}/`.
 3. The browser uploads the file with supabase-js `uploadToSignedUrl` and registers the stimulus with `POST /api/v1/studies/{study_id}/stimuli` as before. Storage paths outside the study's folder are rejected, because study deletion removes them with the service-role key. Playback still uses public URLs.
 
 Every issued upload is recorded in the `uploads` table (`supabase/migrations/005_upload_ledger.sql`; the API also creates the table on startup when it is missing). The quota is computed from this ledger rather than from the stimuli table because files are uploaded before they are registered: counting only registered stimuli would let a client request upload URLs without ever registering them. The ledger also lets study deletion remove files that were uploaded but never registered. Deleting a study deletes its ledger rows and frees the quota. Sizes are those declared by the client; the bucket's own size limit enforces the real maximum per file.
@@ -113,6 +114,50 @@ Do these once the API (with `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` set o
 1. **Storage > Buckets > `stimuli` > Edit bucket**: keep it public (playback uses public URLs), turn on "Restrict file upload size" and set it to 50 MB, and set "Allowed MIME types" to `video/*, audio/*, image/*`. (List exact image types instead of `image/*` if you also want to block SVG files.)
 2. **Storage > Policies** (policies on `storage.objects`): delete, or restrict to the service role, every policy that lets the `anon` (or `public`/`authenticated`) role INSERT, UPDATE or DELETE objects in the `stimuli` bucket. Signed upload URLs and the service-role key do not need these policies. Public URLs do not need an `anon` SELECT policy either, and such a policy lets anyone list every file in the bucket, so remove it unless something else relies on it.
 3. Check: an upload from the browser console with only the anon key (`supabase.storage.from("stimuli").upload("test.txt", new Blob(["x"]))`) should now fail, while publishing a study with uploaded media from the setup page still works.
+
+### Linked media (no upload)
+
+Experimenters can also paste links to files they host themselves (OSF, a university web server, GitHub Pages, their own
+bucket). Nothing is uploaded: the stimulus is registered with that `media_url`, and participants' browsers load it from
+there, so it uses neither storage nor bandwidth of this deployment. Registered links must start with `https://` (or
+`http://`, `blob:`, `data:image/`, or be a path on the site); `javascript:`, `file:` and protocol-relative links are
+rejected. Videos play from any host; thumbnails are captured only when the host allows cross-site reads (CORS), and the
+arena shows the media type otherwise.
+
+### Cloudflare R2 (optional)
+
+The free Supabase plan has 1 GB of storage and 5 GB of downloads a month. Cloudflare R2 has 10 GB of storage free and no
+download fees. When all four variables below are set, new uploads go to R2 instead of Supabase Storage (files uploaded
+earlier stay where they are and keep working):
+
+| Variable | Value |
+| --- | --- |
+| `R2_ACCOUNT_ID` | the Cloudflare account ID (R2 overview page) |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | an R2 API token with "Object Read & Write" on the bucket |
+| `R2_BUCKET` | the bucket name |
+
+The bucket stays private. The API returns a presigned PUT URL (valid 15 minutes) that binds the declared content type
+and size, so R2 itself rejects a file that differs from what the quota was checked against. Stimuli are stored as
+`r2:<object key>` references, and every API response that returns stimuli turns them into presigned GET URLs valid for
+24 hours. Study deletion removes the study's keys from R2 (one DeleteObjects request per 1,000 keys) as well as from
+Supabase Storage. Requests are signed with AWS Signature Version 4 (`app/r2_storage.py`, standard library only; the
+tests check it against the worked examples in the Amazon S3 documentation).
+
+The browser uploads to R2 directly and reads thumbnails from it, so the bucket needs this CORS policy (R2 > bucket >
+Settings > CORS policy):
+
+```json
+[
+  {
+    "AllowedOrigins": ["https://multiarrangement.com", "https://www.multiarrangement.com", "https://multiarrangement.vercel.app"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
+    "AllowedHeaders": ["content-type"],
+    "MaxAgeSeconds": 3600
+  }
+]
+```
+
+With R2 on, raise `MAX_STORAGE_BYTES_TOTAL` to about 9 GB (`9663676416`) and, if wanted, the per-key and per-file limits.
 
 ## Health checks and keep-alive
 

@@ -49,9 +49,14 @@ def max_stimuli_per_study() -> int:
 
 def max_upload_bytes() -> int:
     """Largest single media file an experimenter may upload to Storage."""
-    return env_int("MAX_UPLOAD_BYTES", 50 * MB)
+    return env_int("MAX_UPLOAD_BYTES", 20 * MB)
 
 
 def max_storage_bytes_per_owner() -> int:
     """Total upload volume allowed per experimenter key."""
-    return env_int("MAX_STORAGE_BYTES_PER_OWNER", 1 * GB)
+    return env_int("MAX_STORAGE_BYTES_PER_OWNER", 150 * MB)
+
+
+def max_storage_bytes_total() -> int:
+    """Upload volume allowed across all experimenter keys (the free Supabase plan has 1 GB of storage)."""
+    return env_int("MAX_STORAGE_BYTES_TOTAL", 800 * MB)

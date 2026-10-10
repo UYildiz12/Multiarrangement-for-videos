@@ -21,13 +21,15 @@ def test_default_limits(monkeypatch):
         "MAX_STIMULI_PER_STUDY",
         "MAX_UPLOAD_BYTES",
         "MAX_STORAGE_BYTES_PER_OWNER",
+        "MAX_STORAGE_BYTES_TOTAL",
     ):
         monkeypatch.delenv(name, raising=False)
     assert limits.max_request_bytes() == 5 * 1024 * 1024
     assert limits.max_studies_per_owner() == 100
     assert limits.max_stimuli_per_study() == 300
-    assert limits.max_upload_bytes() == 50 * 1024 * 1024
-    assert limits.max_storage_bytes_per_owner() == 1024 * 1024 * 1024
+    assert limits.max_upload_bytes() == 20 * 1024 * 1024
+    assert limits.max_storage_bytes_per_owner() == 150 * 1024 * 1024
+    assert limits.max_storage_bytes_total() == 800 * 1024 * 1024
 
     monkeypatch.setenv("MAX_STUDIES_PER_OWNER", "not-a-number")
     assert limits.max_studies_per_owner() == 100

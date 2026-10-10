@@ -16,15 +16,17 @@ from app.limits import (
     format_bytes,
     max_stimuli_per_study,
     max_storage_bytes_per_owner,
+    max_storage_bytes_total,
     max_studies_per_owner,
     max_upload_bytes,
 )
 from app.routers.experimenter import get_optional_owner, get_required_owner
+from app import r2_storage
+from app.object_storage import delete_storage_paths
 from app.supabase_storage import (
     StorageNotConfiguredError,
     StorageRequestError,
     create_signed_upload_url,
-    delete_storage_paths,
     storage_bucket,
     study_storage_prefix,
 )
@@ -296,7 +298,9 @@ async def register_stimuli(
     # stay inside this study's folder.
     prefix = study_storage_prefix(study["owner_id"], study_id)
     for stim in payload.stimuli:
-        for path in (stim.media_storage_path, stim.thumbnail_storage_path):
+        refs = [u[len(r2_storage.REF_PREFIX):] for u in (stim.media_url, stim.thumbnail_url)
+                if u and u.startswith(r2_storage.REF_PREFIX)]
+        for path in (stim.media_storage_path, stim.thumbnail_storage_path, *refs):
             if path and (not path.startswith(prefix) or ".." in path):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -345,11 +349,12 @@ def create_signed_upload(
     payload: SignedUploadRequest,
     owner_id: UUID = Depends(get_required_owner),
 ) -> SignedUploadResponse:
-    """Issue a signed Supabase Storage upload URL for one file of this study.
+    """Issue a signed upload URL for one file of this study.
 
-    The declared size and type are checked here; the bucket's own size limit
-    and MIME allow-list enforce them on the actual upload. A plain ``def`` so
-    the blocking Storage request runs in the threadpool.
+    The file goes to Cloudflare R2 when it is configured (the presigned PUT
+    binds the declared type and size) and to Supabase Storage otherwise (the
+    bucket's own size limit and MIME allow-list enforce them). A plain ``def``
+    so the blocking Storage request runs in the threadpool.
     """
     study = get_study(study_id)
     if study is None:
@@ -384,6 +389,9 @@ def create_signed_upload(
                 )
             ).scalar_one()
         )
+        total_bytes = int(
+            conn.execute(select(func.coalesce(func.sum(uploads_table.c.size_bytes), 0))).scalar_one()
+        )
 
     max_files = max_stimuli_per_study()
     if max_files and same_kind >= max_files:
@@ -401,7 +409,28 @@ def create_signed_upload(
             ),
         )
 
+    total_cap = max_storage_bytes_total()
+    if total_cap and total_bytes + payload.size_bytes > total_cap:
+        raise HTTPException(
+            status_code=507,  # Insufficient Storage
+            detail=(
+                "The service's shared upload storage is full. Paste links to files you host yourself "
+                "(for example on OSF or a university web server) instead of uploading them."
+            ),
+        )
+
     path = study_storage_prefix(owner_id, study_id) + _upload_object_name(payload)
+    if r2_storage.r2_configured():
+        response = SignedUploadResponse(
+            provider="r2",
+            path=path,
+            signed_url=r2_storage.create_upload_url(path, content_type, payload.size_bytes),
+            bucket=r2_storage._env("R2_BUCKET"),
+            media_url=r2_storage.ref_for(path),
+            read_url=r2_storage.read_url(path),
+        )
+        _record_upload(path, owner_id, study_id, payload, content_type)
+        return response
     try:
         signed = create_signed_upload_url(path)
     except StorageNotConfiguredError:
@@ -415,6 +444,11 @@ def create_signed_upload(
             detail="Could not prepare the upload. Please try again.",
         ) from None
 
+    _record_upload(path, owner_id, study_id, payload, content_type)
+    return SignedUploadResponse(provider="supabase", bucket=storage_bucket(), **signed)
+
+
+def _record_upload(path: str, owner_id: UUID, study_id: UUID, payload: SignedUploadRequest, content_type: str) -> None:
     with connect() as conn:
         conn.execute(
             uploads_table.insert().values(
@@ -427,7 +461,6 @@ def create_signed_upload(
                 created_at=utcnow_iso(),
             )
         )
-    return SignedUploadResponse(bucket=storage_bucket(), **signed)
 
 
 def get_studies_db() -> dict:
