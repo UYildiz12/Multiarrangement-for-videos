@@ -417,6 +417,7 @@ def test_stimuli_storage_paths_round_trip_in_list_and_export():
     )
     assert study_resp.status_code == 201
     study_id = study_resp.json()["id"]
+    prefix = f"owners/{study_resp.json()['owner_id']}/studies/{study_id}/"
 
     stimuli_resp = client.post(
         f"/api/v1/studies/{study_id}/stimuli",
@@ -428,27 +429,27 @@ def test_stimuli_storage_paths_round_trip_in_list_and_export():
                     "media_type": "image",
                     "media_url": "https://example.com/owner_upload.jpg",
                     "thumbnail_url": "https://example.com/owner_upload.jpg",
-                    "media_storage_path": "owners/o1/studies/s1/media/owner_upload.jpg",
-                    "thumbnail_storage_path": "owners/o1/studies/s1/media/owner_upload.jpg",
+                    "media_storage_path": f"{prefix}media/owner_upload.jpg",
+                    "thumbnail_storage_path": f"{prefix}media/owner_upload.jpg",
                     "duration_seconds": 0.5,
                 }
             ]
         },
     )
     assert stimuli_resp.status_code == 200
-    assert stimuli_resp.json()[0]["media_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
+    assert stimuli_resp.json()[0]["media_storage_path"] == f"{prefix}media/owner_upload.jpg"
 
     list_resp = client.get(f"/api/v1/studies/{study_id}/stimuli")
     assert list_resp.status_code == 200
     listed = list_resp.json()
-    assert listed[0]["media_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
-    assert listed[0]["thumbnail_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
+    assert listed[0]["media_storage_path"] == f"{prefix}media/owner_upload.jpg"
+    assert listed[0]["thumbnail_storage_path"] == f"{prefix}media/owner_upload.jpg"
 
     export_resp = client.get(f"/api/v1/studies/{study_id}/export?format=json")
     assert export_resp.status_code == 200
     exported_stimuli = export_resp.json()["stimuli"]
-    assert exported_stimuli[0]["media_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
-    assert exported_stimuli[0]["thumbnail_storage_path"] == "owners/o1/studies/s1/media/owner_upload.jpg"
+    assert exported_stimuli[0]["media_storage_path"] == f"{prefix}media/owner_upload.jpg"
+    assert exported_stimuli[0]["thumbnail_storage_path"] == f"{prefix}media/owner_upload.jpg"
 
 
 def test_admin_delete_study_reports_storage_cleanup(monkeypatch):
@@ -463,6 +464,7 @@ def test_admin_delete_study_reports_storage_cleanup(monkeypatch):
     )
     assert study_resp.status_code == 201
     study_id = study_resp.json()["id"]
+    prefix = f"owners/{study_resp.json()['owner_id']}/studies/{study_id}/"
 
     stimuli_resp = client.post(
         f"/api/v1/studies/{study_id}/stimuli",
@@ -474,8 +476,8 @@ def test_admin_delete_study_reports_storage_cleanup(monkeypatch):
                     "media_type": "video",
                     "media_url": "https://example.com/clip.mp4",
                     "thumbnail_url": "https://example.com/clip_thumb.jpg",
-                    "media_storage_path": "owners/o1/studies/s1/media/clip.mp4",
-                    "thumbnail_storage_path": "owners/o1/studies/s1/thumbs/clip.jpg",
+                    "media_storage_path": f"{prefix}media/clip.mp4",
+                    "thumbnail_storage_path": f"{prefix}thumbs/clip.jpg",
                     "duration_seconds": 5.0,
                 }
             ]
@@ -494,8 +496,8 @@ def test_admin_delete_study_reports_storage_cleanup(monkeypatch):
     delete_resp = client.delete(f"/api/v1/admin/studies/{study_id}")
     assert delete_resp.status_code == 200
     assert captured["paths"] == [
-        "owners/o1/studies/s1/media/clip.mp4",
-        "owners/o1/studies/s1/thumbs/clip.jpg",
+        f"{prefix}media/clip.mp4",
+        f"{prefix}thumbs/clip.jpg",
     ]
     assert delete_resp.json()["storage_cleanup"]["status"] == "deleted"
 
@@ -512,6 +514,7 @@ def test_owner_delete_study_triggers_storage_cleanup(monkeypatch):
     )
     assert study_resp.status_code == 201
     study_id = study_resp.json()["id"]
+    prefix = f"owners/{study_resp.json()['owner_id']}/studies/{study_id}/"
 
     stimuli_resp = client.post(
         f"/api/v1/studies/{study_id}/stimuli",
@@ -523,8 +526,8 @@ def test_owner_delete_study_triggers_storage_cleanup(monkeypatch):
                     "media_type": "image",
                     "media_url": "https://example.com/image.png",
                     "thumbnail_url": "https://example.com/image.png",
-                    "media_storage_path": "owners/o1/studies/s2/media/image.png",
-                    "thumbnail_storage_path": "owners/o1/studies/s2/media/image.png",
+                    "media_storage_path": f"{prefix}media/image.png",
+                    "thumbnail_storage_path": f"{prefix}media/image.png",
                     "duration_seconds": 0.5,
                 }
             ]
@@ -542,4 +545,4 @@ def test_owner_delete_study_triggers_storage_cleanup(monkeypatch):
 
     delete_resp = client.delete(f"/api/v1/studies/{study_id}")
     assert delete_resp.status_code == 204
-    assert captured["paths"] == ["owners/o1/studies/s2/media/image.png"]
+    assert captured["paths"] == [f"{prefix}media/image.png"]

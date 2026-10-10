@@ -69,6 +69,19 @@ interface ChainSessionsData {
 
 type Tab = "studies" | "chains";
 
+function describeKeyGenerationError(err: unknown, inviteCode: string): string {
+    const msg = err instanceof Error ? err.message : "Failed to generate key";
+    if (msg.includes("API error 403")) {
+        return inviteCode.trim()
+            ? "That invite code was not accepted. Check the code and try again."
+            : "This server requires an invite code to create experimenter keys. Enter the code you were given in the invite code field and try again.";
+    }
+    if (msg.includes("API error 429")) {
+        return "Too many keys were requested from your network recently. Please try again later.";
+    }
+    return msg;
+}
+
 export default function AdminPage() {
     return (
         <Suspense fallback={<div style={{ minHeight: "100vh", background: "#000", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center" }}>Loading...</div>}>
@@ -84,6 +97,7 @@ function AdminContent() {
     const [showKey, setShowKey] = useState(false);
     const [copied, setCopied] = useState(false);
     const [justGenerated, setJustGenerated] = useState(false);
+    const [inviteCode, setInviteCode] = useState("");
     const [activeTab, setActiveTab] = useState<Tab>("studies");
     const [studies, setStudies] = useState<StudySummary[]>([]);
     const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -142,14 +156,15 @@ function AdminContent() {
     };
 
     const handleGenerate = async () => {
+        setError(null);
         try {
-            const key = await generateKey();
+            const key = await generateKey(inviteCode);
             setKeyInput(key);
             setJustGenerated(true);
             setShowKey(true);
             setCopied(false);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to generate key");
+            setError(describeKeyGenerationError(err, inviteCode));
         }
     };
 
@@ -402,6 +417,26 @@ function AdminContent() {
                             <span style={{ color: "#555", fontSize: 12 }}>or</span>
                             <div style={{ flex: 1, height: 1, background: "#333" }} />
                         </div>
+
+                        <input
+                            type="text"
+                            value={inviteCode}
+                            onChange={(e) => setInviteCode(e.target.value)}
+                            placeholder="Invite code (only if this server requires one)"
+                            aria-label="Invite code"
+                            autoComplete="off"
+                            style={{
+                                width: "100%",
+                                marginTop: 16,
+                                padding: "10px 14px",
+                                borderRadius: 8,
+                                border: "1px solid #333",
+                                background: "#1a1a1a",
+                                color: "#fff",
+                                fontSize: 13,
+                                boxSizing: "border-box",
+                            }}
+                        />
 
                         <button
                             onClick={handleGenerate}

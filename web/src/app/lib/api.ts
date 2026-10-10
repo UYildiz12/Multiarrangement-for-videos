@@ -27,7 +27,8 @@ export async function apiFetch<T>(
     const text = await res.text();
     // Only expose server message for expected client errors;
     // hide raw text for 5xx to avoid leaking backend internals.
-    const safeStatuses = new Set([400, 401, 403, 404, 409, 422]);
+    // 413/415/429 carry the API's size, file-type and rate-limit messages.
+    const safeStatuses = new Set([400, 401, 403, 404, 409, 413, 415, 422, 429]);
     const detail = safeStatuses.has(res.status) ? text : "Internal server error";
     throw new Error(`API error ${res.status}: ${detail}`);
   }

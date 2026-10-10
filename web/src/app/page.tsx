@@ -178,6 +178,9 @@ export default function Home() {
                         </div>
                     )}
                 </div>
+                <footer style={{ textAlign: "center", marginTop: 24, fontSize: 12 }}>
+                    <Link href="/privacy" style={{ color: "#555", textDecoration: "none" }}>Privacy</Link>
+                </footer>
             </div>
         </div>
     );

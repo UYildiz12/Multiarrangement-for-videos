@@ -9,6 +9,9 @@ be associated with whoever holds the same key.
 
 Set the ``EXPERIMENTER_KEY_SECRET`` environment variable in production.
 A fallback is used for local development only.
+
+If ``EXPERIMENTER_INVITE_CODE`` is set, generating a key requires that code.
+Existing keys keep working; participants never need a code.
 """
 
 import hashlib
@@ -19,6 +22,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, status
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/experimenter", tags=["experimenter"])
 
@@ -134,14 +138,37 @@ def get_required_owner(
     )
 
 
+def _check_invite_code(supplied: Optional[str]) -> None:
+    """Require EXPERIMENTER_INVITE_CODE (when set), compared in constant time."""
+    expected = os.getenv("EXPERIMENTER_INVITE_CODE", "").strip()
+    if not expected:
+        return
+    supplied = (supplied or "").strip()
+    if not supplied:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="An invite code is required to generate an experimenter key.",
+        )
+    if not _hmac.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid invite code. An invite code is required to generate an experimenter key.",
+        )
+
+
 # ── routes ───────────────────────────────────────────────────────────────
 
+class GenerateKeyRequest(BaseModel):
+    invite_code: Optional[str] = Field(default=None, max_length=200)
+
+
 @router.post("/generate-key")
-async def generate_key():
+async def generate_key(payload: Optional[GenerateKeyRequest] = None):
     """Generate a new HMAC-signed experimenter key.
 
     The key is **not** stored on the server.  The caller must save it.
     The server can verify it issued the key via the embedded signature.
     """
+    _check_invite_code(payload.invite_code if payload else None)
     key = _make_signed_key()
     return {"key": key}

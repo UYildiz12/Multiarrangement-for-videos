@@ -10,7 +10,7 @@ interface KeyContextType {
     isLocalBypass: boolean;
     authReady: boolean;
     clearKey: () => void;
-    generateKey: () => Promise<string>;
+    generateKey: (inviteCode?: string) => Promise<string>;
     generating: boolean;
 }
 
@@ -104,11 +104,14 @@ export function KeyProvider({ children }: { children: ReactNode }) {
         sessionStorage.removeItem("adminSecret");
     }, []);
 
-    const generateKey = useCallback(async () => {
+    const generateKey = useCallback(async (inviteCode?: string) => {
         setGenerating(true);
         try {
+            // The server only checks the code when EXPERIMENTER_INVITE_CODE is set.
+            const code = (inviteCode || "").trim();
             const data = await apiFetch<{ key: string }>("/api/v1/experimenter/generate-key", {
                 method: "POST",
+                body: JSON.stringify(code ? { invite_code: code } : {}),
             });
             return data.key;
         } finally {

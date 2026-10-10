@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 
+from app.limits import max_stimuli_per_study
 from app.routers.experimenter import get_required_owner
 from app.routers.sessions import create_session, get_session_start_payload
 from app.routers.studies import get_study, list_stimuli_for_study
@@ -184,6 +185,12 @@ async def start_demo_session(req: DemoStartRequest) -> SessionStartResponse:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported demo paradigm")
     if req.n_stimuli < 2:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Demo requires at least two stimuli")
+    max_stimuli = max_stimuli_per_study()
+    if max_stimuli and req.n_stimuli > max_stimuli:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Demo supports at most {max_stimuli} stimuli",
+        )
     study_id = _create_demo_study(req.paradigm, req.n_stimuli)
     participant_id = f"demo_user_{uuid4().hex[:8]}"
     return create_session(study_id, participant_id)

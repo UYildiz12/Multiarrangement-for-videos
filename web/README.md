@@ -76,3 +76,5 @@ Expected result for release `0.1.10.2`: unit tests pass, the production build su
 - Vercel is the primary frontend deployment target
 - Set `NEXT_PUBLIC_API_BASE` to the deployed FastAPI base URL
 - Supabase credentials are optional and only needed for hosted media uploads from the setup flow
+- Hosted uploads go to Supabase Storage through one-time signed upload URLs issued by the API (`POST /api/v1/studies/{id}/uploads`); the anon key is only used to upload to those URLs and to build public playback URLs. The API needs `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; see `server/README.md` for the bucket settings
+- `next.config.ts` adds security headers to every route (no Content-Security-Policy, to avoid breaking media playback); `/privacy` describes what the hosted service stores

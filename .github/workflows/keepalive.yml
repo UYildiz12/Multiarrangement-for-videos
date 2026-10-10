@@ -1,0 +1,22 @@
+name: Keep-alive
+
+# Runs a trivial database query through the API every two days so the
+# Supabase free-tier project is not paused for inactivity. A failed run makes
+# GitHub e-mail the repository owner, which doubles as a basic uptime alert.
+
+on:
+  schedule:
+    - cron: "17 6 */2 * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping-database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check API and database health
+        run: >-
+          curl -fsS --retry 3 --retry-delay 30 --retry-all-errors --max-time 30
+          https://multiarrangement-api-production.up.railway.app/health/db

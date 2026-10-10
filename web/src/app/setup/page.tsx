@@ -12,7 +12,6 @@ import { getSupabaseClient, SUPABASE_BUCKET } from "../lib/supabaseClient";
 import {
     IMAGE_DURATION_FALLBACK,
     buildInstructions,
-    buildStudyScopedPath,
     coalesceDuration,
     dataUrlToBlob,
     detectUploadedMediaType,
@@ -455,7 +454,7 @@ export default function SetupPage() {
                 }),
             });
 
-            const studyVideos = await materializeStudyVideos(videosWithDuration, study);
+            const studyVideos = await materializeStudyVideos(videosWithDuration, study, keyHeaders);
             const stimuliPayload = {
                 stimuli: studyVideos.map((v, i) => ({
                     ordinal: i,
@@ -600,7 +599,7 @@ export default function SetupPage() {
                 }),
             });
 
-            const studyVideos = await materializeStudyVideos(videosWithDuration, study);
+            const studyVideos = await materializeStudyVideos(videosWithDuration, study, keyHeaders);
             const stimuliPayload = {
                 stimuli: studyVideos.map((v, i) => ({
                     ordinal: i,
@@ -1597,34 +1596,46 @@ function publicUrlForPath(path: string, supabase: ReturnType<typeof getSupabaseC
     return data.publicUrl;
 }
 
-async function uploadToSupabase(file: File, storagePath: string, supabase: ReturnType<typeof getSupabaseClient>) {
-    if (!supabase) throw new Error("Supabase client not configured");
-    const { error } = await supabase.storage.from(SUPABASE_BUCKET).upload(storagePath, file, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: file.type || undefined,
-    });
-    if (error) throw new Error(`Upload failed: ${error.message}`);
-    return publicUrlForPath(storagePath, supabase);
+interface SignedUpload {
+    path: string;
+    token: string;
 }
 
-async function uploadThumbnailToSupabase(
-    dataUrl: string,
-    storagePath: string,
-    supabase: ReturnType<typeof getSupabaseClient>
-) {
-    if (!supabase) throw new Error("Supabase client not configured");
-    const blob = dataUrlToBlob(dataUrl);
-    const { error } = await supabase.storage.from(SUPABASE_BUCKET).upload(storagePath, blob, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: "image/jpeg",
+// The API checks file size, type, stimulus count and the storage quota, then
+// returns a one-time signed upload URL; the anon key has no write access.
+async function uploadViaSignedUrl(
+    body: Blob,
+    filename: string,
+    kind: "media" | "thumbnail",
+    index: number,
+    study: HostedStudyIdentity,
+    keyHeaders: Record<string, string>,
+    supabase: NonNullable<ReturnType<typeof getSupabaseClient>>
+): Promise<{ path: string; publicUrl: string }> {
+    const signed = await apiFetch<SignedUpload>(`/api/v1/studies/${study.id}/uploads`, {
+        method: "POST",
+        headers: keyHeaders,
+        body: JSON.stringify({ filename, content_type: body.type, size_bytes: body.size, kind, index }),
     });
-    if (error) throw new Error(`Thumbnail upload failed: ${error.message}`);
-    return publicUrlForPath(storagePath, supabase);
+    const { error } = await supabase.storage
+        .from(SUPABASE_BUCKET)
+        .uploadToSignedUrl(signed.path, signed.token, body, { cacheControl: "3600", contentType: body.type });
+    if (error) throw new Error(`Upload of ${filename} failed: ${error.message}`);
+    return { path: signed.path, publicUrl: publicUrlForPath(signed.path, supabase) };
 }
 
-async function materializeStudyVideos(videos: VideoFile[], study: HostedStudyIdentity): Promise<VideoFile[]> {
+// Some browsers leave File.type empty (e.g. for .mkv); the API and bucket need a media type.
+function withMediaType(file: File, mediaType: VideoFile["mediaType"]): File {
+    if (file.type) return file;
+    const ext = getFileExtension(file.name) || "octet-stream";
+    return new File([file], file.name, { type: `${mediaType}/${ext}` });
+}
+
+async function materializeStudyVideos(
+    videos: VideoFile[],
+    study: HostedStudyIdentity,
+    keyHeaders: Record<string, string>
+): Promise<VideoFile[]> {
     const pendingUploads = videos.some((video) => Boolean(video.sourceFile));
     if (!pendingUploads) {
         return videos;
@@ -1642,26 +1653,40 @@ async function materializeStudyVideos(videos: VideoFile[], study: HostedStudyIde
             continue;
         }
 
-        const mediaExt = getFileExtension(video.sourceFile.name) || "dat";
-        const mediaPath = buildStudyScopedPath(study.owner_id, study.id, "media", index, video.name, mediaExt);
-        const mediaUrl = await uploadToSupabase(video.sourceFile, mediaPath, supabase);
+        const media = await uploadViaSignedUrl(
+            withMediaType(video.sourceFile, video.mediaType),
+            video.sourceFile.name,
+            "media",
+            index,
+            study,
+            keyHeaders,
+            supabase
+        );
 
         let thumbnailUrl = video.thumbnail;
         let thumbnailStoragePath = video.thumbnailStoragePath;
         if (video.mediaType === "video" && video.thumbnailDataUrl) {
-            const thumbPath = buildStudyScopedPath(study.owner_id, study.id, "thumbs", index, `${video.name}_thumb`, "jpg");
-            thumbnailUrl = await uploadThumbnailToSupabase(video.thumbnailDataUrl, thumbPath, supabase);
-            thumbnailStoragePath = thumbPath;
+            const thumb = await uploadViaSignedUrl(
+                dataUrlToBlob(video.thumbnailDataUrl),
+                `${video.name}_thumb.jpg`,
+                "thumbnail",
+                index,
+                study,
+                keyHeaders,
+                supabase
+            );
+            thumbnailUrl = thumb.publicUrl;
+            thumbnailStoragePath = thumb.path;
         } else if (video.mediaType === "image") {
-            thumbnailUrl = mediaUrl;
-            thumbnailStoragePath = mediaPath;
+            thumbnailUrl = media.publicUrl;
+            thumbnailStoragePath = media.path;
         }
 
         uploaded.push({
             ...video,
-            url: mediaUrl,
+            url: media.publicUrl,
             thumbnail: thumbnailUrl,
-            mediaStoragePath: mediaPath,
+            mediaStoragePath: media.path,
             thumbnailStoragePath,
         });
     }

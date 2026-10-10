@@ -146,6 +146,28 @@ class StimulusBatchCreate(BaseModel):
     stimuli: List[StimulusCreate]
 
 
+class UploadKind(str, Enum):
+    MEDIA = "media"
+    THUMBNAIL = "thumbnail"
+
+
+class SignedUploadRequest(BaseModel):
+    """Request body for a signed Supabase Storage upload URL (one file)."""
+    filename: str = Field(..., min_length=1, max_length=255)
+    content_type: str = Field(..., min_length=1, max_length=255)
+    size_bytes: int = Field(..., ge=1)
+    kind: UploadKind = UploadKind.MEDIA
+    index: int = Field(default=0, ge=0, le=9999)
+
+
+class SignedUploadResponse(BaseModel):
+    """Where the browser uploads the file (supabase-js ``uploadToSignedUrl``)."""
+    path: str
+    token: str
+    signed_url: str
+    bucket: str
+
+
 # Session schemas
 class SessionCreate(BaseModel):
     """Request body for starting a session."""

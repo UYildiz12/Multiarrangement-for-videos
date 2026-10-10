@@ -4,14 +4,20 @@ Multiarrangement Web API.
 FastAPI application for the web-based multiarrangement experiment platform.
 """
 
+import logging
 import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
+from app.middleware import RequestSizeLimitMiddleware, SecurityHeadersMiddleware
+from app.ratelimit import RateLimitMiddleware
 from app.routers import studies_router, sessions_router, results_router, invites_router, admin_router, chains_router, chains_public_router, experimenter_router
 from app.schemas import HealthResponse
-from app.storage import init_db
+from app.storage import init_db, ping_database
+
+logger = logging.getLogger(__name__)
 
 APP_VERSION = "0.1.12"
 _TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
@@ -85,6 +91,13 @@ app = FastAPI(
 
 init_db()
 
+# Middleware added last runs first. Request order:
+# CORS -> security headers -> rate limit -> body-size limit -> routes,
+# so 429/413 responses still carry CORS and security headers.
+app.add_middleware(RequestSizeLimitMiddleware)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+
 # CORS for web frontend
 app.add_middleware(
     CORSMiddleware,
@@ -109,6 +122,17 @@ app.include_router(experimenter_router, prefix="/api/v1")
 def health():
     """Health check endpoint."""
     return HealthResponse(status="ok", version=APP_VERSION)
+
+
+@app.get("/health/db")
+def health_db():
+    """Database health check (also used by the keep-alive workflow)."""
+    try:
+        ping_database()
+    except Exception as exc:  # noqa: BLE001 - any failure means "unhealthy"
+        logger.warning("Database health check failed: %s", exc.__class__.__name__)
+        return JSONResponse(status_code=503, content={"status": "error", "database": "unavailable"})
+    return {"status": "ok", "database": "ok"}
 
 
 @app.get("/")

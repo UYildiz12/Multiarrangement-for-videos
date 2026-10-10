@@ -13,6 +13,7 @@ _BOOTSTRAP_DB = Path(tempfile.gettempdir()) / "multiarrangement_server_bootstrap
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_BOOTSTRAP_DB.as_posix()}")
 
 from app.main import app
+from app.ratelimit import rate_limiter
 from app.storage import reset_db
 
 
@@ -23,6 +24,7 @@ def local_dev_bypass_auth(monkeypatch, tmp_path):
     db_path = tmp_path / "test_hosted.sqlite3"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
     reset_db()
+    rate_limiter.reset()
     yield
     reset_db()
 

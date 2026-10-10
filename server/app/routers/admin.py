@@ -9,7 +9,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import delete
 
 from app.routers.experimenter import (
     is_local_dev_bypass_auth_enabled,
@@ -18,8 +17,13 @@ from app.routers.experimenter import (
     owner_id_from_key,
 )
 from app.routers.sessions import delete_session_record, get_session_record, get_trials_for_session, list_sessions_for_study
-from app.routers.studies import get_study, get_studies_db, list_stimuli_for_study, list_storage_paths_for_study
-from app.storage import connect, studies_table
+from app.routers.studies import (
+    delete_study_rows,
+    get_study,
+    get_studies_db,
+    list_stimuli_for_study,
+    list_storage_paths_for_study,
+)
 from app.supabase_storage import delete_storage_paths
 
 router = APIRouter(tags=["admin"])
@@ -128,8 +132,7 @@ async def delete_study(study_id: UUID, owner_id: UUID | None = Depends(_resolve_
 
     session_count = len(list_sessions_for_study(study_id))
     cleanup = delete_storage_paths(list_storage_paths_for_study(study_id))
-    with connect() as conn:
-        conn.execute(delete(studies_table).where(studies_table.c.id == str(study_id)))
+    delete_study_rows(study_id)
     return {
         "status": "deleted",
         "study_id": str(study_id),

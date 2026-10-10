@@ -17,6 +17,7 @@ from typing import Any, Iterator
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Column,
     Float,
     ForeignKey,
@@ -152,6 +153,24 @@ chain_invites_table = Table(
     Column("chain_session_id", String(36), ForeignKey("chain_sessions.id", ondelete="SET NULL"), nullable=True),
 )
 
+# Ledger of signed upload URLs issued by the API, one row per storage object.
+# It backs the per-owner storage quota and the per-study upload cap, and lets
+# study deletion remove uploads that were never registered as stimuli.
+# study_id deliberately has no ForeignKey here: Supabase creates the table
+# (with a UUID foreign key) in migration 005, and a String -> UUID key would
+# fail if create_all ran first. Study deletion removes ledger rows explicitly.
+uploads_table = Table(
+    "uploads",
+    metadata,
+    Column("storage_path", String, primary_key=True),
+    Column("owner_id", String(36), nullable=False, index=True),
+    Column("study_id", String(36), nullable=False, index=True),
+    Column("kind", String(16), nullable=False),
+    Column("content_type", String(255), nullable=False),
+    Column("size_bytes", BigInteger, nullable=False),
+    Column("created_at", String(64), nullable=False),
+)
+
 Index("ix_sessions_study_participant", sessions_table.c.study_id, sessions_table.c.participant_id)
 Index("ix_chain_sessions_chain_participant", chain_sessions_table.c.chain_id, chain_sessions_table.c.participant_id)
 
@@ -234,6 +253,12 @@ def connect(readonly: bool = False) -> Iterator[Connection]:
             yield conn
 
 
+def ping_database() -> None:
+    """Run a trivial query; raises if the database cannot be reached."""
+    with connect(readonly=True) as conn:
+        conn.execute(text("SELECT 1"))
+
+
 def row_to_dict(row: RowMapping | None) -> dict[str, Any] | None:
     if row is None:
         return None
@@ -252,6 +277,7 @@ def fetch_all(conn: Connection, statement) -> list[dict[str, Any]]:
 def clear_all_tables() -> None:
     with connect() as conn:
         for table in (
+            uploads_table,
             chain_invites_table,
             chain_sessions_table,
             chain_studies_table,
