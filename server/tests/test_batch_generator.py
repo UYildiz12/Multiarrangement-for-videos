@@ -154,8 +154,8 @@ class TestGenerateBatchesFunction:
             algorithm="balanced",
         )
 
-    def test_balanced_cover_score_uses_normalized_metric(self):
-        """Server scoring should share the size-normalized cover metric."""
+    def test_balanced_cover_score_uses_exact_lexicographic_metric(self):
+        """Server scoring should share the exact concurrence-profile metric."""
         all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
         evenly_spread = all_pairs + [[0, 1], [0, 2], [0, 3]]
 
@@ -168,6 +168,14 @@ class TestGenerateBatchesFunction:
         all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
 
         assert _is_already_balanced_enough(6, 2, all_pairs) is True
+
+    def test_ratio_threshold_does_not_accept_a_dominated_cover(self):
+        from ma_core.batch_generator import _is_already_balanced_enough
+
+        all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
+        concentrated = all_pairs + [[0, 1], [0, 1], [0, 2]]
+
+        assert _is_already_balanced_enough(6, 2, concentrated) is False
 
 
 class TestEdgeCases:
@@ -209,3 +217,14 @@ class TestExactDesignFastPath:
                 counts[(a, b)] = counts.get((a, b), 0) + 1
         assert len(counts) == 57 * 56 // 2
         assert set(counts.values()) == {1}
+
+    def test_one_point_extension_is_used_before_search(self):
+        batches = generate_batches(50, 7, seed=1, algorithm="optimal")
+
+        assert len(batches) == 65
+        counts = {}
+        for batch in batches:
+            for a, b in combinations(sorted(batch), 2):
+                counts[(a, b)] = counts.get((a, b), 0) + 1
+        assert len(counts) == 50 * 49 // 2
+        assert set(counts.values()) == {1, 2}

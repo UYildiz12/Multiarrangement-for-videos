@@ -7,6 +7,15 @@ _INT_RE = re.compile(r"-?\d+")
 
 __all__ = ["fetch_ljcr_cover"]
 
+
+def _valid_block(nums: List[int], v: int, k: int) -> bool:
+    return (
+        len(nums) == k
+        and len(set(nums)) == k
+        and all(1 <= item <= v for item in nums)
+    )
+
+
 def fetch_ljcr_cover(v: int, k: int) -> List[Tuple[int,...]]:
     url = LJCR_URL.format(v=v, k=k)
     try:
@@ -23,19 +32,17 @@ def fetch_ljcr_cover(v: int, k: int) -> List[Tuple[int,...]]:
         for m in re.finditer(fr"(?is)<{tag}[^>]*>(.*?)</{tag}>", text):
             for line in m.group(1).splitlines():
                 nums = [int(x) for x in _INT_RE.findall(line)]
-                if len(nums) == k:
+                if _valid_block(nums, v, k):
                     blk = tuple(sorted(x-1 for x in nums))
-                    if all(0 <= x < v for x in blk):
-                        blocks.append(blk)
+                    blocks.append(blk)
         if blocks: return blocks
 
     # Strategy 2: per-line fallback
     for line in text.splitlines():
         nums = [int(x) for x in _INT_RE.findall(line)]
-        if len(nums) == k:
+        if _valid_block(nums, v, k):
             blk = tuple(sorted(x-1 for x in nums))
-            if all(0 <= x < v for x in blk):
-                blocks.append(blk)
+            blocks.append(blk)
     if blocks: return blocks
 
     # Strategy 3: collect long run after first block-ish line
@@ -44,17 +51,17 @@ def fetch_ljcr_cover(v: int, k: int) -> List[Tuple[int,...]]:
     for line in text.splitlines():
         nums = [int(x) for x in _INT_RE.findall(line)]
         if not nums: continue
-        if not seen_first and len(nums) == k:
+        if not seen_first and _valid_block(nums, v, k):
             seen_first = True; allints.extend(nums)
         elif seen_first:
             allints.extend(nums)
     if allints:
         for i in range(0, len(allints), k):
             chunk = allints[i:i+k]
-            if len(chunk) != k: continue
+            if not _valid_block(chunk, v, k):
+                continue
             blk = tuple(sorted(x-1 for x in chunk))
-            if all(0 <= x < v for x in blk):
-                blocks.append(blk)
+            blocks.append(blk)
     if not blocks:
         raise RuntimeError(f"Could not parse any {k}-tuples from LJCR page for (v={v},k={k}). URL: {url}")
 

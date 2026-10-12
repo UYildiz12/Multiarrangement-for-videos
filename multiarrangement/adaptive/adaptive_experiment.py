@@ -37,6 +37,8 @@ class AdaptiveConfig:
     target_time_tolerance: float = 0.05         # allowable fractional overshoot
     min_subset_size: int = 3
     max_subset_size: Optional[int] = None
+    skip_initial: bool = False                 # skip the all-item orientation trial
+    skip_first: Optional[bool] = None          # accepted alias for skip_initial
     time_cost_exponent: float = 1.5
     arena_max: float = 1.0
     use_inverse_mds: bool = True
@@ -64,6 +66,10 @@ class AdaptiveConfig:
     stop_on_utility: bool = False             # compare threshold on u(W)=1-exp(-dW) instead of raw W
     avoid_anchor_reuse: bool = False          # avoid reusing the exact previous anchor pair
     cold_start_require_unseen_trials: int = 0 # require at least one unseen in early trials
+
+    def __post_init__(self) -> None:
+        if self.skip_first is not None:
+            self.skip_initial = bool(self.skip_first)
 
 
 class AdaptiveMultiarrangementExperiment:
@@ -146,6 +152,11 @@ class AdaptiveMultiarrangementExperiment:
             except Exception:
                 self.long_clip_mask = None
 
+        if self.config.skip_initial:
+            self._activate_subset(
+                self._select_adaptive_subset(trials_so_far=0)
+            )
+
     def _estimate_durations(self) -> np.ndarray:
         """Estimate per-item review durations (in seconds) for time-aware costs.
 
@@ -190,7 +201,9 @@ class AdaptiveMultiarrangementExperiment:
     def get_video_path(self, video_filename: str) -> Path:
         return self.input_directory / video_filename
 
-    def record_arrangement(self, video_positions_by_name: Dict[str, Tuple[float, float]]) -> None:
+    def record_arrangement(self, video_positions_by_name: Dict[str, Tuple[float, float]],
+                           arena_center: Optional[Tuple[float, float]] = None,
+                           arena_radius: Optional[float] = None) -> None:
         # Map back to global indices
         positions_by_idx: Dict[int, Tuple[float, float]] = {}
         for idx in self.current_subset_indices:
@@ -199,7 +212,9 @@ class AdaptiveMultiarrangementExperiment:
                 positions_by_idx[idx] = video_positions_by_name[name]
 
         # Save this trial result
-        self.trials.append(TrialArrangement(subset=list(self.current_subset_indices), positions=positions_by_idx))
+        # Arena geometry puts distances in arena-radius units, independent of the screen size.
+        self.trials.append(TrialArrangement(subset=list(self.current_subset_indices), positions=positions_by_idx,
+                                            arena_center=arena_center, arena_radius=arena_radius))
 
         # Re-estimate D and W using all trials so far
         self.D_est, self.W_raw = estimate_rdm_weighted_average(
@@ -242,6 +257,79 @@ class AdaptiveMultiarrangementExperiment:
                 if 0 <= idx < self.n:
                     self.inclusion_counts[idx] += 1
 
+    def _select_adaptive_subset(self, *, trials_so_far: int) -> List[int]:
+        """Choose one LTW subset without advancing the completed-trial count."""
+        # Set optional avoidance of the last anchor pair
+        avoid_pair = self.last_anchor_pair if self.config.avoid_anchor_reuse else None
+        max_size = self.config.max_subset_size
+        if max_size is None:
+            if self.config.skip_initial:
+                max_size = min(self.n, max(self.config.min_subset_size, 6))
+            else:
+                max_size = self.n
+        next_subset = select_next_subset_lift_weakest(
+            self.D_est,
+            self.W_sched,
+            utility_exponent=self.config.utility_exponent,
+            time_cost_exponent=self.config.time_cost_exponent,
+            arena_max=self.config.arena_max,
+            min_size=self.config.min_subset_size,
+            max_size=max_size,
+            seen=self.seen,
+            recent=self.recent,
+            last_subset=self.last_subset,
+            avoid_anchor_pair=avoid_pair,
+            max_jaccard=self.config.max_jaccard,
+            overlap_penalty=self.config.overlap_penalty,
+            recency_penalty=self.config.recency_penalty,
+            unseen_boost=self.config.unseen_boost,
+            stress_weight=self.config.stress_weight,
+            durations=self.durations,
+            duration_cost_weight=self.config.duration_cost_weight,
+            target_time_seconds=self.config.target_time_seconds,
+            target_time_tolerance=self.config.target_time_tolerance,
+            duration_cost_cap_per_item=self.config.duration_cost_cap_per_item,
+            inclusion_counts=self.inclusion_counts,
+            long_clip_mask=self.long_clip_mask,
+            min_long_clip_inclusion_rate=self.config.min_long_clip_inclusion_rate,
+            long_clip_boost=self.config.long_clip_boost,
+            trials_so_far=trials_so_far,
+            require_unseen=(trials_so_far < int(self.config.cold_start_require_unseen_trials)),
+        )
+
+        # Diagnostic: print chosen subset size and a few names
+        try:
+            names = [self.video_names[i] for i in next_subset]
+            print(
+                f"[info] Adaptive trial {trials_so_far + 1}: selected subset "
+                f"size {len(next_subset)}: {names[:5]}"
+                f"{'...' if len(names) > 5 else ''}"
+            )
+        except Exception:
+            pass
+
+        # Safety fallback: if selector failed, sample a mid-sized random subset
+        if not next_subset or len(next_subset) < self.config.min_subset_size:
+            k = max(self.config.min_subset_size, min(6, self.n))
+            next_subset = list(range(min(self.n, k)))
+
+        # Avoid repeating the exact same subset
+        if set(next_subset) == set(self.current_subset_indices) and len(next_subset) < self.n:
+            # Add one new item if available
+            remaining = [i for i in range(self.n) if i not in next_subset]
+            if remaining:
+                next_subset = next_subset + [remaining[0]]
+
+        return [int(index) for index in next_subset]
+
+    def _activate_subset(self, next_subset: List[int]) -> None:
+        """Make a selected subset current and update overlap/anchor state."""
+        self.current_subset_indices = next_subset
+        self.last_subset = list(next_subset)
+        if len(next_subset) >= 2:
+            a, b = int(next_subset[0]), int(next_subset[1])
+            self.last_anchor_pair = (min(a, b), max(a, b))
+
     def advance_to_next_batch(self) -> bool:
         self.trial_counter += 1
 
@@ -267,64 +355,9 @@ class AdaptiveMultiarrangementExperiment:
                     self.experiment_completed = True
                     return False
 
-        # Choose next subset via lift-the-weakest
-        # Set optional avoidance of the last anchor pair
-        avoid_pair = self.last_anchor_pair if self.config.avoid_anchor_reuse else None
-        next_subset = select_next_subset_lift_weakest(
-            self.D_est,
-            self.W_sched,
-            utility_exponent=self.config.utility_exponent,
-            time_cost_exponent=self.config.time_cost_exponent,
-            arena_max=self.config.arena_max,
-            min_size=self.config.min_subset_size,
-            max_size=self.config.max_subset_size or self.n,
-            seen=self.seen,
-            recent=self.recent,
-            last_subset=self.last_subset,
-            avoid_anchor_pair=avoid_pair,
-            max_jaccard=self.config.max_jaccard,
-            overlap_penalty=self.config.overlap_penalty,
-            recency_penalty=self.config.recency_penalty,
-            unseen_boost=self.config.unseen_boost,
-            stress_weight=self.config.stress_weight,
-            durations=self.durations,
-            duration_cost_weight=self.config.duration_cost_weight,
-            target_time_seconds=self.config.target_time_seconds,
-            target_time_tolerance=self.config.target_time_tolerance,
-            duration_cost_cap_per_item=self.config.duration_cost_cap_per_item,
-            inclusion_counts=self.inclusion_counts,
-            long_clip_mask=self.long_clip_mask,
-            min_long_clip_inclusion_rate=self.config.min_long_clip_inclusion_rate,
-            long_clip_boost=self.config.long_clip_boost,
-            trials_so_far=self.trial_counter,
-            require_unseen=(self.trial_counter < int(self.config.cold_start_require_unseen_trials)),
+        self._activate_subset(
+            self._select_adaptive_subset(trials_so_far=self.trial_counter)
         )
-
-        # Diagnostic: print chosen subset size and a few names
-        try:
-            names = [self.video_names[i] for i in next_subset]
-            print(f"[info] Trial {self.trial_counter}: selected subset size {len(next_subset)}: {names[:5]}{'...' if len(names)>5 else ''}")
-        except Exception:
-            pass
-
-        # Safety fallback: if selector failed, sample a mid-sized random subset
-        if not next_subset or len(next_subset) < self.config.min_subset_size:
-            k = max(self.config.min_subset_size, min(6, self.n))
-            next_subset = list(range(min(self.n, k)))
-
-        # Avoid repeating the exact same subset
-        if set(next_subset) == set(self.current_subset_indices) and len(next_subset) < self.n:
-            # Add one new item if available
-            remaining = [i for i in range(self.n) if i not in next_subset]
-            if remaining:
-                next_subset = next_subset + [remaining[0]]
-
-        self.current_subset_indices = next_subset
-        self.last_subset = list(next_subset)
-        # Update last anchor pair from the first two indices (selection starts from anchors)
-        if len(next_subset) >= 2:
-            a, b = int(next_subset[0]), int(next_subset[1])
-            self.last_anchor_pair = (min(a, b), max(a, b))
         return True
 
     def is_experiment_complete(self) -> bool:
@@ -356,6 +389,7 @@ class AdaptiveMultiarrangementExperiment:
             "evidence_threshold": float(self.config.evidence_threshold),
             "evidence_weight_mode": str(self.config.evidence_weight_mode),
             "utility_exponent": float(self.config.utility_exponent),
+            "skip_initial": bool(self.config.skip_initial),
             "rng_seed": int(self.rng_seed) if self.rng_seed is not None else None,
         }
         import json

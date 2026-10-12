@@ -296,6 +296,13 @@ def _time_limit_reached(session: dict[str, Any], study: dict[str, Any]) -> bool:
     return datetime.now(timezone.utc) >= (started_at + timedelta(minutes=minutes))
 
 
+def _skip_initial_requested(config: dict[str, Any]) -> bool:
+    """Resolve the manuscript name and the public ``skip_first`` alias."""
+    if "skip_initial" in config:
+        return bool(config["skip_initial"])
+    return bool(config.get("skip_first", False))
+
+
 def _build_next_trial_response(
     session: dict[str, Any],
     study: dict[str, Any],
@@ -335,17 +342,23 @@ def _build_next_trial_response(
     if D is None or W is None or n_stimuli < 2:
         return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True), session_changed
 
-    if trial_index == 0 and not session.get("trial_arrangements"):
+    config = study["config"]
+    skip_initial = _skip_initial_requested(config)
+    if (
+        trial_index == 0
+        and not session.get("trial_arrangements")
+        and not skip_initial
+    ):
         return NextTrialResponse(
             trial_index=trial_index,
             subset_indices=list(range(n_stimuli)),
             is_final=False,
         ), session_changed
 
-    threshold = study["config"].get("evidence_threshold", 0.5)
-    stop_on_utility = bool(study["config"].get("stop_on_utility", False))
+    threshold = config.get("evidence_threshold", 0.5)
+    stop_on_utility = bool(config.get("stop_on_utility", False))
     if stop_on_utility:
-        utility_exponent = float(study["config"].get("utility_exponent", 10.0))
+        utility_exponent = float(config.get("utility_exponent", 10.0))
         upper = np.triu_indices(n_stimuli, 1)
         if upper[0].size > 0:
             utility_values = 1.0 - np.exp(-utility_exponent * W[upper])
@@ -354,14 +367,17 @@ def _build_next_trial_response(
     elif check_stopping_criterion(W, threshold):
         return NextTrialResponse(trial_index=trial_index, subset_indices=[], is_final=True), session_changed
 
-    config = study["config"]
     cold_start_trials = int(config.get("cold_start_require_unseen_trials", 0))
     require_unseen = cold_start_trials > 0 and trial_index < cold_start_trials
+    min_size = int(config.get("min_subset_size", 3))
+    max_size = config.get("max_subset_size")
+    if max_size is None and skip_initial:
+        max_size = min(n_stimuli, max(min_size, 6))
     subset = select_next_subset_lift_weakest(
         D,
         W,
-        min_size=int(config.get("min_subset_size", 3)),
-        max_size=config.get("max_subset_size"),
+        min_size=min_size,
+        max_size=max_size,
         utility_exponent=float(config.get("utility_exponent", 10.0)),
         time_cost_exponent=float(config.get("time_cost_exponent", 1.5)),
         durations=session.get("durations"),
@@ -482,6 +498,27 @@ def _get_or_create_schedule(
     return [list(batch) for batch in cached]
 
 
+def _get_or_create_repeat_schedule(study_id: UUID | str, n_stimuli: int, batch_size: int,
+                                   repeats: int, mode: str = "compact") -> list[list[int]]:
+    """Schedule in which every pair appears at least ``repeats`` times (cached per study): the fewest trials found in
+    compact mode, the most even schedule within 25% more trials in balanced mode."""
+    key = (str(study_id), n_stimuli, batch_size, "repeats", repeats, mode)
+    cached = _SCHEDULE_CACHE.get(key)
+    if cached is None:
+        from multiarrangement.core.budget import repeat_schedule
+
+        try:
+            cached = repeat_schedule(n_stimuli, batch_size, repeats, seed=42, mode=mode)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,  # Unprocessable Content
+                detail=(f"{repeats} repeats per pair are not available for {n_stimuli} stimuli in trials of "
+                        f"{batch_size}: {exc}. Choose fewer repeats or another batch size."),
+            ) from None
+        _SCHEDULE_CACHE[key] = cached
+    return [list(batch) for batch in cached]
+
+
 def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
     study = get_study(study_id)
     if study is None:
@@ -502,14 +539,20 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
         schedule_mode = str(study["config"].get("schedule_mode", "compact"))
         extra_fraction = 0.25 if schedule_mode == "balanced" else 0.0
         effective_batch = min(batch_size, n_stimuli)
-        batches = _get_or_create_schedule(
-            study_id,
-            n_stimuli,
-            effective_batch,
-            flex=flex,
-            algorithm=str(setcover_algorithm),
-            max_extra_fraction=extra_fraction,
-        )
+        repeats = int(study["config"].get("pair_repeats", 1) or 1)
+        if repeats > 1:
+            # every pair at least `repeats` times: fewest trials (compact) or most even within 25% more (balanced)
+            batches = _get_or_create_repeat_schedule(study_id, n_stimuli, effective_batch, repeats,
+                                                     mode="balanced" if schedule_mode == "balanced" else "compact")
+        else:
+            batches = _get_or_create_schedule(
+                study_id,
+                n_stimuli,
+                effective_batch,
+                flex=flex,
+                algorithm=str(setcover_algorithm),
+                max_extra_fraction=extra_fraction,
+            )
 
     seen = np.zeros((n_stimuli,), dtype=bool) if n_stimuli > 0 else None
     recent = np.zeros((n_stimuli,), dtype=float) if n_stimuli > 0 else None
@@ -520,6 +563,35 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
         for index, stimulus in enumerate(stimuli):
             duration = stimulus.get("duration_seconds")
             durations[index] = float(duration) if duration is not None else 0.0
+
+    counterbalance_index = 0
+    if batches and study["paradigm"] == Paradigm.SETCOVER:
+        family_size = max(
+            1,
+            int(study["config"].get("counterbalance_family_size", 16)),
+        )
+        counterbalance_index = len(list_sessions_for_study(study_id)) % family_size
+        try:
+            from coverlib.ordering import prepare_schedule_for_participant
+
+            batches = prepare_schedule_for_participant(
+                n_stimuli,
+                batches,
+                participant_index=counterbalance_index,
+                counterbalance=bool(
+                    study["config"].get("counterbalance_schedules", True)
+                ),
+                counterbalance_family_size=family_size,
+                optimize_order=bool(
+                    study["config"].get("optimize_trial_order", True)
+                ),
+                durations=durations,
+                seed=42,
+            )
+        except Exception:
+            # The cached certified block set remains valid even if optional
+            # presentation-level optimization is unavailable.
+            pass
 
     long_clip_mask = None
     long_clip_threshold_seconds = study["config"].get("long_clip_threshold_seconds")
@@ -558,6 +630,7 @@ def create_session(study_id: UUID, participant_id: str) -> SessionStartResponse:
         "last_anchor_pair": None,
         "long_clip_mask": long_clip_mask,
         "pairwise_ratings": {},
+        "counterbalance_index": counterbalance_index,
     }
 
     payload = {
@@ -793,7 +866,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         robust_huber_c = float(config.get("robust_huber_c", 0.9))
 
         if study["paradigm"] == Paradigm.SETCOVER:
-            setcover_weight_mode = config.get("setcover_weight_mode", config.get("weight_mode", "max"))
+            setcover_weight_mode = config.get("setcover_weight_mode", config.get("weight_mode", "rms"))
             setcover_weight_alpha = float(config.get("setcover_weight_alpha", config.get("weight_alpha", 2.0)))
             use_inverse_mds = bool(config.get("use_inverse_mds", False))
             inverse_mds_max_iter = int(config.get("inverse_mds_max_iter", 15))

@@ -2,7 +2,7 @@
 Lift-the-Weakest adaptive subset selection and weighted-average RDM estimation.
 
 Implements:
-- Evidence-weighted, iteratively scaled RDM estimation from multiple subset arrangements
+- Evidence-weighted RDM estimation from multiple subset arrangements, with trial scales aligned directly
 - Lift-the-weakest next-trial subset selection maximizing estimated trial efficiency
 """
 
@@ -261,6 +261,117 @@ def compute_evidence_matrix(
     )
 
 
+def _trial_log_scales(trial_info: List[Tuple[List[int], np.ndarray]], alpha: float) -> np.ndarray:
+    """Log-scale of every trial, from the pairs it shares with other trials.
+
+    Model: log d_ij^(t) = log D_ij + beta_t + error, fitted by weighted least squares with weights
+    (d / RMS of the trial)^alpha, so that small distances, whose logarithms are noisy, count less; with alpha = 2
+    a trial's pairs have mean weight one. Eliminating the pair effects leaves a weighted graph Laplacian L on the
+    trials, linked through shared pairs; pairs shown in only one trial carry no information about scale. Each
+    trial's arena scale (beta_t = 0) enters as a prior worth one average pair, so the log-scales solve
+    (L + I) beta = r exactly: a trial that shares no pair keeps the arena scale, weakly linked trials move little,
+    and well-linked trials follow the data. No iteration is involved.
+    """
+    n_trials = len(trial_info)
+    beta = np.zeros(n_trials, dtype=float)
+    if n_trials < 2:
+        return beta
+    obs: Dict[Tuple[int, int], List[Tuple[int, float, float]]] = {}
+    for t, (subset, D_sub) in enumerate(trial_info):
+        m = len(subset)
+        if m < 2:
+            continue
+        iu_sub = np.triu_indices(m, 1)
+        rms_t = _rms(D_sub[iu_sub])
+        if rms_t <= 1e-12:
+            continue
+        for a, b in zip(*iu_sub):
+            d = float(D_sub[a, b])
+            if d <= 1e-12:
+                continue
+            ia, ib = subset[a], subset[b]
+            key = (ia, ib) if ia < ib else (ib, ia)
+            obs.setdefault(key, []).append((t, float(np.log(d)), (d / rms_t) ** float(alpha)))
+    L = np.zeros((n_trials, n_trials), dtype=float)
+    r = np.zeros(n_trials, dtype=float)
+    for views in obs.values():
+        if len(views) < 2:
+            continue
+        idx = np.array([t for t, _, _ in views])
+        y = np.array([v for _, v, _ in views])
+        w = np.array([v for _, _, v in views])
+        W = float(w.sum())
+        if W <= 0.0:
+            continue
+        ybar = float(w @ y) / W
+        np.add.at(r, idx, w * (y - ybar))
+        np.add.at(L, (idx, idx), w)
+        L[np.ix_(idx, idx)] -= np.outer(w, w) / W
+    if not np.any(L):
+        return beta
+    return np.linalg.solve(L + np.eye(n_trials), r)
+
+
+def _aligned_average(
+    n_items: int,
+    trial_info: List[Tuple[List[int], np.ndarray]],
+    scales: np.ndarray,
+    *,
+    alpha: float,
+    weight_mode: str,
+    robust_method: Optional[str],
+    robust_winsor_high: float,
+    robust_huber_c: float,
+    D_ref: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Evidence-weighted average of the rescaled distances s_t * d (unnormalized)."""
+    _robust_winsor = (robust_method in ('winsor', 'winsor_resid_huber'))
+    _robust_huber_dist = (robust_method == 'huber')
+    num = np.zeros((n_items, n_items), dtype=float)
+    den = np.zeros((n_items, n_items), dtype=float)
+    for (subset, D_unscaled), s in zip(trial_info, scales):
+        m = len(subset)
+        if m < 2:
+            continue
+        D_scaled = D_unscaled * float(s)
+        iu_sub = np.triu_indices(m, 1)
+        maxd = float(np.max(D_unscaled[iu_sub])) if iu_sub[0].size else 0.0
+        for a in range(m):
+            ia = subset[a]
+            for b in range(a + 1, m):
+                ib = subset[b]
+                if weight_mode == 'max':
+                    dij = D_unscaled[a, b] / maxd if maxd > 1e-12 else 0.0
+                elif weight_mode == 'k2012':
+                    dij = D_unscaled[a, b]
+                else:  # 'rms': weights from the rescaled distances
+                    dij = D_scaled[a, b]
+                if _robust_winsor:
+                    hi = float(robust_winsor_high)
+                    if hi > 0.0:
+                        dij = min(dij, hi)
+                if _robust_huber_dist:
+                    c = float(robust_huber_c)
+                    if dij <= 0.0:
+                        w = 0.0
+                    else:
+                        w = (dij ** float(alpha)) * (1.0 if dij <= c else (c / dij))
+                else:
+                    w = dij ** float(alpha)
+                if D_ref is not None:  # residual Huber against a first-pass estimate on the same scale
+                    res = abs(D_scaled[a, b] - D_ref[ia, ib])
+                    c = float(robust_huber_c)
+                    if res > 1e-12:
+                        w *= (1.0 if res <= c else (c / res))
+                num[ia, ib] += D_scaled[a, b] * w
+                den[ia, ib] += w
+                num[ib, ia] += D_scaled[a, b] * w
+                den[ib, ia] += w
+    with np.errstate(invalid="ignore", divide="ignore"):
+        D = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
+    return np.nan_to_num(D)
+
+
 def estimate_rdm_weighted_average(
     n_items: int,
     trials: Iterable[TrialArrangement],
@@ -271,22 +382,18 @@ def estimate_rdm_weighted_average(
     robust_method: Optional[str] = None,  # 'winsor' | 'huber' | 'resid_huber' | 'winsor_resid_huber' | None
     robust_winsor_high: float = 0.98,
     robust_huber_c: float = 0.9,
-    weight_mode: str = 'max',  # 'max' (dnorm=d/max), 'rms' (scaled to match RMS), or 'k2012' (raw center-distance^alpha weights)
+    weight_mode: str = 'max',  # 'max' (dnorm=d/max), 'rms' (rescaled distances), or 'k2012' (raw center-distance^alpha weights)
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Estimate full RDM (n x n) via weighted average of iteratively scaled subset RDMS.
+    """Estimate the full RDM (n x n) as an evidence-weighted average of rescaled subset distances.
 
-    Weight per pair in a trial is configurable via `weight_mode`:
-        - 'k2012': evidence weight equals raw center-to-center distance^alpha (typically alpha=2),
-                   matching the description in inversemdsalgos.txt (no per-trial normalization).
-        - 'max':   evidence weight equals (d_ij / max_d_in_trial)^alpha (per-trial max normalization).
-        - 'rms':   evidence weight uses RMS-matched distances (D_scaled)^alpha.
-    Each trial subset distance matrix is scaled to match the current RDM estimate on its pairs.
-
-    Args:
-        n_items: total item count
-        trials: iterable of TrialArrangement
-        max_iter: maximum iterations for alternating scaling/averaging
-        tol: RMS difference threshold for convergence
+    Each trial's scale is estimated jointly from the pairs it shares with other trials (_trial_log_scales); each
+    group of trials linked by shared pairs keeps the scale of the arena. The estimate is the weighted average of
+    the rescaled distances, renormalized to unit off-diagonal RMS. Weight per pair in a trial (`weight_mode`):
+        - 'k2012': raw center-to-center distance^alpha, as in inversemdsalgos.txt (no per-trial normalization).
+        - 'max':   (d_ij / max_d_in_trial)^alpha (per-trial max normalization).
+        - 'rms':   rescaled distance^alpha.
+    The scales are solved exactly, so the result does not depend on an iteration count; `max_iter` and `tol`
+    are accepted for compatibility and unused.
 
     Returns:
         (D_est, W)
@@ -295,190 +402,26 @@ def estimate_rdm_weighted_average(
     """
     trials = list(trials)
     trial_info = _prepare_trial_info(trials)
-
-    # Seed current estimate D
-    D = np.zeros((n_items, n_items), dtype=float)
-    # If any full arrangement present, use it as seed (scaled to RMS=1)
-    seed_found = False
-    for subset, D_sub in trial_info:
-        if len(subset) == n_items:
-            # Directly set full D from this arrangement
-            D[:, :] = 0.0
-            for a in range(n_items):
-                for b in range(a + 1, n_items):
-                    D[a, b] = D[b, a] = D_sub[a, b]
-            seed_found = True
-            break
-
-    if not seed_found:
-        # Use evidence-weighted average of unscaled distances, embedded into full matrix
-        num = np.zeros((n_items, n_items), dtype=float)
-        den = np.zeros((n_items, n_items), dtype=float)
-        for subset, D_sub in trial_info:
-            m = len(subset)
-            for a in range(m):
-                ia = subset[a]
-                for b in range(a + 1, m):
-                    ib = subset[b]
-                    w = (D_sub[a, b] ** float(alpha))
-                    num[ia, ib] += D_sub[a, b] * w
-                    den[ia, ib] += w
-                    num[ib, ia] += D_sub[a, b] * w
-                    den[ib, ia] += w
-        with np.errstate(invalid="ignore", divide="ignore"):
-            D = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
-            D = np.nan_to_num(D)
-
-    # Scale D to RMS 1 (off-diagonal)
+    scales = np.exp(-_trial_log_scales(trial_info, alpha))
+    # Unit RMS over all rescaled distances, the scale the robust thresholds assume.
+    sq = [(s * D_sub[np.triu_indices(len(subset), 1)]) ** 2 for (subset, D_sub), s in zip(trial_info, scales)
+          if len(subset) >= 2]
+    g = float(np.sqrt(np.mean(np.concatenate(sq)))) if sq else 0.0
+    if g > 0:
+        scales = scales / g
+    common = dict(alpha=alpha, weight_mode=weight_mode, robust_method=robust_method,
+                  robust_winsor_high=robust_winsor_high, robust_huber_c=robust_huber_c)
+    D = _aligned_average(n_items, trial_info, scales, **common)
     iu = np.triu_indices(n_items, 1)
+    if robust_method in ('resid_huber', 'winsor_resid_huber'):
+        # Residuals are measured in units of the unit-RMS estimate, as the Huber threshold assumes.
+        g = _rms(D[iu])
+        if g > 0:
+            D = _aligned_average(n_items, trial_info, scales / g, D_ref=D / g, **common) * g
     rms_D = _rms(D[iu])
     if rms_D > 0:
         D *= (1.0 / rms_D)
-
-    # Alternating scaling / averaging
-    # Parse robust options
-    _robust_winsor = (robust_method in ('winsor', 'winsor_resid_huber'))
-    _robust_huber_dist = (robust_method == 'huber')
-    _robust_huber_resid = (robust_method in ('resid_huber', 'winsor_resid_huber'))
-
-    for _ in range(max_iter):
-        D_prev = D.copy()
-
-        # For each trial, compute scale to match D on its pairs
-        scaled_subs: List[Tuple[List[int], np.ndarray, np.ndarray]] = []
-        for subset, D_sub in trial_info:
-            # Extract current D on subset
-            m = len(subset)
-            D_slice = np.zeros((m, m), dtype=float)
-            for a in range(m):
-                ia = subset[a]
-                for b in range(m):
-                    ib = subset[b]
-                    D_slice[a, b] = D[ia, ib]
-            s = _scale_to_match_rms(D_sub, D_slice)
-            scaled = D_sub * s
-            scaled_subs.append((subset, scaled, D_sub))  # keep unscaled for weights
-
-        # Weighted average across trials
-        num = np.zeros((n_items, n_items), dtype=float)
-        den = np.zeros((n_items, n_items), dtype=float)
-        for subset, D_scaled, D_unscaled in scaled_subs:
-            m = len(subset)
-            # Current D on subset for residuals (same scale as D_scaled)
-            D_slice = np.zeros((m, m), dtype=float)
-            for a in range(m):
-                ia = subset[a]
-                for b in range(m):
-                    ib = subset[b]
-                    D_slice[a, b] = D[ia, ib]
-            if weight_mode == 'max':
-                iu_sub = np.triu_indices(m, 1)
-                maxd = float(np.max(D_unscaled[iu_sub])) if iu_sub[0].size else 0.0
-                scale_w = (1.0 / maxd) if maxd > 1e-12 else 0.0
-                for a in range(m):
-                    ia = subset[a]
-                    for b in range(a + 1, m):
-                        ib = subset[b]
-                        # evidence weight normalized within each trial (max-normalized)
-                        dij = D_unscaled[a, b] * scale_w
-                        if _robust_winsor:
-                            hi = float(robust_winsor_high)
-                            if hi > 0.0:
-                                dij = min(dij, hi)
-                        if _robust_huber_dist:
-                            c = float(robust_huber_c)
-                            if dij <= 0.0:
-                                w = 0.0
-                            else:
-                                wfactor = 1.0 if dij <= c else (c / dij)
-                                w = (dij ** float(alpha)) * wfactor
-                        else:
-                            w = dij ** float(alpha)
-                        # Residual Huber on RMS scale (D_scaled vs current D on subset)
-                        if _robust_huber_resid:
-                            r = abs(D_scaled[a, b] - D_slice[a, b])
-                            c = float(robust_huber_c)
-                            if r > 1e-12:
-                                w *= (1.0 if r <= c else (c / r))
-                        num[ia, ib] += D_scaled[a, b] * w
-                        den[ia, ib] += w
-                        num[ib, ia] += D_scaled[a, b] * w
-                        den[ib, ia] += w
-            elif weight_mode == 'k2012':
-                # Use raw center-to-center distances directly for weighting (no per-trial max normalization)
-                # WARNING: robust thresholds assume normalized distances; use with care.
-                for a in range(m):
-                    ia = subset[a]
-                    for b in range(a + 1, m):
-                        ib = subset[b]
-                        dij = D_unscaled[a, b]
-                        if _robust_winsor:
-                            hi = float(robust_winsor_high)
-                            if hi > 0.0:
-                                dij = min(dij, hi)
-                        if _robust_huber_dist:
-                            c = float(robust_huber_c)
-                            if dij <= 0.0:
-                                w = 0.0
-                            else:
-                                wfactor = 1.0 if dij <= c else (c / dij)
-                                w = (dij ** float(alpha)) * wfactor
-                        else:
-                            w = dij ** float(alpha)
-                        if _robust_huber_resid:
-                            r = abs(D_scaled[a, b] - D_slice[a, b])
-                            c = float(robust_huber_c)
-                            if r > 1e-12:
-                                w *= (1.0 if r <= c else (c / r))
-                        num[ia, ib] += D_scaled[a, b] * w
-                        den[ia, ib] += w
-                        num[ib, ia] += D_scaled[a, b] * w
-                        den[ib, ia] += w
-            else:  # weight_mode == 'rms'
-                # use RMS-matched distances (D_scaled) directly for weighting
-                for a in range(m):
-                    ia = subset[a]
-                    for b in range(a + 1, m):
-                        ib = subset[b]
-                        dij = D_scaled[a, b]
-                        if _robust_winsor:
-                            hi = float(robust_winsor_high)
-                            if hi > 0.0:
-                                dij = min(dij, hi)
-                        if _robust_huber_dist:
-                            c = float(robust_huber_c)
-                            if dij <= 0.0:
-                                w = 0.0
-                            else:
-                                wfactor = 1.0 if dij <= c else (c / dij)
-                                w = (dij ** float(alpha)) * wfactor
-                        else:
-                            w = dij ** float(alpha)
-                        if _robust_huber_resid:
-                            r = abs(D_scaled[a, b] - D_slice[a, b])
-                            c = float(robust_huber_c)
-                            if r > 1e-12:
-                                w *= (1.0 if r <= c else (c / r))
-                        num[ia, ib] += D_scaled[a, b] * w
-                        den[ia, ib] += w
-                        num[ib, ia] += D_scaled[a, b] * w
-                        den[ib, ia] += w
-        with np.errstate(invalid="ignore", divide="ignore"):
-            D = np.divide(num, den, out=np.zeros_like(num), where=den > 0)
-            D = np.nan_to_num(D)
-
-        # Scale to RMS 1 (off-diagonal)
-        rms_D = _rms(D[iu])
-        if rms_D > 0:
-            D *= (1.0 / rms_D)
-
-        # Convergence
-        diff = _rms((D - D_prev)[iu])
-        if diff < tol:
-            break
-
     np.fill_diagonal(D, 0.0)
-    # Build and return W according to requested weight_mode using final D
     W = _accumulate_weights(
         trial_info,
         D,
@@ -579,6 +522,12 @@ def select_next_subset_lift_weakest(
     maximize (utility gain) / (time cost), and stops when no addition improves TE.
     """
     n = D.shape[0]
+    # Pairs not yet shown have no distance estimate (0). Predicting their evidence gain from 0 would make the
+    # greedy growth ignore them, so they get the mean of the estimated distances (1 before any estimate).
+    D_gain = np.array(D, dtype=float, copy=True)
+    off = ~np.eye(n, dtype=bool)
+    shown = (np.asarray(W) > 0) & off
+    D_gain[off & ~shown] = float(np.mean(D_gain[shown])) if np.any(shown) else 1.0
     # 1–2: weakest pair
     masked = W.copy()
     np.fill_diagonal(masked, np.inf)
@@ -661,7 +610,7 @@ def select_next_subset_lift_weakest(
                 pool = unseen_pool
         for i in pool:
             candidate = nextISS + [i]
-            dW = _predict_evidence_gain_for_subset(candidate, D, arena_max=arena_max)
+            dW = _predict_evidence_gain_for_subset(candidate, D_gain, arena_max=arena_max)
             delta = 0.0
             for (a, b), inc in dW.items():
                 w0 = W[a, b]
@@ -712,7 +661,7 @@ def select_next_subset_lift_weakest(
         for i in list(available):
             candidate = nextISS + [i]
             # Predict evidence gain for this subset
-            dW = _predict_evidence_gain_for_subset(candidate, D, arena_max=arena_max)
+            dW = _predict_evidence_gain_for_subset(candidate, D_gain, arena_max=arena_max)
             # Compute utility gain only over affected pairs
             gain_pairs = list(dW.items())
             # Efficient utility delta: sum over only affected pairs
@@ -947,8 +896,9 @@ def _smacof_mds_2d(
 
     # Weights
     W = np.ones((n, n), dtype=float) - np.eye(n)
-    V = np.diag(np.sum(W, axis=1))  # (n-1) on diagonal
-    Vinv = np.linalg.pinv(V)
+    # For complete unit weights, the stress Laplacian is n*I - 11',
+    # not the diagonal degree matrix. Its pseudoinverse acts as 1/n on
+    # the centered columns of B @ X (the Guttman transform).
 
     def _pairwise_dist(X):
         # Euclidean distances
@@ -972,7 +922,7 @@ def _smacof_mds_2d(
         np.fill_diagonal(B, -np.sum(B, axis=1))
 
         # Update
-        X_new = Vinv @ (B @ X)
+        X_new = (B @ X) / n
         # Center to remove translation
         X_new -= np.mean(X_new, axis=0, keepdims=True)
 

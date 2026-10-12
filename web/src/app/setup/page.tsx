@@ -62,7 +62,11 @@ interface ExperimentConfig {
     videos: VideoFile[];
     batchSize: number;
     scheduleMode: "compact" | "balanced";
+    pairRepeats: number;
     flex: boolean;
+    optimizeTrialOrder: boolean;
+    counterbalanceSchedules: boolean;
+    counterbalanceFamilySize: number;
     setcoverWeightMode: WeightMode;
     setcoverWeightAlpha: number;
     useInverseMds: boolean;
@@ -74,6 +78,7 @@ interface ExperimentConfig {
     robustHuberC: number;
     evidenceThreshold: number;
     stopOnUtility: boolean;
+    skipInitial: boolean;
     minSubsetSize: number;
     maxSubsetSize: number;
     evidenceWeightMode: WeightMode;
@@ -108,8 +113,12 @@ const defaultConfig: ExperimentConfig = {
     videos: [],
     batchSize: 6,
     scheduleMode: "compact",
+    pairRepeats: 1,
     flex: false,
-    setcoverWeightMode: "max",
+    optimizeTrialOrder: true,
+    counterbalanceSchedules: true,
+    counterbalanceFamilySize: 16,
+    setcoverWeightMode: "rms",
     setcoverWeightAlpha: 2.0,
     useInverseMds: false,
     inverseMdsMaxIter: 15,
@@ -120,6 +129,7 @@ const defaultConfig: ExperimentConfig = {
     robustHuberC: 0.9,
     evidenceThreshold: 0.35,
     stopOnUtility: false,
+    skipInitial: false,
     minSubsetSize: 4,
     maxSubsetSize: 6,
     evidenceWeightMode: "k2012",
@@ -437,7 +447,11 @@ export default function SetupPage() {
             if (config.paradigm === "setcover") {
                 studyConfig.batch_size = config.batchSize;
                 studyConfig.schedule_mode = config.scheduleMode;
+                studyConfig.pair_repeats = config.pairRepeats;
                 studyConfig.flex = config.flex;
+                studyConfig.optimize_trial_order = config.optimizeTrialOrder;
+                studyConfig.counterbalance_schedules = config.counterbalanceSchedules;
+                studyConfig.counterbalance_family_size = config.counterbalanceFamilySize;
                 studyConfig.setcover_weight_mode = config.setcoverWeightMode;
                 studyConfig.setcover_weight_alpha = config.setcoverWeightAlpha;
                 studyConfig.use_inverse_mds = config.useInverseMds;
@@ -449,6 +463,7 @@ export default function SetupPage() {
             } else {
                 studyConfig.evidence_threshold = config.evidenceThreshold;
                 studyConfig.stop_on_utility = config.stopOnUtility;
+                studyConfig.skip_initial = config.skipInitial;
                 studyConfig.min_subset_size = config.minSubsetSize;
                 studyConfig.max_subset_size = config.maxSubsetSize;
                 studyConfig.evidence_weight_mode = config.evidenceWeightMode;
@@ -581,7 +596,11 @@ export default function SetupPage() {
             if (config.paradigm === "setcover") {
                 studyConfig.batch_size = config.batchSize;
                 studyConfig.schedule_mode = config.scheduleMode;
+                studyConfig.pair_repeats = config.pairRepeats;
                 studyConfig.flex = config.flex;
+                studyConfig.optimize_trial_order = config.optimizeTrialOrder;
+                studyConfig.counterbalance_schedules = config.counterbalanceSchedules;
+                studyConfig.counterbalance_family_size = config.counterbalanceFamilySize;
                 studyConfig.setcover_weight_mode = config.setcoverWeightMode;
                 studyConfig.setcover_weight_alpha = config.setcoverWeightAlpha;
                 studyConfig.use_inverse_mds = config.useInverseMds;
@@ -594,6 +613,7 @@ export default function SetupPage() {
 
                 studyConfig.evidence_threshold = config.evidenceThreshold;
                 studyConfig.stop_on_utility = config.stopOnUtility;
+                studyConfig.skip_initial = config.skipInitial;
                 studyConfig.min_subset_size = config.minSubsetSize;
                 studyConfig.max_subset_size = config.maxSubsetSize;
                 studyConfig.evidence_weight_mode = config.evidenceWeightMode;
@@ -1123,9 +1143,22 @@ export default function SetupPage() {
                                 </select>
                                 <div style={{ fontSize: 12, color: "#888", marginTop: 4 }}>
                                     {config.scheduleMode === "balanced"
-                                        ? "Every stimulus pair appears at most twice where a certified schedule exists."
-                                        : "Minimum session length; some pairs may repeat more often than others."}
+                                        ? (config.pairRepeats > 1
+                                            ? `Every stimulus pair appears at least ${config.pairRepeats} times, spread as evenly as possible with up to 25% more trials than the shortest such schedule.`
+                                            : "Pair counts kept as even as possible, with up to 25% more trials.")
+                                        : (config.pairRepeats > 1
+                                            ? `Every stimulus pair appears at least ${config.pairRepeats} times, in the fewest trials found.`
+                                            : "Minimum session length; some pairs may repeat more often than others.")}
                                 </div>
+                            </div>
+                            <div>
+                                <label style={labelStyle}>Repeats per pair</label>
+                                <select value={config.pairRepeats} onChange={(e) => setConfig({ ...config, pairRepeats: parseInt(e.target.value) || 1 })} style={inputStyle}>
+                                    <option value={1}>1 (every pair at least once)</option>
+                                    <option value={2}>2</option>
+                                    <option value={3}>3</option>
+                                    <option value={4}>4</option>
+                                </select>
                             </div>
                             <div>
                                 <label style={labelStyle}>Weight Mode</label>
@@ -1166,6 +1199,39 @@ export default function SetupPage() {
                                     <label htmlFor="flex-setcover" style={{ color: "#aaa", fontSize: 12 }}>
                                         Use flexible batch sizes
                                     </label>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <input
+                                        id="optimize-order-setcover"
+                                        type="checkbox"
+                                        checked={config.optimizeTrialOrder}
+                                        onChange={(e) => setConfig({ ...config, optimizeTrialOrder: e.target.checked })}
+                                    />
+                                    <label htmlFor="optimize-order-setcover" style={{ color: "#aaa", fontSize: 12 }}>
+                                        Balance early trial prefixes
+                                    </label>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                    <input
+                                        id="counterbalance-setcover"
+                                        type="checkbox"
+                                        checked={config.counterbalanceSchedules}
+                                        onChange={(e) => setConfig({ ...config, counterbalanceSchedules: e.target.checked })}
+                                    />
+                                    <label htmlFor="counterbalance-setcover" style={{ color: "#aaa", fontSize: 12 }}>
+                                        Counterbalance schedules across participants
+                                    </label>
+                                </div>
+                                <div>
+                                    <label style={labelStyle}>Counterbalance Family Size</label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        max={128}
+                                        value={config.counterbalanceFamilySize}
+                                        onChange={(e) => setConfig({ ...config, counterbalanceFamilySize: Math.max(1, Math.min(128, parseInt(e.target.value) || 16)) })}
+                                        style={inputStyle}
+                                    />
                                 </div>
                                 <div>
                                     <label style={labelStyle}>Inverse MDS Max Iter</label>
@@ -1219,6 +1285,17 @@ export default function SetupPage() {
                                 />
                                 <label htmlFor="stop-on-utility" style={{ color: "#aaa", fontSize: 12 }}>
                                     Stop on utility threshold
+                                </label>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                <input
+                                    id="skip-initial-adaptive"
+                                    type="checkbox"
+                                    checked={config.skipInitial}
+                                    onChange={(e) => setConfig({ ...config, skipInitial: e.target.checked })}
+                                />
+                                <label htmlFor="skip-initial-adaptive" style={{ color: "#aaa", fontSize: 12 }}>
+                                    Skip all-item orientation trial
                                 </label>
                             </div>
                             <div>

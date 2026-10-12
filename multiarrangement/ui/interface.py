@@ -651,7 +651,8 @@ class BaseInterface(ABC):
             if video_name in self.video_positions:
                 positions_for_recording[video_name] = self.video_positions[video_name]
                 
-        self.experiment.record_arrangement(positions_for_recording)
+        self.experiment.record_arrangement(positions_for_recording, arena_center=self.arena_center,
+                                           arena_radius=self.arena_radius)
         
         # Advance to next batch
         has_next = self.experiment.advance_to_next_batch()

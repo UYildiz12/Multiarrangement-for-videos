@@ -49,8 +49,12 @@ class SetCoverConfig(BaseModel):
     batch_size: int = Field(default=6, ge=3, le=12)
     flex: bool = False
     setcover_algorithm: str = "balanced"
+    optimize_trial_order: bool = True
+    counterbalance_schedules: bool = True
+    counterbalance_family_size: int = Field(default=16, ge=1, le=128)
+    pair_repeats: int = Field(default=1, ge=1, le=4)
     weight_alpha: float = 2.0
-    weight_mode: str = "max"
+    weight_mode: str = "rms"
     use_inverse_mds: bool = False
 
 
@@ -59,10 +63,18 @@ class AdaptiveConfig(BaseModel):
     evidence_threshold: float = Field(default=0.35, ge=0.0, le=1.0)
     min_subset_size: int = Field(default=4, ge=3)
     max_subset_size: int = Field(default=6, le=12)
+    skip_initial: bool = False
+    skip_first: Optional[bool] = None
     utility_exponent: float = 10.0
     use_inverse_mds: bool = True
     inverse_mds_max_iter: int = 15
     inverse_mds_step_c: float = 0.3
+
+    @model_validator(mode="after")
+    def resolve_skip_first_alias(self) -> "AdaptiveConfig":
+        if self.skip_first is not None:
+            self.skip_initial = bool(self.skip_first)
+        return self
 
 
 class PairwiseConfig(BaseModel):

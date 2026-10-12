@@ -1,4 +1,10 @@
 import numpy as np
+import pytest
+
+from multiarrangement.adaptive.adaptive_experiment import (
+    AdaptiveConfig,
+    AdaptiveMultiarrangementExperiment,
+)
 from multiarrangement.adaptive.lift_weakest import (
     TrialArrangement,
     estimate_rdm_weighted_average,
@@ -118,3 +124,47 @@ def test_smacof_converges_beyond_first_iteration():
     iu = np.triu_indices(12, 1)
     stress = float(np.sum((Dhat[iu] - D_noisy[iu]) ** 2))
     assert stress < 5.4
+
+
+def _adaptive_experiment(tmp_path, monkeypatch, config):
+    for index in range(8):
+        (tmp_path / f"clip_{index}.mp4").write_bytes(b"")
+    monkeypatch.setattr(
+        AdaptiveMultiarrangementExperiment,
+        "_estimate_durations",
+        lambda self: np.ones(self.n, dtype=float),
+    )
+    return AdaptiveMultiarrangementExperiment(
+        input_directory=str(tmp_path),
+        config=config,
+    )
+
+
+def test_adaptive_default_starts_with_all_item_orientation(tmp_path, monkeypatch):
+    experiment = _adaptive_experiment(
+        tmp_path,
+        monkeypatch,
+        AdaptiveConfig(min_subset_size=3, max_subset_size=4),
+    )
+
+    assert experiment.current_subset_indices == list(range(8))
+    assert experiment.trial_counter == 0
+    assert experiment.trials == []
+
+
+@pytest.mark.parametrize("flag", ["skip_initial", "skip_first"])
+def test_skip_initial_starts_immediately_with_ltw_subset(tmp_path, monkeypatch, flag):
+    experiment = _adaptive_experiment(
+        tmp_path,
+        monkeypatch,
+        AdaptiveConfig(
+            min_subset_size=3,
+            max_subset_size=4,
+            **{flag: True},
+        ),
+    )
+
+    assert 3 <= len(experiment.current_subset_indices) <= 4
+    assert set(experiment.current_subset_indices) != set(range(8))
+    assert experiment.trial_counter == 0
+    assert experiment.trials == []

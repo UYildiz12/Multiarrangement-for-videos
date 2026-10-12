@@ -17,6 +17,8 @@ def read_blocks_file(path: Path, v: int, k: int) -> List[Tuple[int,...]]:
             if not ln or ln.startswith("#"): continue
             nums = [int(x) for x in ln.split()]
             if len(nums) != k: continue
+            if len(set(nums)) != k:
+                raise ValueError(f"{path}: block contains repeated items.")
             blocks.append(tuple(sorted(nums)))
     if not blocks: return []
     zero_based = any(0 in b for b in blocks)
@@ -25,6 +27,8 @@ def read_blocks_file(path: Path, v: int, k: int) -> List[Tuple[int,...]]:
     for b in blocks:
         if any(x < 0 or x >= v for x in b):
             raise ValueError(f"{path}: item out of range for v={v}.")
+    if len(set(blocks)) != len(blocks):
+        raise ValueError(f"{path}: schedule contains repeated identical blocks.")
     return blocks
 
 def save_blocks_file(path: Path, blocks: List[Tuple[int,...]], indexing: str = "zero") -> None:

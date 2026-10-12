@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, List, Sequence, Tuple
 
+from .certificates import balanced_sort_key as _exact_balanced_sort_key
+
 
 Block = Tuple[int, ...]
 
@@ -149,25 +151,14 @@ def normalized_balance_metrics(
 
 
 def balance_sort_key(v: int, k: int, blocks: Sequence[Sequence[int]]) -> Tuple[object, ...]:
-    """Lexicographic score for selecting scientifically balanced covers."""
-    metrics = normalized_balance_metrics(v, k, blocks)
-    if not metrics.complete:
-        return (
-            1,
-            metrics.missing_pairs,
-            round(metrics.missing_pair_fraction, 12),
-            metrics.n_blocks,
-        )
-    return (
-        0,
-        round(metrics.lambda_max_ratio, 12),
-        metrics.lambda_max,
-        round(metrics.normalized_pair_sumsq_excess, 12),
-        round(metrics.pairs_at_lambda_max_fraction, 12),
-        round(metrics.normalized_item_sumsq_excess, 12),
-        metrics.item_range,
-        metrics.n_blocks,
-    )
+    """Exact balanced-mode score.
+
+    Diagnostics remain normalized for reporting, but selection uses the raw
+    concurrence vector: lambda_max, the number of pairs at that level, and
+    every lower level in order.  This prevents a ratio threshold from accepting
+    a dominated schedule.
+    """
+    return _exact_balanced_sort_key(v, k, blocks)
 
 
 def balance_score(v: int, blocks: Sequence[Sequence[int]]) -> Tuple[int, int, int, int, int, int]:

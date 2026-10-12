@@ -26,6 +26,7 @@ SESSION_STATE_KEYS = {
     "last_anchor_pair",
     "long_clip_mask",
     "pairwise_ratings",
+    "counterbalance_index",
 }
 
 

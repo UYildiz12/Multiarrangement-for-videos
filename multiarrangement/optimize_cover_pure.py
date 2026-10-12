@@ -8,6 +8,13 @@ import argparse, html, math, random, re, sys, time, urllib.request, os
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+# Direct source-tree execution puts only ``multiarrangement/`` on sys.path.
+# Add its parent when the sibling ``coverlib`` package is present; installed
+# entry points already have the correct site-packages path.
+_SOURCE_ROOT = Path(__file__).resolve().parent.parent
+if (_SOURCE_ROOT / "coverlib").is_dir() and str(_SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_SOURCE_ROOT))
+
 # ---------------- combinatorial helpers ----------------
 def pair_index(i: int, j: int, v: int) -> int:
     if i > j: i, j = j, i
@@ -41,11 +48,21 @@ def histogram(counts: List[int]) -> Dict[int,int]:
 
 def schonheim_lb(v: int, k: int) -> int:
     # ceil(v/k * ceil((v-1)/(k-1)))
-    return math.ceil((v / k) * math.ceil((v - 1) / (k - 1)))
+    replication_minimum = (v + k - 3) // (k - 1)
+    return (v * replication_minimum + k - 1) // k
 
 # ---------------- LJCR fetch (robust parser) ----------------
 LJCR_URL = "https://ljcr.dmgordon.org/cover/show_cover.php?v={v}&k={k}&t=2"
 _INT_RE = re.compile(r"-?\d+")
+
+
+def _valid_ljcr_block(nums: List[int], v: int, k: int) -> bool:
+    return (
+        len(nums) == k
+        and len(set(nums)) == k
+        and all(1 <= item <= v for item in nums)
+    )
+
 
 def parse_blocks_from_html(html_text: str, v: int, k: int) -> List[Tuple[int,...]]:
     text = html.unescape(html_text)
@@ -56,17 +73,17 @@ def parse_blocks_from_html(html_text: str, v: int, k: int) -> List[Tuple[int,...
         for m in re.finditer(fr"(?is)<{tag}[^>]*>(.*?)</{tag}>", text):
             for line in m.group(1).splitlines():
                 nums = [int(x) for x in _INT_RE.findall(line)]
-                if len(nums) == k:
+                if _valid_ljcr_block(nums, v, k):
                     blk = tuple(sorted(x-1 for x in nums))
-                    if all(0 <= x < v for x in blk): blocks.append(blk)
+                    blocks.append(blk)
         if blocks: return blocks
 
     # Strategy 2: per-line
     for line in text.splitlines():
         nums = [int(x) for x in _INT_RE.findall(line)]
-        if len(nums) == k:
+        if _valid_ljcr_block(nums, v, k):
             blk = tuple(sorted(x-1 for x in nums))
-            if all(0 <= x < v for x in blk): blocks.append(blk)
+            blocks.append(blk)
     if blocks: return blocks
 
     # Strategy 3: collect long run after first k-tuple, chunk
@@ -74,16 +91,17 @@ def parse_blocks_from_html(html_text: str, v: int, k: int) -> List[Tuple[int,...
     for line in text.splitlines():
         nums = [int(x) for x in _INT_RE.findall(line)]
         if not nums: continue
-        if not seen_first and len(nums) == k:
+        if not seen_first and _valid_ljcr_block(nums, v, k):
             seen_first = True; allints.extend(nums)
         elif seen_first:
             allints.extend(nums)
     if allints:
         for i in range(0, len(allints), k):
             chunk = allints[i:i+k]
-            if len(chunk) != k: continue
+            if not _valid_ljcr_block(chunk, v, k):
+                continue
             blk = tuple(sorted(x-1 for x in chunk))
-            if all(0 <= x < v for x in blk): blocks.append(blk)
+            blocks.append(blk)
     return blocks
 
 def fetch_ljcr_cover(v: int, k: int) -> List[Tuple[int,...]]:
@@ -110,9 +128,11 @@ def read_blocks_file(path: Path, v: int, k: int) -> List[Tuple[int,...]]:
             ln = ln.strip().replace(",", " ")
             if not ln or ln.startswith("#"): continue
             nums = [int(x) for x in ln.split()]
-            if len(nums) != k: 
+            if len(nums) != k:
                 # tolerate ragged lines (skip)
                 continue
+            if len(set(nums)) != k:
+                raise ValueError(f"{path}: block contains repeated items.")
             blocks.append(tuple(sorted(nums)))
     if not blocks: return []
     # detect indexing: if any 0 present, assume 0-based; else assume 1-based
@@ -123,6 +143,8 @@ def read_blocks_file(path: Path, v: int, k: int) -> List[Tuple[int,...]]:
     for b in blocks:
         if any(x < 0 or x >= v for x in b):
             raise ValueError(f"{path}: item out of range for v={v}.")
+    if len(set(blocks)) != len(blocks):
+        raise ValueError(f"{path}: schedule contains repeated identical blocks.")
     return blocks
 
 def save_blocks_file(path: Path, blocks: List[Tuple[int,...]], indexing: str = "zero") -> None:
@@ -668,7 +690,8 @@ def main():
     rng = random.Random(args.seed)
     random.seed(args.seed)
 
-    # Seed blocks: seed-file > cache (offline-first) > LJCR fetch
+    # Seed blocks: seed-file > certified frontier > cache/LJCR.
+    frontier_blocks = None
     if args.seed_file:
         path = Path(args.seed_file)
         blocks = read_blocks_file(path, v, k)
@@ -677,7 +700,39 @@ def main():
             sys.exit(1)
         print(f"Loaded local seed: {path} (blocks={len(blocks)})")
     else:
-        blocks = get_seed_blocks(v, k, cache_dir, offline_first=True or args.offline_first, offline_only=args.offline_only)
+        try:
+            from coverlib.frontier import select_frontier_cover
+
+            frontier = select_frontier_cover(
+                v,
+                k,
+                package_dir=Path(__file__).resolve().parent,
+                mode="compact",
+            )
+            if frontier is not None:
+                frontier_blocks = list(frontier.blocks)
+                blocks = list(frontier.blocks)
+                print(
+                    f"Loaded certified frontier:{frontier.source} "
+                    f"(blocks={len(blocks)})"
+                )
+            else:
+                blocks = get_seed_blocks(
+                    v,
+                    k,
+                    cache_dir,
+                    offline_first=True or args.offline_first,
+                    offline_only=args.offline_only,
+                )
+        except Exception as exc:
+            print(f"Certified frontier unavailable ({exc}); using cache/LJCR.")
+            blocks = get_seed_blocks(
+                v,
+                k,
+                cache_dir,
+                offline_first=True or args.offline_first,
+                offline_only=args.offline_only,
+            )
 
     # If under-covered (rare for LJCR), repair then prune
     counts, _ = coverage_from_blocks(v, blocks)
@@ -704,7 +759,10 @@ def main():
     avg_lambda = b * (k*(k-1)//2) / P
     print(f"Seed (after repair/prune): b={b}, Schonheim>={schonheim_lb(v,k)}, avg lambda={avg_lambda:.3f}")
     freq = vertex_frequencies(v, blocks)
-    lmax_vertex_lb = max((7*f + (v-2)) // (v-1) for f in freq)  # ceil(7f/(v-1))
+    lmax_vertex_lb = max(
+        ((k - 1) * f + (v - 2)) // (v - 1)
+        for f in freq
+    )
     print(f"Vertex-frequency lower bound on lambda_max: >= {lmax_vertex_lb} (max f_i={max(freq)})")
     # Prepare output path early so we can save on timeout
     outpath = Path(args.outfile or f"rebalance_v{v}_k{k}.txt")
@@ -718,10 +776,31 @@ def main():
             return None
         return max(0.0, deadline - time.time())
 
+    def best_output_blocks():
+        current = list(opt.blocks)
+        if frontier_blocks is None:
+            return current
+        try:
+            from coverlib.certificates import compact_sort_key
+
+            if compact_sort_key(v, k, frontier_blocks) < compact_sort_key(
+                v,
+                k,
+                current,
+            ):
+                return list(frontier_blocks)
+        except Exception:
+            pass
+        return current
+
     def maybe_timeout():
         if deadline is not None and time.time() >= deadline:
             print("Time limit reached; saving current cover…")
-            save_blocks_file(outpath, opt.blocks, indexing=("one" if one_based else "zero"))
+            save_blocks_file(
+                outpath,
+                best_output_blocks(),
+                indexing=("one" if one_based else "zero"),
+            )
             print("Saved improved cover to", outpath)
             sys.exit(0)
     print("Initial  lambda_max:", opt.lambda_max(), "hist:", opt.histogram(), "sumsq:", opt.sumsq())
@@ -795,7 +874,7 @@ def main():
     print("Final    lambda_max:", opt.lambda_max(), "hist:", opt.histogram(), "sumsq:", opt.sumsq())
 
     with outpath.open("w", encoding="utf-8") as f:
-        for blk in opt.blocks:
+        for blk in best_output_blocks():
             if one_based: f.write(" ".join(str(x+1) for x in blk) + "\n")
             else:         f.write(" ".join(str(x)   for x in blk) + "\n")
     print("Saved improved cover to", outpath)

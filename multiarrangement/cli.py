@@ -278,6 +278,28 @@ def batch_generator_cli():
         action="store_true",
         help="Validate the generated batches"
     )
+    parser.add_argument(
+        "--no-optimize-trial-order",
+        action="store_true",
+        help="Keep the stored block order instead of balancing early prefixes",
+    )
+    parser.add_argument(
+        "--counterbalance",
+        action="store_true",
+        help="Relabel the schedule for a participant counterbalancing slot",
+    )
+    parser.add_argument(
+        "--participant-index",
+        type=int,
+        default=0,
+        help="Zero-based counterbalancing slot (default: 0)",
+    )
+    parser.add_argument(
+        "--counterbalance-family-size",
+        type=int,
+        default=16,
+        help="Number of deterministic relabeled schedules (default: 16)",
+    )
     
     args = parser.parse_args()
     
@@ -307,7 +329,13 @@ def batch_generator_cli():
         print(f"Schönheim lower bound: {generator.calculate_schonheim_lower_bound()}")
         
         # Generate batches using the specified algorithm
-        batches = generator.optimize_batches(algorithm=args.algorithm)
+        batches = generator.optimize_batches(
+            algorithm=args.algorithm,
+            optimize_trial_order=not args.no_optimize_trial_order,
+            counterbalance=args.counterbalance,
+            participant_index=args.participant_index,
+            counterbalance_family_size=args.counterbalance_family_size,
+        )
             
         print(f"Generated {len(batches)} batches")
         
@@ -351,6 +379,13 @@ def main_adaptive():
     parser.add_argument("--time-limit-minutes", type=float, default=None, help="Total time limit (minutes)")
     parser.add_argument("--min-subset-size", type=int, default=3, help="Minimum items in a subset")
     parser.add_argument("--max-subset-size", type=int, default=None, help="Maximum items in a subset")
+    parser.add_argument(
+        "--skip-initial",
+        "--skip-first",
+        dest="skip_initial",
+        action="store_true",
+        help="Skip the initial all-item orientation trial",
+    )
     parser.add_argument("--use-inverse-mds", action="store_true", help="Enable inverse-MDS refinement per trial")
     parser.add_argument("--inverse-mds-max-iter", type=int, default=15, help="Max inverse-MDS iterations")
     parser.add_argument("--inverse-mds-step-c", type=float, default=0.3, help="Inverse-MDS step size c")
@@ -371,6 +406,7 @@ def main_adaptive():
         time_limit_seconds=(args.time_limit_minutes * 60.0) if args.time_limit_minutes else None,
         min_subset_size=max(3, args.min_subset_size),
         max_subset_size=args.max_subset_size,
+        skip_initial=args.skip_initial,
         use_inverse_mds=args.use_inverse_mds,
         inverse_mds_max_iter=args.inverse_mds_max_iter,
         inverse_mds_step_c=args.inverse_mds_step_c,

@@ -1,9 +1,8 @@
-"""Exact combinatorial design constructions for perfectly balanced schedules.
+"""Deterministic combinatorial constructions for certified schedules.
 
-Every constructor returns a list of sorted blocks (item indices 0..v-1) that
-forms a 2-(v, k, 1) design: every pair of items appears in exactly one block,
-at the minimum possible number of trials. These are provably optimal covering
-schedules; no search can do better.
+The base constructors return 2-(v, k, 1) designs.  One-point extension and
+truncation turn those exact designs into ideal pair covers on the neighbouring
+orders v+1 and v-1 without stochastic search.
 
 Provided constructions:
 - Steiner triple systems (k=3) for every admissible v (v = 1 or 3 mod 6):
@@ -11,23 +10,37 @@ Provided constructions:
   backtracking search) for v = 6t+1.
 - Projective planes PG(2, q): v = q^2+q+1, k = q+1, b = v.
 - Affine planes AG(2, q): v = q^2, k = q, b = q^2+q.
+- Minimum-length one-point extensions with concurrence in {1, 2}.
+- Ideal-concurrence one-point truncations for budgeted balanced mode.
 
-Finite fields GF(q) are supported for prime q and for q in {4, 8, 9} via
-hardcoded irreducible polynomials, which covers every plane with v <= 100.
+Finite fields GF(q) are supported for prime q and for q in {4, 8, 9, 16} via
+hardcoded irreducible polynomials, including fields used by transversal inflation.
 """
 
 from __future__ import annotations
 
+import itertools
+import math
+from dataclasses import dataclass
 from functools import lru_cache
-from typing import Dict, Iterator, List, Tuple
+from typing import Dict, Iterator, List, Sequence, Tuple
 
 Block = Tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class ConstructedCover:
+    """A deterministic schedule candidate with explicit provenance."""
+
+    source: str
+    blocks: Tuple[Block, ...]
 
 # Irreducible polynomials for small prime-power fields, coefficients low->high.
 _IRREDUCIBLE: Dict[int, Tuple[int, Tuple[int, ...]]] = {
     4: (2, (1, 1, 1)),       # x^2 + x + 1 over GF(2)
     8: (2, (1, 1, 0, 1)),    # x^3 + x + 1 over GF(2)
     9: (3, (1, 0, 1)),       # x^2 + 1 over GF(3)
+    16: (2, (1, 1, 0, 0, 1)),  # x^4 + x + 1 over GF(2)
 }
 
 
@@ -41,7 +54,7 @@ def _is_prime(n: int) -> bool:
 
 
 class GF:
-    """Finite field GF(q) for prime q or q in {4, 8, 9}.
+    """Finite field GF(q) for prime q or q in {4, 8, 9, 16}.
 
     Elements are integers 0..q-1. For prime powers, the integer encodes the
     polynomial's coefficients in base p (low degree first).
@@ -256,6 +269,154 @@ def exact_design(v: int, k: int) -> List[Block] | None:
             return affine_plane(q)
     except Exception:
         return None
+    return None
+
+
+def _verify_steiner_design(u: int, k: int, blocks: Sequence[Sequence[int]]) -> List[Block]:
+    normalized = [tuple(sorted(int(item) for item in block)) for block in blocks]
+    if any(len(block) != k or len(set(block)) != k for block in normalized):
+        raise ValueError("base design contains an invalid block")
+    if any(item < 0 or item >= u for block in normalized for item in block):
+        raise ValueError("base design contains an out-of-range point")
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("base design contains repeated blocks")
+    counts: Dict[Tuple[int, int], int] = {}
+    for block in normalized:
+        for pair in itertools.combinations(block, 2):
+            counts[pair] = counts.get(pair, 0) + 1
+    if len(counts) != math.comb(u, 2) or set(counts.values()) != {1}:
+        raise ValueError("base blocks are not a Steiner 2-design")
+    return normalized
+
+
+def one_point_extension(
+    u: int,
+    k: int,
+    base_blocks: Sequence[Sequence[int]],
+) -> List[Block]:
+    """Extend a 2-(u, k, 1) design to an ideal minimum cover on u+1 points.
+
+    The new point is ``u``.  The distinguished old point is ``u-1``; the
+    remaining points are partitioned deterministically into groups of size
+    ``k-1``.  The construction is valid when the replication number
+    ``r=(u-1)/(k-1)`` is at least ``k-2``.
+    """
+    design = _verify_steiner_design(u, k, base_blocks)
+    if (u - 1) % (k - 1):
+        raise ValueError("base design has a nonintegral replication number")
+    replication = (u - 1) // (k - 1)
+    if replication < k - 2:
+        raise ValueError("one-point extension needs r >= k-2")
+
+    distinguished = u - 1
+    new_point = u
+    remaining = list(range(u - 1))
+    groups = [
+        remaining[index * (k - 1) : (index + 1) * (k - 1)]
+        for index in range(replication)
+    ]
+    if any(len(group) != k - 1 for group in groups):
+        raise ValueError("failed to partition the old points")
+
+    added = [tuple(sorted(group + [new_point])) for group in groups]
+    representatives = [groups[index][0] for index in range(k - 2)]
+    added.append(tuple(sorted([distinguished, new_point] + representatives)))
+    return sorted(design + added)
+
+
+def one_point_truncation(
+    u: int,
+    k: int,
+    base_blocks: Sequence[Sequence[int]],
+) -> List[Block]:
+    """Remove one point from a 2-(u, k, 1) design and cyclically pad its groups.
+
+    The result is a cover on ``u-1`` points with the original number of trials,
+    ideal pair concurrence at that trial count, and ideal item replication.
+    """
+    design = _verify_steiner_design(u, k, base_blocks)
+    removed_point = u - 1
+    groups = [
+        tuple(item for item in block if item != removed_point)
+        for block in design
+        if removed_point in block
+    ]
+    groups = sorted(groups)
+    replication = len(groups)
+    if replication < 3:
+        raise ValueError("truncation needs at least three groups to avoid a two-cycle")
+    if any(len(group) != k - 1 for group in groups):
+        raise ValueError("invalid truncated group")
+    flattened = [item for group in groups for item in group]
+    if sorted(flattened) != list(range(u - 1)):
+        raise ValueError("blocks through the removed point do not partition the remainder")
+
+    kept = [block for block in design if removed_point not in block]
+    representatives = [group[0] for group in groups]
+    padded = [
+        tuple(sorted(group + (representatives[(index + 1) % replication],)))
+        for index, group in enumerate(groups)
+    ]
+    return sorted(kept + padded)
+
+
+def one_point_extension_design(v: int, k: int) -> List[Block] | None:
+    """Return a certified extension candidate for target parameters ``(v, k)``."""
+    if v <= k:
+        return None
+    base = exact_design(v - 1, k)
+    if base is None:
+        return None
+    try:
+        return one_point_extension(v - 1, k, base)
+    except ValueError:
+        return None
+
+
+def one_point_truncation_design(v: int, k: int) -> List[Block] | None:
+    """Return an ideal-concurrence truncation candidate for ``(v, k)``."""
+    base = exact_design(v + 1, k)
+    if base is None:
+        return None
+    try:
+        return one_point_truncation(v + 1, k, base)
+    except ValueError:
+        return None
+
+
+def structured_cover_candidates(v: int, k: int) -> List[ConstructedCover]:
+    """Return all supported deterministic candidates, without discarding ties."""
+    candidates: List[ConstructedCover] = []
+    exact = exact_design(v, k)
+    if exact is not None:
+        candidates.append(ConstructedCover("exact_design", tuple(exact)))
+    extension = one_point_extension_design(v, k)
+    if extension is not None:
+        candidates.append(ConstructedCover("one_point_extension", tuple(extension)))
+    truncation = one_point_truncation_design(v, k)
+    if truncation is not None:
+        candidates.append(ConstructedCover("one_point_truncation", tuple(truncation)))
+
+    unique: List[ConstructedCover] = []
+    seen = set()
+    for candidate in candidates:
+        identity = tuple(sorted(candidate.blocks))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(candidate)
+    return unique
+
+
+def certified_compact_cover(v: int, k: int) -> ConstructedCover | None:
+    """Return a deterministic candidate that attains the Schönheim bound."""
+    replication_minimum = (v + k - 3) // (k - 1)
+    lower_bound = (v * replication_minimum + k - 1) // k
+    for candidate in structured_cover_candidates(v, k):
+        if candidate.source == "one_point_truncation":
+            continue
+        if len(candidate.blocks) == lower_bound:
+            return candidate
     return None
 
 

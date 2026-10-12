@@ -1,5 +1,7 @@
 ﻿"""Tests for schedule diagnostics and the per-study schedule cache."""
 
+import pytest
+
 from app.routers.results import schedule_diagnostics
 from app.routers import sessions as sessions_module
 
@@ -70,6 +72,70 @@ class TestScheduleCache:
         sessions_module._get_or_create_schedule("study-y", 3, 2, flex=False, algorithm="optimal")
         assert calls["n"] == 2
 
+    def test_hosted_sessions_use_sequential_counterbalance_slots(self, client, monkeypatch):
+        from coverlib.certificates import certify_schedule
+
+        base = [
+            [0, 2, 5],
+            [1, 3, 4],
+            [0, 1, 3],
+            [1, 2, 3],
+            [2, 4, 5],
+            [1, 3, 5],
+            [0, 3, 4],
+        ]
+        monkeypatch.setattr(
+            sessions_module,
+            "_get_or_create_schedule",
+            lambda *args, **kwargs: [list(block) for block in base],
+        )
+        study = client.post(
+            "/api/v1/studies",
+            json={
+                "name": "Counterbalance",
+                "paradigm": "setcover",
+                "config": {
+                    "batch_size": 3,
+                    "counterbalance_schedules": True,
+                    "counterbalance_family_size": 4,
+                    "optimize_trial_order": True,
+                },
+            },
+        ).json()
+        client.post(
+            f"/api/v1/studies/{study['id']}/stimuli",
+            json={
+                "stimuli": [
+                    {
+                        "ordinal": index,
+                        "filename": f"clip_{index}.mp4",
+                        "media_type": "video",
+                        "media_url": f"https://example.com/{index}.mp4",
+                    }
+                    for index in range(6)
+                ]
+            },
+        )
+        session_ids = [
+            client.post(
+                f"/api/v1/studies/{study['id']}/sessions",
+                json={"participant_id": f"P{index}"},
+            ).json()["session_id"]
+            for index in range(2)
+        ]
+        records = [
+            sessions_module.get_session_record(session_id)
+            for session_id in session_ids
+        ]
+
+        assert [record["counterbalance_index"] for record in records] == [0, 1]
+        first = certify_schedule(6, 3, records[0]["batches"])
+        second = certify_schedule(6, 3, records[1]["batches"])
+        assert first.concurrence_profile == second.concurrence_profile
+        assert sorted(map(tuple, records[0]["batches"])) != sorted(
+            map(tuple, records[1]["batches"])
+        )
+
 
 class TestAdaptiveInverseMdsDefault:
     def test_hosted_adaptive_does_not_refine_by_default(self, client, monkeypatch):
@@ -124,3 +190,52 @@ class TestAdaptiveInverseMdsDefault:
         )
         assert response.status_code == 200
         assert calls["n"] == 0
+
+
+class TestAdaptiveSkipInitial:
+    @pytest.mark.parametrize("flag", ["skip_initial", "skip_first"])
+    def test_first_trial_is_ltw_subset_when_orientation_is_skipped(
+        self,
+        client,
+        flag,
+    ):
+        study = client.post(
+            "/api/v1/studies",
+            json={
+                "name": f"Adaptive {flag}",
+                "paradigm": "adaptive",
+                "config": {
+                    flag: True,
+                    "min_subset_size": 3,
+                    "max_subset_size": 4,
+                    "evidence_threshold": 999,
+                },
+            },
+        ).json()
+        client.post(
+            f"/api/v1/studies/{study['id']}/stimuli",
+            json={
+                "stimuli": [
+                    {
+                        "ordinal": index,
+                        "filename": f"clip_{index}.mp4",
+                        "media_type": "video",
+                        "media_url": f"https://example.com/{index}.mp4",
+                    }
+                    for index in range(8)
+                ]
+            },
+        )
+        session_id = client.post(
+            f"/api/v1/studies/{study['id']}/sessions",
+            json={"participant_id": f"P-{flag}"},
+        ).json()["session_id"]
+
+        first_trial = client.get(
+            f"/api/v1/sessions/{session_id}/next"
+        ).json()
+
+        assert first_trial["trial_index"] == 0
+        assert first_trial["is_final"] is False
+        assert 3 <= len(first_trial["subset_indices"]) <= 4
+        assert set(first_trial["subset_indices"]) != set(range(8))

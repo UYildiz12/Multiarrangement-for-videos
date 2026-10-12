@@ -21,6 +21,16 @@ _logger = logging.getLogger(__name__)
 _warned_keys: Set[str] = set()
 
 
+def solve_schedule(v: int, k: int, **options):
+    """Optional exact scheduler shared with the desktop public library.
+
+    Returns the witness and stage ledger; callers must inspect feasibility and
+    proof flags before using a result. Existing session defaults stay cached.
+    """
+    from coverlib.general import solve_schedule as solve
+    return solve(v, k, **options)
+
+
 def _warn_once(key: str, message: str) -> None:
     """Warn once per process for degraded-math fallbacks (avoids log spam)."""
     if key not in _warned_keys:
@@ -67,7 +77,8 @@ class BatchGenerator:
         """
         v = self.n_items
         k = self.batch_size
-        return math.ceil((v / k) * math.ceil((v - 1) / (k - 1)))
+        replication_minimum = (v + k - 3) // (k - 1)
+        return (v * replication_minimum + k - 1) // k
         
     def generate_all_pairs(self) -> Set[Tuple[int, int]]:
         """Generate all possible pairs of item indices."""
@@ -393,15 +404,18 @@ def _generate_optimal_batches(
     Returns:
         List of batches (0-based), or None if LJCR data unavailable.
     """
-    # Exact constructions (Steiner systems, projective/affine planes) are
-    # provably optimal and perfectly balanced; use them when (v, k) admits one.
+    # Exact designs and their one-point extensions attain the lower bound and
+    # are certificate-ready, so they precede cache/search work.
     try:
-        from coverlib.constructions import exact_design
+        from coverlib.constructions import certified_compact_cover
 
-        design = exact_design(v, k)
-        if design is not None:
-            print(f"[optimal] Using exact 2-({v},{k},1) design ({len(design)} blocks, lambda=1)")
-            return [list(block) for block in design]
+        constructed = certified_compact_cover(v, k)
+        if constructed is not None:
+            print(
+                f"[optimal] Using certified {constructed.source} for "
+                f"v={v} k={k} ({len(constructed.blocks)} blocks)"
+            )
+            return [list(block) for block in constructed.blocks]
     except Exception:
         pass
 
@@ -411,17 +425,37 @@ def _generate_optimal_batches(
         return None
 
     cache_dir = _resolve_ljcr_cache_dir()
+    frontier = None
+    try:
+        import multiarrangement as ma
+        from coverlib.frontier import select_frontier_cover
+
+        frontier = select_frontier_cover(
+            v,
+            k,
+            package_dir=Path(ma.__file__).resolve().parent,
+            mode="compact",
+        )
+    except Exception:
+        frontier = None
 
     # Try to load seed blocks from cache; fetch from LJCR if missing
-    try:
-        blocks = ocp.get_seed_blocks(
-            v, k, cache_dir,
-            offline_first=True,
-            offline_only=False,   # allow live fetch if cache misses
+    if frontier is not None:
+        blocks = list(frontier.blocks)
+        print(
+            f"[optimal] Using frontier:{frontier.source} seed for "
+            f"v={v} k={k} ({len(blocks)} blocks)"
         )
-    except Exception as e:
-        print(f"[optimal] Could not obtain seed blocks for v={v} k={k}: {e}")
-        return None
+    else:
+        try:
+            blocks = ocp.get_seed_blocks(
+                v, k, cache_dir,
+                offline_first=True,
+                offline_only=False,   # allow live fetch if cache misses
+            )
+        except Exception as e:
+            print(f"[optimal] Could not obtain seed blocks for v={v} k={k}: {e}")
+            return None
 
     rng = random.Random(seed)
     random.seed(seed)
@@ -464,8 +498,37 @@ def _generate_optimal_batches(
         )
 
     result = [list(b) for b in opt.blocks]
+    try:
+        from coverlib.certificates import compact_sort_key
+        from coverlib.constructions import structured_cover_candidates
+
+        result_key = compact_sort_key(v, k, result)
+        if frontier is not None:
+            candidate = [list(block) for block in frontier.blocks]
+            candidate_key = compact_sort_key(v, k, candidate)
+            if candidate_key < result_key:
+                result = candidate
+                result_key = candidate_key
+        for constructed in structured_cover_candidates(v, k):
+            candidate = [list(block) for block in constructed.blocks]
+            candidate_key = compact_sort_key(v, k, candidate)
+            if candidate_key < result_key:
+                result = candidate
+                result_key = candidate_key
+                print(
+                    f"[optimal] Improved compact schedule with "
+                    f"{constructed.source} ({len(candidate)} blocks)"
+                )
+    except Exception as exc:
+        _warn_once(
+            "compact_portfolio_fallback",
+            f"Exact compact portfolio comparison unavailable ({exc!r}); "
+            "keeping the existing searched schedule.",
+        )
+
+    result_lmax = max(_coverage_counts(v, result)[0].values())
     print(f"[optimal] Generated {len(result)} batches for v={v} k={k} "
-          f"(lambda_max={opt.lambda_max()}, Schonheim>={ocp.schonheim_lb(v, k)})")
+          f"(lambda_max={result_lmax}, Schonheim>={ocp.schonheim_lb(v, k)})")
     return result
 
 
@@ -653,16 +716,13 @@ def _is_already_balanced_enough(n_items: int, batch_size: int, batches: List[Lis
         metrics = normalized_balance_metrics(n_items, batch_size, batches)
         return (
             metrics.complete
-            and metrics.lambda_max_ratio <= 1.5
-            and metrics.normalized_pair_sumsq_excess <= 0.05
+            and metrics.pair_sumsq_excess == 0
         )
     except Exception:
         score = _balanced_cover_score(n_items, batch_size, batches)
         if score[0] != 0:
             return False
-        _, lmax, count_at_lmax, *_ = score
-        expected_pairs = n_items * (n_items - 1) // 2
-        return lmax <= 3 and count_at_lmax <= max(1, int(math.ceil(expected_pairs * 0.02)))
+        return False
 
 
 def _generate_balanced_batches(
@@ -703,16 +763,24 @@ def _generate_balanced_batches(
 
     extra_budget = int(math.floor(len(candidates[0]) * max(0.0, float(max_extra_fraction))))
     trial_limit = len(candidates[0]) + extra_budget
+
+    try:
+        from coverlib.constructions import structured_cover_candidates
+
+        for constructed in structured_cover_candidates(n_items, batch_size):
+            blocks = [list(block) for block in constructed.blocks]
+            if len(blocks) <= trial_limit:
+                candidates.append(blocks)
+    except Exception as exc:
+        _warn_once(
+            "structured_cover_candidates_fallback",
+            f"Deterministic neighbouring-design constructions unavailable ({exc!r}); "
+            "continuing with cached and searched schedules.",
+        )
+
     cached = _load_balanced_cache_candidate(n_items, batch_size, trial_limit)
     if cached and _balanced_cover_score(n_items, batch_size, cached) < _balanced_cover_score(n_items, batch_size, candidates[0]):
-        pair_counts, _ = _coverage_counts(n_items, cached)
-        hist = Counter(pair_counts.values())
-        print(
-            f"[balanced] Loaded cached balanced cover for v={n_items} k={batch_size} "
-            f"({len(cached)} batches, lambda_max={max(pair_counts.values()) if pair_counts else 0}, "
-            f"hist={dict(sorted(hist.items()))})"
-        )
-        return cached
+        candidates.append(cached)
 
     extra_blocks = max(0, trial_limit - len(candidates[0]))
     if extra_blocks:
@@ -769,7 +837,7 @@ def _improve_balanced_cover_if_needed(
         from coverlib.balanced import normalized_balance_metrics
 
         metrics = normalized_balance_metrics(n_items, batch_size, batches)
-        if n_items < 24 or not metrics.complete or metrics.lambda_max_ratio <= 1.5:
+        if n_items < 24 or not metrics.complete or metrics.pair_sumsq_excess == 0:
             return batches
         target_lmax = metrics.ideal_lambda_max
     except Exception:
@@ -806,7 +874,8 @@ def _load_balanced_cache_candidate(
     trial_limit: int,
 ) -> Optional[List[List[int]]]:
     try:
-        from coverlib.balanced import load_cached_balanced_cover
+        from coverlib.balanced import balance_sort_key, load_cached_balanced_cover
+        from coverlib.frontier import select_frontier_cover
     except Exception as exc:
         _warn_once(
             "balanced_cache_loader_fallback",
@@ -815,10 +884,12 @@ def _load_balanced_cache_candidate(
         return None
 
     cache_dirs: List[Path] = []
+    package_dir: Optional[Path] = None
     try:
         import multiarrangement as ma
 
-        cache_dirs.append(Path(ma.__file__).resolve().parent / "balanced_cache")
+        package_dir = Path(ma.__file__).resolve().parent
+        cache_dirs.append(package_dir / "balanced_cache")
     except Exception as exc:
         _warn_once(
             "balanced_cache_package_fallback",
@@ -828,15 +899,48 @@ def _load_balanced_cache_candidate(
     cache_dirs.append(Path(__file__).resolve().parent / "balanced_cache")
     cache_dirs.append(Path.cwd() / "multiarrangement" / "balanced_cache")
 
-    return load_cached_balanced_cover(
+    candidates: List[List[List[int]]] = []
+    cached = load_cached_balanced_cover(
         n_items,
         batch_size,
         max_blocks=trial_limit,
         cache_dirs=cache_dirs,
     )
+    if cached:
+        candidates.append(cached)
+    if package_dir is not None:
+        frontier = select_frontier_cover(
+            n_items,
+            batch_size,
+            package_dir=package_dir,
+            mode="balanced",
+            max_blocks=trial_limit,
+        )
+        if frontier is not None:
+            candidates.append([list(block) for block in frontier.blocks])
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda blocks: balance_sort_key(
+            n_items,
+            batch_size,
+            blocks,
+        ),
+    )
 
 
-def generate_batches(
+def generate_batches(n_items: int, batch_size: int, *args, **kwargs) -> List[List[int]]:
+    """Generate batches (see ``_generate_batches``) and check that every pair of items is shown."""
+    batches = _generate_batches(n_items, batch_size, *args, **kwargs)
+    counts, _ = _coverage_counts(n_items, batches)
+    missing = n_items * (n_items - 1) // 2 - len(counts)
+    if missing:
+        raise RuntimeError(f"The schedule leaves {missing} pairs of items unshown")
+    return batches
+
+
+def _generate_batches(
     n_items: int,
     batch_size: int,
     seed: Optional[int] = None,
@@ -844,6 +948,8 @@ def generate_batches(
     flex: bool = False,
     algorithm: str = "balanced",
     max_extra_fraction: float = 0.0,
+    *,
+    refine_schedule: bool = False,
 ) -> List[List[int]]:
     """
     Convenience function to generate batches.
@@ -863,11 +969,31 @@ def generate_batches(
             the minimum trial count; 0.25 (balanced mode) lets the cache
             supply a certified low-concurrence schedule with up to 25%
             more trials.
+        refine_schedule: Run additional search even for indexed settings. The
+            default selects the validated cached objective choice immediately.
 
     Returns:
         List of batches
     """
     seed_value = 42 if seed is None else seed
+
+    if not flex and algorithm != "greedy" and not refine_schedule:
+        try:
+            from multiarrangement.core.schedule_cache import load_indexed_schedule
+
+            cached = load_indexed_schedule(n_items, batch_size,
+                                           mode="balanced" if algorithm == "balanced" else "compact",
+                                           max_extra_fraction=max_extra_fraction)
+            if cached is not None:
+                return cached
+        except ImportError as exc:
+            raise RuntimeError(
+                f"Schedule index unavailable ({exc!r}). The server must import the repository's multiarrangement "
+                "package to serve the same schedules as the package; deploy from the repository root."
+            ) from exc
+        except Exception as exc:
+            _warn_once("indexed_schedule_fallback",
+                       f"Validated schedule index unavailable ({exc!r}); using fallback search.")
 
     if algorithm == "balanced":
         return _generate_balanced_batches(

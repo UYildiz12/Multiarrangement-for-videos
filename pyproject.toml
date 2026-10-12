@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multiarrangement"
-version = "0.3.0"
+version = "0.4.0"
 description = "Video and audio similarity arrangement toolkit (set-cover and adaptive LTW)"
 authors = [{ name = "Umur Yildiz" }]
 requires-python = ">=3.8"
@@ -30,6 +30,7 @@ dependencies = [
   "opencv-python>=4.5.0",
   "openpyxl>=3.0.0",
   "matplotlib>=3.4.0",
+  "scipy>=1.9",
 ]
 
 [project.optional-dependencies]
@@ -59,6 +60,8 @@ multiarrangement-demo-image-adaptive = "multiarrangement:demo_image_adaptive"
 covergen = "coverlib.cli:main"
 optimize-cover = "multiarrangement.optimize_cover_pure:main"
 optimize-cover-flex = "multiarrangement.optimize_cover_flex:main"
+multiarrangement-schedule-campaign = "coverlib.campaign:main"
+multiarrangement-frontier = "coverlib.frontier:main"
 
 [project.urls]
 Homepage = "https://github.com/UYildiz12/Multiarrangement-for-videos"
@@ -84,6 +87,10 @@ include = ["multiarrangement*", "coverlib*"]
   "examples/*",
   "ljcr_cache/*.txt",
   "balanced_cache/*.txt",
+  "frontier_cache/*.txt",
+  "frontier_cache/*.json",
+  "repeat_cache/*.json",
+  "repeat_cache/*.gz",
   "ExampleData/*"
 ]
 "*" = ["*.txt", "*.md"]

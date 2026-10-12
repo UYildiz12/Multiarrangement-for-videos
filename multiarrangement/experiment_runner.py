@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 def show_instructions_pygame(mode: str = "video", language: str = "en"):
     """Show instructions for video or audio mode in the selected language using pygame."""
     # Map instructions to media files (best guess)
@@ -653,7 +656,7 @@ def run_multiarrangement_experiment(
     language: str = "en",
     instructions = "default",
     # Fusion controls (set‑cover)
-    setcover_weight_mode: str = 'max',
+    setcover_weight_mode: str = 'rms',
     setcover_weight_alpha: float = 2.0,
     rng_seed: int = None,
     use_inverse_mds: bool = False,
@@ -675,12 +678,14 @@ def run_multiarrangement_experiment(
         output_dir: Directory to save results  
         show_first_frames: Whether to show video frames
         fullscreen: Whether to run in fullscreen mode
-        setcover_weight_mode: 'max' (per‑trial max‑norm), 'rms' (RMS‑matched), or 'k2012' (raw‑distance weights with RMS‑matched numerator)
+        setcover_weight_mode: 'rms' (default; scale-aligned: trial scales fitted jointly from shared pairs), 'max' (per-trial max-norm, the earlier default), or 'k2012' (raw-distance weights with the scale-aligned numerator)
         
     Returns:
         Path to saved results file
     """
-    
+    if setcover_weight_mode == 'max' and robust_method in {'resid_huber', 'winsor_resid_huber'}:
+        raise ValueError("Residual robust weighting requires rms or k2012 set-cover fusion")
+
     # Seed RNG for reproducibility (shuffle, seating jitter, etc.)
     try:
         import os as _os
@@ -1162,7 +1167,8 @@ def run_multiarrangement_experiment(
             
             pygame.display.flip()
     
-    # Compute fused D_hat using requested weight mode
+    # Compute fused D_hat using requested weight mode; fusion_used records what was actually done
+    fusion_used = str(setcover_weight_mode)
     if setcover_weight_mode == 'max':
         with np.errstate(divide='ignore', invalid='ignore'):
             D_hat = np.divide(Num, W, out=np.zeros_like(Num), where=W > 0)
@@ -1199,7 +1205,29 @@ def run_multiarrangement_experiment(
             np.fill_diagonal(D_hat, 0.0)
             W = W_est
         except Exception as e:
-            print(f"Warning: RMS-weighted fusion failed, falling back to max-normalized: {e}")
+            # Num and W are accumulated only in 'max' mode, so rebuild the max-normalized estimate from the logged
+            # placements (without robust weighting) rather than returning an empty matrix.
+            print(f"Warning: {setcover_weight_mode} fusion failed ({e}); using max-normalized fusion of the logged trials")
+            fusion_used = f"max (fallback after {setcover_weight_mode} failed)"
+            Num = np.zeros((n_media, n_media), dtype=float)
+            W = np.zeros((n_media, n_media), dtype=float)
+            alpha = float(setcover_weight_alpha)
+            for t in trial_logs:
+                pos = {int(k): np.asarray(v, dtype=float) for k, v in t["positions"].items()}
+                ids = sorted(pos)
+                d = {(a, b): float(np.linalg.norm(pos[a] - pos[b])) for i, a in enumerate(ids) for b in ids[i + 1:]}
+                maxd = max(d.values(), default=0.0)
+                if maxd <= 1e-12:
+                    continue
+                for (a, b), x in d.items():
+                    dn = x / maxd
+                    w = dn ** alpha
+                    Num[a, b] += w * dn
+                    Num[b, a] += w * dn
+                    W[a, b] += w
+                    W[b, a] += w
+            if not np.any(W > 0):
+                raise RuntimeError("no logged trial could be fused") from e
             with np.errstate(divide='ignore', invalid='ignore'):
                 D_hat = np.divide(Num, W, out=np.zeros_like(Num), where=W > 0)
             np.fill_diagonal(D_hat, 0.0)
@@ -1279,6 +1307,9 @@ def run_multiarrangement_experiment(
         from collections import Counter
         deg_hist = dict(sorted(Counter(deg).items()))
         cov_hist = dict(sorted(Counter(pair_counts.values()).items()))
+        # Trials linked through shared pairs; fusion aligns trial scales only within each group
+        from .core.batch_generator import trial_overlap_components
+        overlap = trial_overlap_components(batch_list)
 
         meta = {
             "mode": "set-cover",
@@ -1293,6 +1324,7 @@ def run_multiarrangement_experiment(
             "fusion": {
                 "alpha": float(setcover_weight_alpha),
                 "weight_mode": str(setcover_weight_mode),
+                "weight_mode_used": fusion_used,
                 "robust_method": robust_method,
                 "robust_winsor_high": float(robust_winsor_high),
                 "robust_huber_c": float(robust_huber_c),
@@ -1309,6 +1341,8 @@ def run_multiarrangement_experiment(
                 "lambda_max": int(lambda_max),
                 "deg_hist": deg_hist,
                 "pair_coverage_hist": cov_hist,
+                "overlap_components": int(len(overlap)),
+                "largest_overlap_component": int(overlap[0]) if overlap else 0,
             },
             "artifacts": {
                 "csv": result_file,

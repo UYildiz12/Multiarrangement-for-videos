@@ -25,6 +25,33 @@ def _warn_once(key: str, message: str) -> None:
         _logger.warning(message)
 
 
+def trial_overlap_components(batches: List[List[int]]) -> List[int]:
+    """Sizes of the groups of trials linked through shared pairs, largest first.
+
+    Two trials are linked when they show a common pair of items. Set-cover fusion can align
+    trial scales only within such a group; across groups the scales rest on each arrangement
+    filling the arena. A schedule whose trials form one group has a single entry.
+    """
+    parent = list(range(len(batches)))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    owner: Dict[Tuple[int, int], int] = {}
+    for t, batch in enumerate(batches):
+        for pair in itertools.combinations(sorted(set(int(i) for i in batch)), 2):
+            if pair in owner:
+                a, b = find(owner[pair]), find(t)
+                if a != b:
+                    parent[a] = b
+            else:
+                owner[pair] = t
+    return sorted(Counter(find(t) for t in range(len(batches))).values(), reverse=True)
+
+
 class BatchGenerator:
     """
     Generate optimized batches for multiarrangement experiments.
@@ -60,8 +87,9 @@ class BatchGenerator:
         """
         self.n_videos = n_videos
         self.batch_size = batch_size
+        self.seed = 42 if seed is None else int(seed)
         self.video_indices = list(range(n_videos))
-        
+
         if seed is not None:
             random.seed(seed)
             
@@ -86,7 +114,8 @@ class BatchGenerator:
         
         # For t=2 (pairwise coverage), the Schönheim bound is:
         # ceil((v/k) * ceil((v-1)/(k-1)))
-        return math.ceil((v / k) * math.ceil((v - 1) / (k - 1)))
+        replication_minimum = (v + k - 3) // (k - 1)
+        return (v * replication_minimum + k - 1) // k
         
     def generate_all_pairs(self) -> Set[Tuple[int, int]]:
         """
@@ -627,7 +656,9 @@ class BatchGenerator:
         for batch in batches:
             for video in batch:
                 video_usage[video] = video_usage.get(video, 0) + 1
-                
+
+        overlap = trial_overlap_components(batches)
+
         return {
             'total_batches': len(batches),
             'total_pairs_needed': len(all_pairs),
@@ -641,7 +672,9 @@ class BatchGenerator:
             'min_video_usage': min(video_usage.values()) if video_usage else 0,
             'max_video_usage': max(video_usage.values()) if video_usage else 0,
             'schonheim_lower_bound': self.calculate_schonheim_lower_bound(),
-            'efficiency': self.calculate_schonheim_lower_bound() / len(batches) if batches else 0
+            'efficiency': self.calculate_schonheim_lower_bound() / len(batches) if batches else 0,
+            'overlap_components': len(overlap),
+            'largest_overlap_component': overlap[0] if overlap else 0,
         }
 
     def _coverage_counts(self, batches: List[List[int]]) -> Tuple[Counter, Counter]:
@@ -795,16 +828,13 @@ class BatchGenerator:
             metrics = normalized_balance_metrics(self.n_videos, self.batch_size, batches)
             return (
                 metrics.complete
-                and metrics.lambda_max_ratio <= 1.5
-                and metrics.normalized_pair_sumsq_excess <= 0.05
+                and metrics.pair_sumsq_excess == 0
             )
         except Exception:
             score = self._balanced_cover_score(batches)
             if score[0] != 0:
                 return False
-            _, lmax, count_at_lmax, *_ = score
-            expected_pairs = self.n_videos * (self.n_videos - 1) // 2
-            return lmax <= 3 and count_at_lmax <= max(1, int(math.ceil(expected_pairs * 0.02)))
+            return False
 
     def optimize_batches_balanced(
         self,
@@ -812,10 +842,15 @@ class BatchGenerator:
         seed: int = 42,
         restarts: int = 64,
         max_extra_fraction: float = 0.0,
+        refine_schedule: bool = False,
     ) -> List[List[int]]:
         """Generate a complete cover while flattening pair counts without adding trials by default."""
+        if not refine_schedule:
+            cached = self._indexed_schedule("balanced", max_extra_fraction=max_extra_fraction)
+            if cached is not None:
+                return cached
         candidates: List[List[List[int]]] = []
-        minimal = self.optimize_batches_hybrid(seed=seed)
+        minimal = self.optimize_batches_hybrid(seed=seed, refine_schedule=refine_schedule)
         if minimal:
             # with a trial surplus allowed, always consult the cache: a
             # certified balanced cover may exist just above the minimum
@@ -834,16 +869,24 @@ class BatchGenerator:
 
         extra_budget = int(math.floor(len(candidates[0]) * max(0.0, float(max_extra_fraction))))
         trial_limit = len(candidates[0]) + extra_budget
+
+        try:
+            from coverlib.constructions import structured_cover_candidates
+
+            for constructed in structured_cover_candidates(self.n_videos, self.batch_size):
+                blocks = [list(block) for block in constructed.blocks]
+                if len(blocks) <= trial_limit:
+                    candidates.append(blocks)
+        except Exception as exc:
+            _warn_once(
+                "structured_cover_candidates_fallback",
+                f"Deterministic neighbouring-design constructions unavailable ({exc!r}); "
+                "continuing with cached and searched schedules.",
+            )
+
         cached = self._load_balanced_cache_candidate(trial_limit)
         if cached and self._balanced_cover_score(cached) < self._balanced_cover_score(candidates[0]):
-            pair_counts, _ = self._coverage_counts(cached)
-            hist = Counter(pair_counts.values())
-            print(
-                f"Loaded cached balanced cover for {self.n_videos} videos, k={self.batch_size} "
-                f"({len(cached)} batches, lambda_max={max(pair_counts.values()) if pair_counts else 0}, "
-                f"hist={dict(sorted(hist.items()))})"
-            )
-            return cached
+            candidates.append(cached)
 
         extra_blocks = max(0, trial_limit - len(candidates[0]))
         if extra_blocks:
@@ -889,7 +932,7 @@ class BatchGenerator:
             from coverlib.balanced import normalized_balance_metrics
 
             metrics = normalized_balance_metrics(self.n_videos, self.batch_size, batches)
-            if self.n_videos < 24 or not metrics.complete or metrics.lambda_max_ratio <= 1.5:
+            if self.n_videos < 24 or not metrics.complete or metrics.pair_sumsq_excess == 0:
                 return batches
             target_lmax = metrics.ideal_lambda_max
         except Exception:
@@ -921,7 +964,8 @@ class BatchGenerator:
 
     def _load_balanced_cache_candidate(self, trial_limit: int) -> Optional[List[List[int]]]:
         try:
-            from coverlib.balanced import load_cached_balanced_cover
+            from coverlib.balanced import balance_sort_key, load_cached_balanced_cover
+            from coverlib.frontier import select_frontier_cover
             import multiarrangement as ma
         except Exception as exc:
             _warn_once(
@@ -936,11 +980,33 @@ class BatchGenerator:
             package_dir / "balanced_cache",
             Path.cwd() / "multiarrangement" / "balanced_cache",
         ]
-        return load_cached_balanced_cover(
+        candidates: List[List[List[int]]] = []
+        cached = load_cached_balanced_cover(
             self.n_videos,
             self.batch_size,
             max_blocks=trial_limit,
             cache_dirs=cache_dirs,
+        )
+        if cached:
+            candidates.append(cached)
+        frontier = select_frontier_cover(
+            self.n_videos,
+            self.batch_size,
+            package_dir=package_dir,
+            mode="balanced",
+            max_blocks=trial_limit,
+        )
+        if frontier is not None:
+            candidates.append([list(block) for block in frontier.blocks])
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda blocks: balance_sort_key(
+                self.n_videos,
+                self.batch_size,
+                blocks,
+            ),
         )
 
     def save_batches(self, batches: List[List[int]], output_file: Path) -> None:
@@ -963,7 +1029,18 @@ class BatchGenerator:
                 
         print(f"Saved {len(batches)} batches to {output_file}")
         
-    def optimize_batches_hybrid(self, prefer_optimal: bool = True, **kwargs) -> List[List[int]]:
+    def _indexed_schedule(self, mode: str, *, max_extra_fraction: float = 0.0) -> Optional[List[List[int]]]:
+        try:
+            from .schedule_cache import load_indexed_schedule
+
+            return load_indexed_schedule(self.n_videos, self.batch_size, mode=mode,
+                                         max_extra_fraction=max_extra_fraction)
+        except Exception as exc:
+            _warn_once("indexed_schedule_fallback",
+                       f"Validated schedule index unavailable ({exc!r}); using fallback search.")
+            return None
+
+    def optimize_batches_hybrid(self, prefer_optimal: bool = True, *, refine_schedule: bool = False, **kwargs) -> List[List[int]]:
         """
         Generate optimized batches using the hybrid strategy:
         1. Try the packaged optimize_cover_pure.py cache/optimizer first.
@@ -978,41 +1055,107 @@ class BatchGenerator:
         """
         from pathlib import Path
 
+        if prefer_optimal and not refine_schedule:
+            cached = self._indexed_schedule("compact")
+            if cached is not None:
+                return cached
+
         # Get project root directory
         project_root = Path(__file__).parent.parent.parent
 
-        # Exact constructions (Steiner systems, projective/affine planes) are
-        # provably optimal and perfectly balanced; use them when available.
+        # Exact designs and their one-point extensions are minimum-length and
+        # certificate-ready; use them before cache/search work.
         if prefer_optimal:
             try:
-                from coverlib.constructions import exact_design
+                from coverlib.constructions import certified_compact_cover
 
-                design = exact_design(self.n_videos, self.batch_size)
-                if design is not None:
+                constructed = certified_compact_cover(self.n_videos, self.batch_size)
+                if constructed is not None:
                     print(
-                        f"Used exact 2-({self.n_videos},{self.batch_size},1) design "
-                        f"({len(design)} batches, lambda=1)"
+                        f"Used certified {constructed.source} for "
+                        f"v={self.n_videos}, k={self.batch_size} "
+                        f"({len(constructed.blocks)} batches)"
                     )
-                    return [list(block) for block in design]
+                    return [list(block) for block in constructed.blocks]
             except Exception:
                 pass
 
+        batches = None
         if prefer_optimal:
             # Try optimize_cover_pure.py first
             try:
                 batches = self._try_optimize_cover_pure(project_root, **kwargs)
                 if batches:
                     print(f"Used optimize_cover_pure.py (optimal solution: {len(batches)} batches)")
-                    return batches
             except Exception as e:
                 print(f"Warning: optimize_cover_pure.py failed: {e}")
-        
-        print("Using Python greedy algorithm (fallback)")
-        return self._try_new_greedy_python(**kwargs)
+
+        if not batches:
+            print("Using Python greedy algorithm (fallback)")
+            batches = self._try_new_greedy_python(**kwargs)
+
+        # Non-minimum neighbouring constructions must beat the existing result
+        # under the exact compact objective before they are selected.
+        try:
+            from coverlib.certificates import compact_sort_key
+            from coverlib.constructions import structured_cover_candidates
+            from coverlib.frontier import select_frontier_cover
+
+            best = batches
+            best_key = compact_sort_key(self.n_videos, self.batch_size, best)
+            try:
+                import multiarrangement as ma
+
+                package_dir = Path(ma.__file__).resolve().parent
+                frontier = select_frontier_cover(
+                    self.n_videos,
+                    self.batch_size,
+                    package_dir=package_dir,
+                    mode="compact",
+                )
+                if frontier is not None:
+                    candidate = [list(block) for block in frontier.blocks]
+                    candidate_key = compact_sort_key(
+                        self.n_videos,
+                        self.batch_size,
+                        candidate,
+                    )
+                    if candidate_key < best_key:
+                        best = candidate
+                        best_key = candidate_key
+                        print(
+                            f"Improved compact schedule with frontier:{frontier.source} "
+                            f"({len(candidate)} batches)"
+                        )
+            except Exception:
+                pass
+            for constructed in structured_cover_candidates(self.n_videos, self.batch_size):
+                candidate = [list(block) for block in constructed.blocks]
+                candidate_key = compact_sort_key(
+                    self.n_videos,
+                    self.batch_size,
+                    candidate,
+                )
+                if candidate_key < best_key:
+                    best = candidate
+                    best_key = candidate_key
+                    print(
+                        f"Improved compact schedule with {constructed.source} "
+                        f"({len(candidate)} batches)"
+                    )
+            return best
+        except Exception as exc:
+            _warn_once(
+                "compact_portfolio_fallback",
+                f"Exact compact portfolio comparison unavailable ({exc!r}); "
+                "keeping the existing searched schedule.",
+            )
+            return batches
     
     def _try_optimize_cover_pure(self, project_root: Path, **kwargs) -> Optional[List[List[int]]]:
         """Try to use optimize_cover_pure.py for optimal batch generation."""
         import subprocess
+        import sys
         import tempfile
         import os
         from pathlib import Path
@@ -1058,7 +1201,7 @@ class BatchGenerator:
         try:
             # Run optimize_cover_pure.py with correct arguments
             cmd = [
-                "python", str(optimize_script),
+                sys.executable, str(optimize_script),
                 "--v", str(self.n_videos),
                 "--k", str(self.batch_size),
                 "--outfile", output_file,
@@ -1113,7 +1256,7 @@ class BatchGenerator:
             print(f"Warning: Advanced Python algorithm failed: {e}, using simple greedy")
             return self.greedy_algorithm()
     
-    def optimize_batches(self, algorithm: str = 'balanced', **kwargs) -> List[List[int]]:
+    def optimize_batches(self, algorithm: str = 'balanced', *, refine_schedule: bool = False, **kwargs) -> List[List[int]]:
         """
         Generate optimized batches using the specified algorithm.
         
@@ -1124,29 +1267,68 @@ class BatchGenerator:
         Returns:
             List of optimized batches
         """
-        if algorithm == 'hybrid':
-            return self.optimize_batches_hybrid(**kwargs)
+        optimize_order = bool(kwargs.pop('optimize_trial_order', True))
+        counterbalance = bool(kwargs.pop('counterbalance', False))
+        participant_index = int(kwargs.pop('participant_index', 0))
+        family_size = int(kwargs.pop('counterbalance_family_size', 16))
+        durations = kwargs.pop('durations', None)
+        if family_size < 1:
+            raise ValueError("counterbalance_family_size must be positive")
+        kwargs.setdefault('seed', self.seed)
+        n_trials = kwargs.pop('n_trials', None)
+
+        if n_trials is not None:
+            if algorithm != 'balanced' or float(kwargs.get('max_extra_fraction', 0.0)) > 0:
+                raise ValueError("n_trials requires algorithm='balanced' without max_extra_fraction")
+            from .budget import budget_schedule
+            batches = budget_schedule(self.n_videos, self.batch_size, int(n_trials), seed=kwargs['seed'])
+        elif algorithm == 'hybrid':
+            batches = self.optimize_batches_hybrid(refine_schedule=refine_schedule, **kwargs)
         elif algorithm == 'balanced':
-            return self.optimize_batches_balanced(**kwargs)
+            batches = self.optimize_batches_balanced(refine_schedule=refine_schedule, **kwargs)
         elif algorithm == 'optimal':
             # Try only optimize_cover_pure.py
-            return self.optimize_batches_hybrid(prefer_optimal=True, **kwargs)
+            batches = self.optimize_batches_hybrid(prefer_optimal=True, refine_schedule=refine_schedule, **kwargs)
         elif algorithm == 'greedy':
             # Try runtime C compilation or fallback to Python
             project_root = Path(__file__).parent.parent.parent
+            batches = None
             try:
                 batches = self._try_greedy_c_runtime(project_root, **kwargs)
                 if batches:
                     print(f"Used runtime C compilation: {len(batches)} batches")
-                    return batches
             except Exception as e:
                 print(f"Warning: Runtime C failed: {e}")
-            
-            print("Falling back to Python greedy")
-            return self._try_new_greedy_python(**kwargs)
+
+            if not batches:
+                print("Falling back to Python greedy")
+                batches = self._try_new_greedy_python(**kwargs)
         elif algorithm == 'python':
-            return self._try_new_greedy_python(**kwargs)
+            batches = self._try_new_greedy_python(**kwargs)
         elif algorithm == 'brute_force':
-            return self.brute_force_algorithm(**kwargs)
+            brute_force_kwargs = dict(kwargs)
+            brute_force_kwargs.pop('seed', None)
+            batches = self.brute_force_algorithm(**brute_force_kwargs)
         else:
             raise ValueError(f"Unknown algorithm: {algorithm}. Use 'hybrid', 'balanced', 'optimal', 'greedy', 'python', or 'brute_force'.")
+
+        try:
+            from coverlib.ordering import prepare_schedule_for_participant
+
+            return prepare_schedule_for_participant(
+                self.n_videos,
+                batches,
+                participant_index=participant_index,
+                counterbalance=counterbalance,
+                counterbalance_family_size=family_size,
+                optimize_order=optimize_order,
+                durations=durations,
+                seed=self.seed,
+            )
+        except Exception as exc:
+            _warn_once(
+                "schedule_presentation_fallback",
+                f"Schedule counterbalancing/trial ordering unavailable ({exc!r}); "
+                "returning the certified schedule in its stored order.",
+            )
+            return batches

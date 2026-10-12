@@ -120,7 +120,9 @@ class MultiarrangementExperiment:
         """Get the full path to a video file."""
         return self.video_directory / video_filename
         
-    def record_arrangement(self, video_positions: Dict[str, Tuple[float, float]]) -> None:
+    def record_arrangement(self, video_positions: Dict[str, Tuple[float, float]],
+                           arena_center: Optional[Tuple[float, float]] = None,
+                           arena_radius: Optional[float] = None) -> None:
         """
         Record the spatial arrangement of videos for the current batch.
         

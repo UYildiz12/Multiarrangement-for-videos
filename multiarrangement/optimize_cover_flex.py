@@ -58,7 +58,8 @@ def lambda_floor(blocks: List[Tuple[int,...]], v: int) -> int:
 
 # Schonheim LB (for fixed k, informational)
 def schonheim_lb(v: int, k: int) -> int:
-    return math.ceil((v / k) * math.ceil((v - 1) / (k - 1)))
+    replication_minimum = (v + k - 3) // (k - 1)
+    return (v * replication_minimum + k - 1) // k
 
 # ---------------- LJCR fetch (robust parser) ----------------
 LJCR_URL = "https://ljcr.dmgordon.org/cover/show_cover.php?v={v}&k={k}&t=2"

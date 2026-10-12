@@ -690,7 +690,8 @@ EXTRA_CASES = [(58, 6, 117, 3)]
 
 
 def schonheim(v, k):
-    return math.ceil(v / k * math.ceil((v - 1) / (k - 1)))
+    replication_minimum = (v + k - 3) // (k - 1)
+    return (v * replication_minimum + k - 1) // k
 
 
 def load_gap_cases():

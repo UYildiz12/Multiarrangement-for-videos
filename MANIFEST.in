@@ -30,4 +30,5 @@ global-exclude *.dylib
 global-exclude *.dll
 recursive-include multiarrangement/ljcr_cache *.txt
 recursive-include multiarrangement/balanced_cache *.txt
+recursive-include multiarrangement/frontier_cache *.txt *.json
 prune output

@@ -12,7 +12,7 @@ for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. Brai
 13(1), 61. https://doi.org/10.3390/brainsci13010061
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 __author__ = "Multiarrangement Team"
 
 from importlib import import_module
@@ -46,12 +46,31 @@ def __getattr__(name: str) -> Any:
     return getattr(module, name)
 
 # Main library functions
+def solve_schedule(v: int, k: int, **options):
+    """Run the optional general scheduler and return its complete proof ledger.
+
+    See ``coverlib.general.solve_schedule`` for explicit budgets, backend and
+    resource limits. This does not change ``create_batches`` cached defaults.
+    """
+    from coverlib.general import solve_schedule as solve
+    return solve(v, k, **options)
+
+
 def create_batches(
     n_videos_or_file,
     batch_size: int = None,
     seed: int = 42,
     algorithm: str = 'balanced',
     flex: bool = False,
+    *,
+    max_extra_fraction: float = 0.0,
+    n_trials: Optional[int] = None,
+    refine_schedule: bool = False,
+    optimize_trial_order: bool = True,
+    counterbalance: bool = False,
+    participant_index: int = 0,
+    counterbalance_family_size: int = 16,
+    durations: Optional[List[float]] = None,
 ):
     """
     Create or load batches for multiarrangement experiments.
@@ -64,6 +83,16 @@ def create_batches(
         seed: Random seed for reproducibility (only used when creating new batches)
         algorithm: Algorithm to use ('balanced', 'hybrid', 'optimal', 'greedy') (only used when creating new batches)
         flex: If True, use optimize_cover_flex.py for variable-size batch optimization
+        max_extra_fraction: Explicit extra-trial allowance for fixed-size balanced schedules (default: 0.0).
+        n_trials: Exact number of trials for a fixed-size balanced schedule. Trials beyond the compact cover go
+            to the least-observed pairs (multiarrangement.core.budget); at least the compact count is required.
+        refine_schedule: Search beyond validated cached schedules (default: False).
+            Search can take substantially longer; unindexed settings retain their fallback search.
+        optimize_trial_order: Reorder fixed-size trials for balanced prefixes.
+        counterbalance: Relabel stimuli using a deterministic participant family.
+        participant_index: Counterbalancing slot for this participant.
+        counterbalance_family_size: Number of relabeled schedules in the family.
+        durations: Optional stimulus durations used to smooth adjacent trials.
     
     Returns:
         List of batches, where each batch is a list of video indices
@@ -83,6 +112,7 @@ def create_batches(
          >>> print(f"Created {len(batches)} flexible batches")
     """
     from pathlib import Path
+    import math
     from .core.batch_generator import BatchGenerator
     from .utils.file_utils import load_batches
     
@@ -101,6 +131,15 @@ def create_batches(
     n_videos = int(n_videos_or_file)
     if batch_size is None:
         raise ValueError("batch_size is required when creating new batches")
+    if not isinstance(refine_schedule, bool):
+        raise ValueError("refine_schedule must be a boolean")
+    max_extra_fraction = float(max_extra_fraction)
+    if not math.isfinite(max_extra_fraction) or max_extra_fraction < 0:
+        raise ValueError("max_extra_fraction must be finite and nonnegative")
+    if max_extra_fraction > 0 and (flex or algorithm != 'balanced'):
+        raise ValueError("Extra-trial allowance requires fixed-size balanced schedules")
+    if n_trials is not None and (flex or algorithm != 'balanced' or max_extra_fraction > 0):
+        raise ValueError("n_trials requires fixed-size balanced schedules without max_extra_fraction")
     
     # Handle flex mode with optimize_cover_flex.py
     if flex:
@@ -110,12 +149,43 @@ def create_batches(
     else:
         print(f"ğŸ”§ Creating batches for {n_videos} videos, batch size {batch_size}")
         generator = BatchGenerator(n_videos=n_videos, batch_size=batch_size, seed=seed)
-        batches = generator.optimize_batches(algorithm=algorithm)
+        budget_options = {'max_extra_fraction': max_extra_fraction} if algorithm == 'balanced' else {}
+        if n_trials is not None:
+            budget_options['n_trials'] = int(n_trials)
+        batches = generator.optimize_batches(
+            algorithm=algorithm,
+            refine_schedule=refine_schedule,
+            **budget_options,
+            optimize_trial_order=optimize_trial_order,
+            counterbalance=counterbalance,
+            participant_index=participant_index,
+            counterbalance_family_size=counterbalance_family_size,
+            durations=durations,
+        )
     
     # Automatic validation
     validate_batches(batches, n_videos)
-    
+    _report_concurrence(batches, n_videos)
+
     return batches
+
+
+def _report_concurrence(batches, n_videos):
+    """Check that every pair is shown, print the largest pair concurrence and warn when some pair is shown more than
+    three times."""
+    from collections import Counter
+    from itertools import combinations
+    lam = Counter(p for b in batches for p in combinations(sorted(set(b)), 2))
+    missing = n_videos * (n_videos - 1) // 2 - len(lam)
+    if missing:
+        raise RuntimeError(f"The schedule leaves {missing} pairs of items unshown")
+    if not lam:
+        return
+    worst = max(lam.values())
+    print(f"Schedule: {len(batches)} trials; no pair shown more than {worst} times")
+    if worst > 3:
+        print("Warning: some pairs are shown more than three times; a balanced schedule (algorithm='balanced' "
+              "with max_extra_fraction or n_trials) spreads repetitions more evenly.")
 
 def _create_flexible_batches(n_videos: int, batch_size: int, mink: int, seed: int, algorithm: str) -> List[List[int]]:
     """
@@ -132,6 +202,7 @@ def _create_flexible_batches(n_videos: int, batch_size: int, mink: int, seed: in
         List of batches with variable sizes (each batch is a list of video indices)
     """
     import subprocess
+    import sys
     import tempfile
     import os
     from .utils.file_utils import resolve_packaged_dir
@@ -173,7 +244,7 @@ def _create_flexible_batches(n_videos: int, batch_size: int, mink: int, seed: in
     try:
         # Run optimize_cover_flex.py with correct arguments
         cmd = [
-            "python", str(flex_script),
+            sys.executable, str(flex_script),
             "--v", str(n_videos),
             "--k", str(batch_size),
             "--min-k-size", str(mink),
@@ -301,7 +372,7 @@ def multiarrangement(
     instructions = "default",
     # Setâ€‘cover fusion controls (Ma.md alignment)
     setcover_weight_alpha: float = 2.0,
-    setcover_weight_mode: str = 'max',
+    setcover_weight_mode: str = 'rms',
     rng_seed: int = None,
     use_inverse_mds: bool = False,
     inverse_mds_max_iter: int = 15,
@@ -321,7 +392,7 @@ def multiarrangement(
         output_dir: Directory to save results
         show_first_frames: Whether to show video frames (True) or ? emoji (False)
         fullscreen: Whether to run in fullscreen mode
-        setcover_weight_mode: 'max' (perâ€‘trial maxâ€‘norm), 'rms' (RMSâ€‘matched), or 'k2012' (rawâ€‘distance weights + RMSâ€‘matched numerator)
+        setcover_weight_mode: 'rms' (scale-aligned; default), 'max' (per-trial max-norm), or 'k2012' (raw-distance weights + scale-aligned numerator)
         rng_seed: Optional integer RNG seed recorded in metadata and used for shuffles
     
     Returns:
@@ -494,6 +565,8 @@ def multiarrangement_adaptive(
     target_time_tolerance: float = 0.05,
     min_subset_size: int = 3,
     max_subset_size: int = None,
+    skip_initial: bool = False,
+    skip_first: Optional[bool] = None,
     use_inverse_mds: bool = False,
     inverse_mds_max_iter: int = 15,
     inverse_mds_step_c: float = 0.3,
@@ -540,6 +613,8 @@ def multiarrangement_adaptive(
         target_time_tolerance=float(target_time_tolerance),
         min_subset_size=max(3, int(min_subset_size)),
         max_subset_size=int(max_subset_size) if max_subset_size is not None else None,
+        skip_initial=bool(skip_initial),
+        skip_first=skip_first,
         use_inverse_mds=use_inverse_mds,
         inverse_mds_max_iter=inverse_mds_max_iter,
         inverse_mds_step_c=inverse_mds_step_c,

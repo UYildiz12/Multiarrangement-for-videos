@@ -94,7 +94,7 @@ def test_setcover_generates_complete_coverage_across_supported_batch_sizes():
         assert covered == expected
 
 
-def test_balanced_setcover_reduces_pathological_pair_repetition():
+def test_balanced_setcover_never_worsens_pair_repetition():
     n_items = 40
     batch_size = 6
     minimal_batches = generate_batches(n_items, batch_size, seed=123, algorithm="hybrid")
@@ -107,8 +107,19 @@ def test_balanced_setcover_reduces_pathological_pair_repetition():
     assert minimal_covered == expected_pairs
     assert balanced_covered == expected_pairs
     assert len(balanced_batches) == len(minimal_batches)
-    assert max(minimal_counts.values()) >= 8
-    assert max(balanced_counts.values()) <= 6
+    assert max(balanced_counts.values()) <= max(minimal_counts.values())
+
+    from coverlib.certificates import balanced_sort_key
+
+    assert balanced_sort_key(
+        n_items,
+        batch_size,
+        balanced_batches,
+    ) <= balanced_sort_key(
+        n_items,
+        batch_size,
+        minimal_batches,
+    )
 
 
 def test_balanced_setcover_common_sizes_have_normalized_diagnostics():

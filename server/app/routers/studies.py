@@ -174,6 +174,12 @@ async def create_study(
     study: StudyCreate,
     owner_id: UUID = Depends(get_required_owner),
 ) -> StudyResponse:
+    repeats = (study.config or {}).get("pair_repeats", 1)
+    if isinstance(repeats, bool) or not isinstance(repeats, int) or not 1 <= repeats <= 4:
+        raise HTTPException(
+            status_code=422,  # Unprocessable Content
+            detail="pair_repeats must be a whole number from 1 to 4.",
+        )
     study_id = str(uuid4())
     payload = {
         "id": study_id,

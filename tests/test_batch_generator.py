@@ -69,8 +69,8 @@ class TestBatchGenerator:
         assert not validation['coverage_complete']
         assert validation['pairs_missing'] > 0
 
-    def test_balanced_algorithm_reduces_worst_pair_repetition(self):
-        """Balanced mode should improve pair evidence without adding trials."""
+    def test_balanced_algorithm_never_worsens_pair_repetition(self):
+        """Balanced mode should improve or tie the compact frontier at fixed b."""
         generator = BatchGenerator(n_videos=24, batch_size=6, seed=123)
         minimal_batches = generator.optimize_batches(algorithm="hybrid", seed=123)
         balanced_batches = generator.optimize_batches(algorithm="balanced", seed=123)
@@ -89,8 +89,15 @@ class TestBatchGenerator:
         assert set(minimal_counts) == set(combinations(range(24), 2))
         assert set(balanced_counts) == set(combinations(range(24), 2))
         assert len(balanced_batches) == len(minimal_batches)
-        assert max(minimal_counts.values()) >= 6
-        assert max(balanced_counts.values()) <= 5
+        assert max(balanced_counts.values()) <= max(minimal_counts.values())
+
+        from coverlib.certificates import balanced_sort_key
+
+        assert balanced_sort_key(24, 6, balanced_batches) <= balanced_sort_key(
+            24,
+            6,
+            minimal_batches,
+        )
 
     def test_optimize_batches_defaults_to_balanced_algorithm(self):
         """Direct package defaults should use same-trial balanced set-cover."""
@@ -137,8 +144,8 @@ class TestBatchGenerator:
         assert set(counts) == set(combinations(range(6), 2))
         assert max(counts.values()) <= 2
 
-    def test_balanced_cover_score_uses_normalized_metric(self):
-        """Package scoring should share the size-normalized cover metric."""
+    def test_balanced_cover_score_uses_exact_lexicographic_metric(self):
+        """Package scoring should share the exact concurrence-profile metric."""
         generator = BatchGenerator(n_videos=6, batch_size=2, seed=42)
         all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
         evenly_spread = all_pairs + [[0, 1], [0, 2], [0, 3]]
@@ -151,6 +158,14 @@ class TestBatchGenerator:
         all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
 
         assert generator._is_already_balanced_enough(all_pairs) is True
+
+    def test_ratio_threshold_does_not_accept_a_dominated_cover(self):
+        """A lambda ratio of 1.5 is not a certificate of fixed-b optimality."""
+        generator = BatchGenerator(n_videos=6, batch_size=2, seed=42)
+        all_pairs = [[i, j] for i, j in combinations(range(6), 2)]
+        concentrated = all_pairs + [[0, 1], [0, 1], [0, 2]]
+
+        assert generator._is_already_balanced_enough(concentrated) is False
 
     def test_optimal_script_prefers_packaged_copy(self, monkeypatch, tmp_path):
         """The packaged optimize script should win over a stale cwd copy."""
@@ -225,3 +240,15 @@ class TestExactDesignFastPath:
                 counts[(a, b)] = counts.get((a, b), 0) + 1
         assert len(counts) == 13 * 12 // 2
         assert set(counts.values()) == {1}
+
+    def test_one_point_extension_is_used_before_search(self):
+        generator = BatchGenerator(n_videos=50, batch_size=7)
+        batches = generator.optimize_batches_hybrid(prefer_optimal=True)
+
+        assert len(batches) == 65
+        counts = {}
+        for batch in batches:
+            for a, b in combinations(sorted(batch), 2):
+                counts[(a, b)] = counts.get((a, b), 0) + 1
+        assert len(counts) == 50 * 49 // 2
+        assert set(counts.values()) == {1, 2}

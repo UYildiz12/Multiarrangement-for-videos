@@ -6,9 +6,13 @@ from coverlib.balanced import normalized_balance_metrics
 from coverlib.constructions import (
     GF,
     affine_plane,
+    certified_compact_cover,
     constructible_designs,
+    one_point_extension_design,
+    one_point_truncation_design,
     projective_plane,
     steiner_triple_system,
+    structured_cover_candidates,
 )
 
 
@@ -87,3 +91,43 @@ def test_constructible_designs_enumeration():
         metrics = normalized_balance_metrics(v, k, blocks)
         assert metrics.complete
         assert metrics.lambda_max == 1
+
+
+@pytest.mark.parametrize(
+    ("v", "k", "expected_b"),
+    [
+        (50, 7, 65),
+        (58, 8, 66),
+        (74, 9, 83),
+        (82, 9, 101),
+    ],
+)
+def test_one_point_extensions_are_minimum_and_ideal(v, k, expected_b):
+    blocks = one_point_extension_design(v, k)
+
+    assert blocks is not None
+    assert len(blocks) == expected_b
+    metrics = normalized_balance_metrics(v, k, blocks)
+    assert metrics.complete
+    assert metrics.lambda_max == 2
+    assert metrics.pair_sumsq_excess == 0
+    assert metrics.item_range == 1
+    compact = certified_compact_cover(v, k)
+    assert compact is not None
+    assert compact.source == "one_point_extension"
+    assert list(compact.blocks) == blocks
+
+
+def test_one_point_truncation_is_ideal_balanced_candidate():
+    blocks = one_point_truncation_design(56, 8)
+
+    assert blocks is not None
+    assert len(blocks) == 57
+    metrics = normalized_balance_metrics(56, 8, blocks)
+    assert metrics.complete
+    assert metrics.lambda_max == 2
+    assert metrics.pair_sumsq_excess == 0
+    assert metrics.item_range == 1
+    assert {
+        candidate.source for candidate in structured_cover_candidates(56, 8)
+    } == {"one_point_truncation"}

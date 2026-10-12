@@ -71,6 +71,20 @@ server/ma_core/ljcr_cache/
 *.exe
 *.zip
 
+# The manuscript is part of this repository, including reference PDFs and
+# figures kept under its local output directory.
+!/paper/*.pdf
+!/paper/**/*.pdf
+!/paper/output/
+!/paper/output/**
+
+# Keep scheduler architecture decisions and machine-readable campaign reports.
+!/docs/
+!/docs/adr/
+!/docs/adr/*.md
+search_reports/*.stdout.log
+search_reports/*.stderr.log
+
 # Demo media (allow demo GIF)
 # *.gif  # commented out to allow demo GIF
 

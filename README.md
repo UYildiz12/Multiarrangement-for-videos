@@ -12,8 +12,20 @@ Distances are computed between stimulus token centers. In the hosted web impleme
 - `multiarrangement/` and `coverlib/`: desktop package source, demos, bundled media, and covering-design utilities
 - `server/`: FastAPI backend for hosted studies
 - `web/`: Next.js frontend for setup, participation, results, and admin flows
+- `paper/`: manuscript sources, figures, and compiled reference PDFs
 - `tests/` and `server/tests/`: regression tests for the package and hosted stack
 - `multiarrangement/examples/`: runnable example scripts
+
+The schedule generator uses a monotonic candidate portfolio: certified
+constructions, residual exact repair, cyclic/one-rotational search, and bounded
+local search are compared with the existing LJCR and balanced-cache schedules.
+The nondominated frontier is shared by the desktop package and server. See
+[`CERTIFIED_SCHEDULING.md`](CERTIFIED_SCHEDULING.md) for the guarantees and
+objective order.
+
+The current certified audit improves 66 of the 745 historical cache parameter
+pairs in at least one mode (30 compact, 66 balanced), without deleting any
+valid prior candidate.
 
 ## Quick demo
 
@@ -26,6 +38,7 @@ Bundled package assets include:
 - audio: `multiarrangement/15audios/*`, `multiarrangement/sample_audio/*`
 - instruction clips: `multiarrangement/demovids/*`
 - cached covering designs: `multiarrangement/ljcr_cache/*.txt`
+- certified runtime frontier: `multiarrangement/frontier_cache/index.json`
 
 ## Install
 
@@ -77,6 +90,20 @@ results.vis()
 results.savefig(f"{output_dir}/rdm_setcover.png", title="Set-cover RDM")
 ```
 
+Fixed-batch schedules are ordered for balanced early prefixes by default.
+Group studies can additionally request deterministic isomorphic schedules that
+spread repeated-pair bias across participants:
+
+```python
+batches = ma.create_batches(
+    58,
+    8,
+    counterbalance=True,
+    participant_index=participant_number,
+    counterbalance_family_size=16,
+)
+```
+
 Minimal adaptive LTW experiment:
 
 ```python
@@ -89,6 +116,9 @@ results = ma.multiarrangement_adaptive(input_dir, output_dir)
 results.vis()
 results.savefig(f"{output_dir}/rdm_adaptive.png", title="Adaptive LTW RDM")
 ```
+
+Pass `skip_initial=True` (or the `skip_first=True` alias) to begin directly
+with an LTW-selected subset instead of the all-item orientation trial.
 
 Example scripts are included under `multiarrangement/examples/`.
 

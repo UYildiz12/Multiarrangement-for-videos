@@ -69,6 +69,9 @@ class TestConfigSchemas:
         assert config.batch_size == 6
         assert config.flex is False
         assert config.setcover_algorithm == "balanced"
+        assert config.optimize_trial_order is True
+        assert config.counterbalance_schedules is True
+        assert config.counterbalance_family_size == 16
         assert config.weight_alpha == 2.0
 
     def test_setcover_config_batch_size_bounds(self):
@@ -78,13 +81,26 @@ class TestConfigSchemas:
         with pytest.raises(ValidationError):
             SetCoverConfig(batch_size=15)  # Too large
 
+    def test_setcover_counterbalance_family_size_bounds(self):
+        with pytest.raises(ValidationError):
+            SetCoverConfig(counterbalance_family_size=0)
+        with pytest.raises(ValidationError):
+            SetCoverConfig(counterbalance_family_size=129)
+
     def test_adaptive_config_defaults(self):
         """Test adaptive config defaults."""
         config = AdaptiveConfig()
         assert config.evidence_threshold == 0.35
         assert config.min_subset_size == 4
         assert config.max_subset_size == 6
+        assert config.skip_initial is False
         assert config.use_inverse_mds is True
+
+    def test_adaptive_config_accepts_skip_first_alias(self):
+        """The user-facing alias should resolve to the manuscript flag."""
+        config = AdaptiveConfig(skip_first=True)
+
+        assert config.skip_initial is True
 
     def test_adaptive_config_threshold_bounds(self):
         """Test evidence threshold validation."""
