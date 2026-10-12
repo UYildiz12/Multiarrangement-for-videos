@@ -1,7 +1,9 @@
 providers = ["python"]
 
+# The repository root has a pyproject.toml, so nixpacks copies only that file before the install phase.
+# The server requirements are therefore installed in the build phase, which runs after the full source is copied.
 [phases.install]
-cmds = [
-  "python -m venv --copies /opt/venv",
-  ". /opt/venv/bin/activate && pip install --upgrade pip && pip install -r server/requirements.txt",
-]
+cmds = ["python -m venv --copies /opt/venv"]
+
+[phases.build]
+cmds = [". /opt/venv/bin/activate && pip install --upgrade pip && pip install -r server/requirements.txt"]
