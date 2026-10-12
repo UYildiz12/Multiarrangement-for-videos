@@ -433,10 +433,10 @@
    "at_lower_bound": false,
    "b": 247,
    "ideal": false,
-   "max_lambda": 7,
-   "path": "v100_k10_r2_7f7b1835f594.txt.gz",
+   "max_lambda": 5,
+   "path": "v100_k10_r2_01fbd5b0ba52.txt.gz",
    "perfect": false,
-   "source": "campaign + balanced"
+   "source": "campaign + balanced (longer floor-r balancing)"
   }
  },
  "100,10,3": {
@@ -41333,10 +41333,10 @@
    "at_lower_bound": false,
    "b": 319,
    "ideal": false,
-   "max_lambda": 8,
-   "path": "v92_k8_r2_93c850e37d65.txt.gz",
+   "max_lambda": 4,
+   "path": "v92_k8_r2_b0f2d73ec987.txt.gz",
    "perfect": false,
-   "source": "campaign + balanced"
+   "source": "campaign + balanced (longer floor-r balancing)"
   }
  },
  "92,8,3": {

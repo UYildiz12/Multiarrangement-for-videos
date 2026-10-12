@@ -7,6 +7,9 @@ items that together show every pair. The extra trials go to the least-observed p
   of the balanced mode, with the budget as its limit) and the compact cover;
 * each is extended by randomly relabelled copies of itself while whole copies fit, so that every pair appears in
   each copy, then by greedy trials on the least-observed pairs;
+* the stored schedules of ``repeat_cache/`` that show every pair at least r >= 2 times and fit the budget are tried
+  as well, padded the same way without letting a pair fall below r, so that a budget of twice the compact length
+  does not inherit the pairs that the compact cover shows many times;
 * the result with the smaller sum of 1/lambda over pairs (the average variance under the equal-variance model of
   the paper) is returned.
 
@@ -37,7 +40,22 @@ def budget_schedule(n_items: int, batch_size: int, n_trials: int, seed: int = 42
     if target > comb(v, k):
         raise ValueError(f"only {comb(v, k)} distinct trials of {k} of {v} items exist")
     return balanced_design(v, k, flattest_within(v, k, target), target, np.random.default_rng(seed),
-                           compact=comp)
+                           compact=comp, starts=repeat_starts(v, k, len(comp), target))
+
+
+def repeat_starts(v: int, k: int, compact_b: int, target: int) -> List[List[List[int]]]:
+    """The compact and balanced ``repeat_cache/`` schedules for r = 2 .. target // compact_b that fit the budget."""
+    out, seen = [], set()
+    for r in range(2, target // compact_b + 1):
+        for mode in ("compact", "balanced"):
+            blocks = load_repeat_design(v, k, r, mode)
+            if blocks is None or len(blocks) > target:
+                continue
+            key = tuple(sorted(tuple(sorted(B)) for B in blocks))
+            if key not in seen:
+                seen.add(key)
+                out.append(blocks)
+    return out
 
 
 def flattest_within(v: int, k: int, max_blocks: int) -> List[List[int]]:
@@ -54,15 +72,19 @@ def flattest_within(v: int, k: int, max_blocks: int) -> List[List[int]]:
     return [list(b) for b in sel.blocks]
 
 
-def balanced_design(v, k, base, target, rng, compact=None):
-    """Extra trials for a fixed budget. Two candidates are built: the flattest portfolio cover that fits (base) and,
-    when it differs, the compact cover, each extended by relabelled copies of itself while whole copies fit and then
-    by greedy trials on the least-observed pairs. The candidate with the smaller sum of 1/lambda over pairs (the
-    average variance under the equal-variance model) is kept; the flatter descending concurrence vector breaks ties.
-    No trial is repeated."""
+def balanced_design(v, k, base, target, rng, compact=None, starts=()):
+    """Extra trials for a fixed budget. Candidates: the flattest portfolio cover that fits (base) and, when it
+    differs, the compact cover, each extended by relabelled copies of itself while whole copies fit and then by greedy
+    trials on the least-observed pairs; and each stored schedule in ``starts`` that shows every pair at least r times,
+    padded the same way without letting a pair fall below r. The candidate with the smaller sum of 1/lambda over pairs
+    (the average variance under the equal-variance model) is kept; the flatter descending concurrence vector breaks
+    ties. No trial is repeated."""
     cands = [extend_cover(v, k, base, target, rng)]
     if compact is not None and sorted(sorted(B) for B in compact) != sorted(sorted(B) for B in base):
         cands.append(extend_cover(v, k, compact, target, rng))
+    for S in starts:
+        floor = int(concurrence(v, S)[np.triu_indices(v, 1)].min())
+        cands.append(balanced_padding(v, k, S, target, rng, floor=floor) if len(S) < target else [list(B) for B in S])
     return min(cands, key=lambda bl: (inverse_load(v, bl), descending_profile(v, bl)))
 
 
@@ -119,9 +141,10 @@ def fresh_trial(v, k, seen, rng):
     raise ValueError(f"all {comb(v, k)} trials of {k} of {v} items are already used")
 
 
-def balanced_padding(v, k, blocks, target, rng):
+def balanced_padding(v, k, blocks, target, rng, floor=1):
     """Add greedy trials, each started from a least-observed pair and grown by the item that joins the most
-    least-observed pairs, until there are ``target`` trials; then flatten the added trials."""
+    least-observed pairs, until there are ``target`` trials; then flatten the added trials without letting a pair
+    fall below ``floor``."""
     lam = np.zeros((v, v), dtype=int)
     for B in blocks:
         for a in B:
@@ -151,7 +174,7 @@ def balanced_padding(v, k, blocks, target, rng):
                 if a != b:
                     lam[a, b] += 1
         out.append(list(t))
-    return flatten(v, out, len(blocks), lam, rng)
+    return flatten(v, out, len(blocks), lam, rng, floor=floor)
 
 
 def flatten(v, blocks, fixed, lam, rng, iters=60000, floor=1):
