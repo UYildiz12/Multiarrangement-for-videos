@@ -7,11 +7,13 @@
 !coverlib/
 !coverlib/**
 !multiarrangement/
-!multiarrangement/__init__.py
-!multiarrangement/ljcr_cache/
-!multiarrangement/ljcr_cache/**
-!multiarrangement/balanced_cache/
-!multiarrangement/balanced_cache/**
+!multiarrangement/**
+multiarrangement/15videos/
+multiarrangement/15audios/
+multiarrangement/15images/
+multiarrangement/demovids/
+multiarrangement/sample_audio/
+multiarrangement/**/__pycache__/
 
 server/tests/
 server/Procfile
