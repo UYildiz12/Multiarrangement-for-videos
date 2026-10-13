@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "multiarrangement"
-version = "0.4.0"
+version = "1.0.0"
 description = "Video and audio similarity arrangement toolkit (set-cover and adaptive LTW)"
 authors = [{ name = "Umur Yildiz" }]
 requires-python = ">=3.8"
@@ -12,7 +12,7 @@ readme = "README.md"
 license = "MIT"
 keywords = ["psychology", "experiment", "video", "similarity", "multiarrangement", "rdm"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Science/Research",
   "Topic :: Scientific/Engineering",
   "Programming Language :: Python :: 3",
