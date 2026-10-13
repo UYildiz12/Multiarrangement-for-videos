@@ -866,7 +866,7 @@ async def submit_trial(session_id: UUID, trial: TrialSubmit) -> TrialResponse:
         robust_huber_c = float(config.get("robust_huber_c", 0.9))
 
         if study["paradigm"] == Paradigm.SETCOVER:
-            setcover_weight_mode = config.get("setcover_weight_mode", config.get("weight_mode", "rms"))
+            setcover_weight_mode = config.get("setcover_weight_mode", config.get("weight_mode", "auto"))
             setcover_weight_alpha = float(config.get("setcover_weight_alpha", config.get("weight_alpha", 2.0)))
             use_inverse_mds = bool(config.get("use_inverse_mds", False))
             inverse_mds_max_iter = int(config.get("inverse_mds_max_iter", 15))

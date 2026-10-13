@@ -12,7 +12,7 @@ for Visual and Cognitive Neuroscience Studies and Its Validation with fMRI. Brai
 13(1), 61. https://doi.org/10.3390/brainsci13010061
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __author__ = "Multiarrangement Team"
 
 from importlib import import_module
@@ -372,7 +372,7 @@ def multiarrangement(
     instructions = "default",
     # Setâ€‘cover fusion controls (Ma.md alignment)
     setcover_weight_alpha: float = 2.0,
-    setcover_weight_mode: str = 'rms',
+    setcover_weight_mode: str = 'auto',
     rng_seed: int = None,
     use_inverse_mds: bool = False,
     inverse_mds_max_iter: int = 15,
@@ -392,7 +392,7 @@ def multiarrangement(
         output_dir: Directory to save results
         show_first_frames: Whether to show video frames (True) or ? emoji (False)
         fullscreen: Whether to run in fullscreen mode
-        setcover_weight_mode: 'rms' (scale-aligned; default), 'max' (per-trial max-norm), or 'k2012' (raw-distance weights + scale-aligned numerator)
+        setcover_weight_mode: 'auto' (default; scale-aligned 'rms' when the schedule shows pairs on average at least 1.1 times, otherwise per-trial max-norm 'max'), 'rms' (scale-aligned), 'max' (per-trial max-norm), or 'k2012' (raw-distance weights + scale-aligned numerator).
         rng_seed: Optional integer RNG seed recorded in metadata and used for shuffles
     
     Returns:

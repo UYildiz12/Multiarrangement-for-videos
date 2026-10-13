@@ -22,7 +22,8 @@ import {
 } from "../lib/setupHelpers";
 
 type Paradigm = "setcover" | "adaptive" | "pairwise";
-type WeightMode = "max" | "rms" | "k2012";
+type EvidenceWeightMode = "max" | "rms" | "k2012";
+type WeightMode = "auto" | EvidenceWeightMode;
 type RobustMethod = "none" | "winsor" | "huber";
 
 interface AvailableVideo {
@@ -81,7 +82,7 @@ interface ExperimentConfig {
     skipInitial: boolean;
     minSubsetSize: number;
     maxSubsetSize: number;
-    evidenceWeightMode: WeightMode;
+    evidenceWeightMode: EvidenceWeightMode;
     evidenceAlpha: number;
     utilityExponent: number;
     timeCostExponent: number;
@@ -118,7 +119,7 @@ const defaultConfig: ExperimentConfig = {
     optimizeTrialOrder: true,
     counterbalanceSchedules: true,
     counterbalanceFamilySize: 16,
-    setcoverWeightMode: "rms",
+    setcoverWeightMode: "auto",
     setcoverWeightAlpha: 2.0,
     useInverseMds: false,
     inverseMdsMaxIter: 15,
@@ -1163,6 +1164,7 @@ export default function SetupPage() {
                             <div>
                                 <label style={labelStyle}>Weight Mode</label>
                                 <select value={config.setcoverWeightMode} onChange={(e) => setConfig({ ...config, setcoverWeightMode: e.target.value as WeightMode })} style={inputStyle}>
+                                    <option value="auto">auto (rms if pairs repeat, else max)</option>
                                     <option value="max">max (d/max)</option>
                                     <option value="rms">rms (RMS-matched)</option>
                                     <option value="k2012">k2012 (hybrid)</option>
@@ -1307,7 +1309,7 @@ export default function SetupPage() {
                             </div>
                             <div>
                                 <label style={labelStyle}>Evidence Weight Mode</label>
-                                <select value={config.evidenceWeightMode} onChange={(e) => setConfig({ ...config, evidenceWeightMode: e.target.value as WeightMode })} style={inputStyle}>
+                                <select value={config.evidenceWeightMode} onChange={(e) => setConfig({ ...config, evidenceWeightMode: e.target.value as EvidenceWeightMode })} style={inputStyle}>
                                     <option value="max">max (d/max)</option>
                                     <option value="rms">rms (RMS-matched)</option>
                                     <option value="k2012">k2012 (hybrid)</option>

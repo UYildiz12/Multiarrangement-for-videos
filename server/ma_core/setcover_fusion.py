@@ -62,7 +62,7 @@ def fuse_setcover(
     n_items: int,
     trials: Iterable[TrialArrangement],
     *,
-    weight_mode: str = "rms",
+    weight_mode: str = "auto",
     alpha: float = 2.0,
     robust_method: Optional[str] = None,
     robust_winsor_high: float = 0.98,
@@ -72,10 +72,14 @@ def fuse_setcover(
     inverse_mds_step_c: float = 0.3,
     inverse_mds_tol: float = 1e-4,
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Fuse set-cover trials into a full RDM and evidence matrix."""
+    """Fuse set-cover trials into a full RDM and evidence matrix. ``weight_mode="auto"`` resolves to "rms" when the
+    trials show pairs on average at least 1.1 times and to "max" otherwise (multiarrangement.core.fusion_choice)."""
+    trials = list(trials)
+    if weight_mode == "auto":
+        from multiarrangement.core.fusion_choice import resolve_setcover_weight_mode
+        weight_mode = resolve_setcover_weight_mode("auto", n_items, [t.subset for t in trials])
     if weight_mode == "max" and robust_method in {"resid_huber", "winsor_resid_huber"}:
         raise ValueError("Residual robust weighting requires rms or k2012 set-cover fusion")
-    trials = list(trials)
     if n_items <= 0:
         return np.zeros((0, 0), dtype=float), np.zeros((0, 0), dtype=float)
 

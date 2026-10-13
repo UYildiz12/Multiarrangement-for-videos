@@ -54,7 +54,7 @@ class SetCoverConfig(BaseModel):
     counterbalance_family_size: int = Field(default=16, ge=1, le=128)
     pair_repeats: int = Field(default=1, ge=1, le=4)
     weight_alpha: float = 2.0
-    weight_mode: str = "rms"
+    weight_mode: str = "auto"
     use_inverse_mds: bool = False
 
 

@@ -656,7 +656,7 @@ def run_multiarrangement_experiment(
     language: str = "en",
     instructions = "default",
     # Fusion controls (set‑cover)
-    setcover_weight_mode: str = 'rms',
+    setcover_weight_mode: str = 'auto',
     setcover_weight_alpha: float = 2.0,
     rng_seed: int = None,
     use_inverse_mds: bool = False,
@@ -678,7 +678,7 @@ def run_multiarrangement_experiment(
         output_dir: Directory to save results  
         show_first_frames: Whether to show video frames
         fullscreen: Whether to run in fullscreen mode
-        setcover_weight_mode: 'rms' (default; scale-aligned: trial scales fitted jointly from shared pairs), 'max' (per-trial max-norm, the earlier default), or 'k2012' (raw-distance weights with the scale-aligned numerator)
+        setcover_weight_mode: 'auto' (default; 'rms' when the schedule shows pairs on average at least 1.1 times, else 'max', see core.fusion_choice), 'rms' (scale-aligned: trial scales fitted jointly from shared pairs), 'max' (per-trial max-norm), or 'k2012' (raw-distance weights with the scale-aligned numerator)
         
     Returns:
         Path to saved results file
@@ -875,6 +875,13 @@ def run_multiarrangement_experiment(
     
     # Initialize accumulation buffers for weighted fusion
     n_media = len(media_names)
+    # 'auto' picks the fusion estimator from the schedule before any trial is run (core.fusion_choice)
+    requested_weight_mode = str(setcover_weight_mode)
+    if setcover_weight_mode == 'auto':
+        from .core.fusion_choice import resolve_setcover_weight_mode
+        setcover_weight_mode = resolve_setcover_weight_mode('auto', n_media, batch_list)
+        if setcover_weight_mode == 'max' and robust_method in {'resid_huber', 'winsor_resid_huber'}:
+            raise ValueError("Residual robust weighting requires rms or k2012 set-cover fusion")
     name_to_idx = {name: i for i, name in enumerate(media_names)}
     # Num and W per Ma.md/README: per-trial max-normalized distances; weights = (d/max)^alpha
     Num = np.zeros((n_media, n_media), dtype=float)
@@ -1323,7 +1330,7 @@ def run_multiarrangement_experiment(
             "interleaving_max_adjacent_overlap": max_adjacent_overlap,
             "fusion": {
                 "alpha": float(setcover_weight_alpha),
-                "weight_mode": str(setcover_weight_mode),
+                "weight_mode": requested_weight_mode,
                 "weight_mode_used": fusion_used,
                 "robust_method": robust_method,
                 "robust_winsor_high": float(robust_winsor_high),
