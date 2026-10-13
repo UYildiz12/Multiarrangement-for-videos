@@ -398,7 +398,10 @@ def estimate_rdm_weighted_average(
     Returns:
         (D_est, W)
         - D_est: estimated full dissimilarity matrix (n x n), symmetric, zeros on diagonal
-        - W: accumulated evidence weights matrix (n x n), symmetric, zeros on diagonal
+        - W: evidence weights (n x n), symmetric, zeros on diagonal. With 'max' and 'k2012' they are the weights
+          of the average. With 'rms' each trial is first rescaled to match the final estimate D_est, so W
+          summarizes the evidence per pair for scheduling and reports and does not reproduce exactly the
+          weights used in the average, which come from the jointly fitted trial scales.
     """
     trials = list(trials)
     trial_info = _prepare_trial_info(trials)
