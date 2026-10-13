@@ -31,4 +31,5 @@ global-exclude *.dll
 recursive-include multiarrangement/ljcr_cache *.txt
 recursive-include multiarrangement/balanced_cache *.txt
 recursive-include multiarrangement/frontier_cache *.txt *.json
+recursive-include multiarrangement/repeat_cache *.json *.gz
 prune output

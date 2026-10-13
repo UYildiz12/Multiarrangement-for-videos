@@ -42,7 +42,13 @@ Bundled package assets include:
 
 ## Install
 
-From the repository root:
+From PyPI:
+
+```bash
+python -m pip install multiarrangement
+```
+
+Or from the repository root:
 
 ```bash
 python -m pip install .
