@@ -5,11 +5,13 @@ connectivity constraint. Production balanced mode allows zero extra trials by
 default. The September 2026 refinements and proofs are documented in
 [`docs/compact-balanced-design.md`](docs/compact-balanced-design.md).
 
-The latest all-settings audit validates 1,113 frontier points for 745 settings.
-Relative to the preceding development cache, 78 compact selections and 63
-optional 25%-surplus selections improve, spanning 106 settings. There are now
-261 settings with a certified full compact optimum. The audit and its trade-offs
-are documented in [`docs/scheduling-all-settings.md`](docs/scheduling-all-settings.md).
+The current portfolio stores 1,150 verified schedules for all 756 settings with
+3 <= k <= 10 and k <= v <= 100. 485 compact schedules are certified as short as
+possible and 354 meet the full compact objective; `portfolio_totals.py` and
+`verify_selection.py` in the paper's Supplementary Data 4 recount these. An
+earlier all-settings audit (September 2026), which validated 1,113 frontier
+points for 745 settings, and its trade-offs are documented in
+[`docs/scheduling-all-settings.md`](docs/scheduling-all-settings.md).
 These computational scheduling results are separate from the participant
 benchmark. The preceding construction audit remains documented in
 [`docs/scheduling-expansion.md`](docs/scheduling-expansion.md).

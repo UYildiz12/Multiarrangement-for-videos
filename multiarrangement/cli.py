@@ -70,10 +70,17 @@ def select_batch_file() -> Path:
     return Path(batch_file)
 
 
+LEGACY_NOTE = (
+    "Legacy interface kept for compatibility: it averages raw on-screen distances and saves only the RDM."
+    " For studies use multiarrangement.multiarrangement() (trial logs, schedule metadata, the paper's fusion estimators) or the hosted interface."
+)
+
+
 def main():
-    """Main CLI entry point for windowed multiarrangement experiment."""
+    """Main CLI entry point for windowed multiarrangement experiment (legacy, see LEGACY_NOTE)."""
+    print("Note: " + LEGACY_NOTE)
     parser = argparse.ArgumentParser(
-        description="Run multiarrangement video similarity experiment"
+        description="Run multiarrangement video similarity experiment. " + LEGACY_NOTE
     )
     
     parser.add_argument(
@@ -154,9 +161,10 @@ def main():
 
 
 def main_fullscreen():
-    """Main CLI entry point for fullscreen multiarrangement experiment."""
+    """Main CLI entry point for fullscreen multiarrangement experiment (legacy, see LEGACY_NOTE)."""
+    print("Note: " + LEGACY_NOTE)
     parser = argparse.ArgumentParser(
-        description="Run fullscreen multiarrangement video similarity experiment"
+        description="Run fullscreen multiarrangement video similarity experiment. " + LEGACY_NOTE
     )
     
     parser.add_argument(
