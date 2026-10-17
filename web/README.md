@@ -69,7 +69,8 @@ npm run build
 npm run lint
 ```
 
-Expected result for release `0.1.10.2`: unit tests pass, the production build succeeds, and lint exits with no errors.
+Expected result: unit tests pass, the production build succeeds, and lint exits with no errors. Continuous
+integration runs these three commands for every commit and release.
 
 ## Deployment
 

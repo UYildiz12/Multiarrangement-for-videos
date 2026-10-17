@@ -20,19 +20,21 @@ The local development path uses SQLite by default, so studies, invites, sessions
 
 ## Install
 
-From the repository root:
+From the repository root, install the server requirements and the `multiarrangement` package itself, which the
+server imports to serve the same stored schedules as the Python library:
 
 ```bash
 python -m pip install -r server/requirements-dev.txt
+python -m pip install -e .
 ```
 
 ## Local development
 
-The quickest local setup is keyless development mode:
+The quickest local setup is keyless development mode, started from the repository root so that both the server
+and the package are importable:
 
 ```bash
-cd server
-LOCAL_DEV_BYPASS_AUTH=1 uvicorn app.main:app --reload --port 8000
+LOCAL_DEV_BYPASS_AUTH=1 PYTHONPATH=server:. uvicorn app.main:app --reload --port 8000
 ```
 
 Useful environment variables:
