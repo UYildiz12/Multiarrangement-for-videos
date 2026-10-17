@@ -168,3 +168,21 @@ def test_skip_initial_starts_immediately_with_ltw_subset(tmp_path, monkeypatch, 
     assert set(experiment.current_subset_indices) != set(range(8))
     assert experiment.trial_counter == 0
     assert experiment.trials == []
+
+
+def test_repeat_avoidance_never_exceeds_max_subset_size(tmp_path, monkeypatch):
+    import multiarrangement.adaptive.adaptive_experiment as ae
+
+    experiment = _adaptive_experiment(
+        tmp_path,
+        monkeypatch,
+        AdaptiveConfig(min_subset_size=4, max_subset_size=4, skip_initial=True),
+    )
+    # the selector proposes exactly the subset just shown, already at the size cap
+    monkeypatch.setattr(ae, "select_next_subset_lift_weakest", lambda *a, **k: [0, 1, 2, 3])
+    experiment.current_subset_indices = [0, 1, 2, 3]
+    nxt = experiment._select_adaptive_subset(trials_so_far=1)
+
+    assert len(nxt) == 4
+    assert set(nxt) != {0, 1, 2, 3}
+    assert nxt[:2] == [0, 1]  # the anchor pair stays

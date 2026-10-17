@@ -308,17 +308,20 @@ class AdaptiveMultiarrangementExperiment:
         except Exception:
             pass
 
-        # Safety fallback: if selector failed, sample a mid-sized random subset
+        # Safety fallback: if selector failed, sample a mid-sized random subset (within max_size)
         if not next_subset or len(next_subset) < self.config.min_subset_size:
-            k = max(self.config.min_subset_size, min(6, self.n))
+            k = min(max_size, max(self.config.min_subset_size, min(6, self.n)))
             next_subset = list(range(min(self.n, k)))
 
-        # Avoid repeating the exact same subset
+        # Avoid repeating the exact same subset without exceeding max_size: add one new item while there is room,
+        # otherwise swap the last item for one not in the subset (the anchor pair, the first two items, stays)
         if set(next_subset) == set(self.current_subset_indices) and len(next_subset) < self.n:
-            # Add one new item if available
             remaining = [i for i in range(self.n) if i not in next_subset]
             if remaining:
-                next_subset = next_subset + [remaining[0]]
+                if len(next_subset) < max_size:
+                    next_subset = next_subset + [remaining[0]]
+                elif len(next_subset) > 2:
+                    next_subset = next_subset[:-1] + [remaining[0]]
 
         return [int(index) for index in next_subset]
 

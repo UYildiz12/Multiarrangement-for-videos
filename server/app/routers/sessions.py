@@ -303,6 +303,16 @@ def _skip_initial_requested(config: dict[str, Any]) -> bool:
     return bool(config.get("skip_first", False))
 
 
+def _hosted_ltw_options(config: dict, session: dict) -> dict:
+    """Study options forwarded to the Lift-the-Weakest selector. The previous anchor pair is avoided only when the
+    study enables avoid_anchor_reuse (off by default, as in the desktop runner), and arena_max is the saved value."""
+    avoid = bool(config.get("avoid_anchor_reuse", False))
+    return {
+        "avoid_anchor_pair": session.get("last_anchor_pair") if avoid else None,
+        "arena_max": float(config.get("arena_max", 1.0)),
+    }
+
+
 def _build_next_trial_response(
     session: dict[str, Any],
     study: dict[str, Any],
@@ -385,7 +395,7 @@ def _build_next_trial_response(
         recent=session.get("recent"),
         seen=session.get("seen"),
         last_subset=session.get("last_subset"),
-        avoid_anchor_pair=session.get("last_anchor_pair"),
+        **_hosted_ltw_options(config, session),
         inclusion_counts=session.get("inclusion_counts"),
         require_unseen=require_unseen,
         max_jaccard=config.get("max_jaccard"),

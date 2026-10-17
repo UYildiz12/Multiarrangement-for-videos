@@ -1,7 +1,7 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it using the metadata below."
 title: "Multiarrangement for Videos"
-version: "1.0.3"
+version: "1.0.4"
 date-released: 2026-10-17
 type: software
 license: MIT
